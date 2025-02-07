@@ -1,0 +1,227 @@
+{
+  "name": "smile-ai",
+  "displayName": "Smile AI",
+  "description": "VS Code için yerel AI destekli geliştirici asistanı",
+  "version": "0.0.1",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "smile-ai",
+          "title": "Smile AI",
+          "icon": "$(hubot)"
+        }
+      ]
+    },
+    "views": {
+      "smile-ai": [
+        {
+          "type": "webview",
+          "id": "smile-ai.chatView",
+          "name": "Chat"
+        },
+        {
+          "type": "webview",
+          "id": "smile-ai.composerView",
+          "name": "Composer"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "smile-ai.chatView.focus",
+        "title": "Chat View'ı Göster",
+        "category": "Smile AI"
+      },
+      {
+        "command": "smile-ai.composerView.focus",
+        "title": "Composer View'ı Göster",
+        "category": "Smile AI"
+      },
+      {
+        "command": "smile-ai.codeCompletion",
+        "title": "Kod Tamamlama",
+        "category": "Smile AI"
+      },
+      {
+        "command": "smile-ai.codeAnalysis",
+        "title": "Kod Analizi",
+        "category": "Smile AI"
+      },
+      {
+        "command": "smile-ai.generateCode",
+        "title": "Kod Üret",
+        "category": "Smile AI"
+      },
+      {
+        "command": "smile-ai.generateDocs",
+        "title": "Dokümantasyon Üret",
+        "category": "Smile AI"
+      },
+      {
+        "command": "smile-ai.generateTests",
+        "title": "Test Üret",
+        "category": "Smile AI"
+      },
+      {
+        "command": "smile-ai.refactorCode",
+        "title": "Kodu Yeniden Düzenle",
+        "category": "Smile AI"
+      },
+      {
+        "command": "smile-ai.fixBug",
+        "title": "Hata Düzelt",
+        "category": "Smile AI"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "smile-ai.openChat",
+        "key": "ctrl+shift+a",
+        "mac": "cmd+shift+a"
+      },
+      {
+        "command": "smile-ai.startComposer",
+        "key": "ctrl+shift+c",
+        "mac": "cmd+shift+c"
+      },
+      {
+        "command": "smile-ai.switchView",
+        "key": "ctrl+tab",
+        "mac": "cmd+tab",
+        "when": "activeViewContainer == smile-ai-sidebar"
+      }
+    ],
+    "configuration": {
+      "title": "Smile AI",
+      "properties": {
+        "smile-ai.modelPath": {
+          "type": "string",
+          "default": "",
+          "description": "Llama model dosyasının yolu"
+        },
+        "smile-ai.contextSize": {
+          "type": "number",
+          "default": 4096,
+          "description": "Model bağlam boyutu"
+        },
+        "smile-ai.temperature": {
+          "type": "number",
+          "default": 0.7,
+          "description": "Model sıcaklık değeri (0-1 arası)"
+        },
+        "smile-ai.maxTokens": {
+          "type": "number",
+          "default": 2048,
+          "description": "Maksimum token sayısı"
+        },
+        "smile-ai.gpu.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "GPU kullanımını etkinleştir"
+        },
+        "smile-ai.gpu.layers": {
+          "type": "number",
+          "default": 32,
+          "description": "GPU'da çalıştırılacak katman sayısı"
+        },
+        "smile-ai.gpu.device": {
+          "type": "string",
+          "default": "cuda",
+          "enum": ["cuda", "metal", "directml"],
+          "description": "Kullanılacak GPU cihazı"
+        },
+        "smile-ai.performance.batchSize": {
+          "type": "number",
+          "default": 512,
+          "description": "Model batch size değeri"
+        },
+        "smile-ai.performance.threads": {
+          "type": "number",
+          "default": 4,
+          "description": "Kullanılacak CPU thread sayısı"
+        },
+        "smile-ai.performance.useMlock": {
+          "type": "boolean",
+          "default": true,
+          "description": "Model belleğini kilitleyerek performansı artır"
+        },
+        "smile-ai.performance.useMemorymap": {
+          "type": "boolean",
+          "default": true,
+          "description": "Memory mapping kullanarak bellek kullanımını optimize et"
+        },
+        "smile-ai.caching.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Model çıktılarını önbelleklemeyi etkinleştir"
+        },
+        "smile-ai.caching.maxSize": {
+          "type": "number",
+          "default": 1073741824,
+          "description": "Maksimum önbellek boyutu (byte)"
+        },
+        "smile-ai.caching.ttl": {
+          "type": "number",
+          "default": 3600000,
+          "description": "Önbellek girişlerinin yaşam süresi (ms)"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "pnpm run package",
+    "compile": "webpack",
+    "watch": "webpack --watch",
+    "package": "webpack --mode production --devtool hidden-source-map",
+    "compile-tests": "tsc -p . --outDir out",
+    "watch-tests": "tsc -p . -w --outDir out",
+    "pretest": "pnpm run compile-tests && pnpm run compile && pnpm run lint",
+    "lint": "eslint src --ext ts",
+    "test": "vscode-test"
+  },
+  "devDependencies": {
+    "@types/chokidar": "^2.1.7",
+    "@types/glob": "^8.1.0",
+    "@types/minimatch": "^5.1.2",
+    "@types/mocha": "^10.0.10",
+    "@types/node": "18.x",
+    "@types/sqlite3": "^3.1.11",
+    "@types/vscode": "^1.85.0",
+    "@typescript-eslint/eslint-plugin": "^6.15.0",
+    "@typescript-eslint/parser": "^6.15.0",
+    "@vscode/test-cli": "^0.0.4",
+    "@vscode/test-electron": "^2.3.8",
+    "eslint": "^8.56.0",
+    "ts-loader": "^9.5.1",
+    "typescript": "^5.3.3",
+    "webpack": "^5.89.0",
+    "webpack-cli": "^5.1.4"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.36.3",
+    "axios": "^1.7.9",
+    "chokidar": "^4.0.3",
+    "glob": "^11.0.1",
+    "lru-cache": "^7.18.3",
+    "minimatch": "^10.0.1",
+    "node-llama-cpp": "^2.8.3",
+    "openai": "^4.83.0",
+    "sqlite3": "^5.1.7"
+  },
+  "pnpm": {
+    "ignoredBuiltDependencies": [
+      "sqlite3"
+    ]
+  }
+}
