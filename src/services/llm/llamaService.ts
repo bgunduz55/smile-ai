@@ -1,12 +1,31 @@
 import * as vscode from 'vscode';
+import { LlamaModel, LlamaContext, LlamaChatSession, LlamaModelOptions } from 'node-llama-cpp';
 import { ModelConfig, AgentTask, TaskResult, TaskType, AgentCapability } from './types';
 import { promptTemplates } from './promptTemplates';
+import path from 'path';
+import fs from 'fs';
+
+interface ModelMetadata {
+    name: string;
+    format: 'gguf' | 'ggml';
+    size: number;
+    parameters: number;
+    lastUsed: Date;
+    performance: {
+        averageResponseTime: number;
+        tokensPerSecond: number;
+        totalTokensGenerated: number;
+    };
+}
 
 export class LlamaService {
-    private model: any; // Llama model instance
-    private config: ModelConfig;
+    private model: LlamaModel | null = null;
+    private context: LlamaContext | null = null;
+    private chatSession: LlamaChatSession | null = null;
     private capabilities: Map<TaskType, AgentCapability>;
     private disposables: vscode.Disposable[] = [];
+    private modelMetadata: ModelMetadata | null = null;
+    private readonly config: ModelConfig;
 
     constructor(config: ModelConfig) {
         this.config = config;
@@ -45,22 +64,113 @@ export class LlamaService {
 
     public async initialize(): Promise<void> {
         try {
-            // TODO: Llama model initialization
-            // this.model = await llama.load(this.config);
+            await this.loadModel();
             this.registerEventHandlers();
+            await this.updateModelMetadata();
         } catch (error) {
             console.error('Llama model initialization failed:', error);
             throw error;
         }
     }
 
+    private async loadModel(): Promise<void> {
+        const modelOptions: LlamaModelOptions = {
+            modelPath: this.config.modelPath,
+            contextSize: this.config.contextSize,
+            gpuLayers: this.detectGPUSupport(),
+            batchSize: this.calculateOptimalBatchSize(),
+            threads: this.getOptimalThreadCount(),
+            useMlock: true,
+            useMemorymap: true
+        };
+
+        this.model = new LlamaModel(modelOptions);
+        this.context = new LlamaContext({ model: this.model });
+        this.chatSession = new LlamaChatSession({ context: this.context });
+    }
+
+    private detectGPUSupport(): number {
+        // TODO: Implement GPU detection logic
+        return 0;
+    }
+
+    private calculateOptimalBatchSize(): number {
+        // Sistem belleğine göre optimal batch size hesapla
+        const systemMemory = this.getSystemMemory();
+        return Math.min(512, Math.floor(systemMemory / 4));
+    }
+
+    private getSystemMemory(): number {
+        // Node.js os modülü ile sistem belleğini al (GB cinsinden)
+        const os = require('os');
+        return Math.floor(os.totalmem() / (1024 * 1024 * 1024));
+    }
+
+    private getOptimalThreadCount(): number {
+        // CPU çekirdek sayısının yarısını kullan
+        const os = require('os');
+        return Math.max(1, Math.floor(os.cpus().length / 2));
+    }
+
+    private async updateModelMetadata(): Promise<void> {
+        if (!this.model) return;
+
+        const stats = await this.model.getStats();
+        this.modelMetadata = {
+            name: path.basename(this.config.modelPath),
+            format: this.config.modelPath.endsWith('.gguf') ? 'gguf' : 'ggml',
+            size: fs.statSync(this.config.modelPath).size,
+            parameters: stats.parameterCount || 0,
+            lastUsed: new Date(),
+            performance: {
+                averageResponseTime: 0,
+                tokensPerSecond: 0,
+                totalTokensGenerated: 0
+            }
+        };
+    }
+
     private registerEventHandlers(): void {
-        // Register event handlers and commands
         this.disposables.push(
             vscode.commands.registerCommand('smile-ai.executeTask', async (task: AgentTask) => {
                 return await this.executeTask(task);
+            }),
+            vscode.workspace.onDidChangeConfiguration(async e => {
+                if (e.affectsConfiguration('smile-ai')) {
+                    await this.handleConfigurationChange();
+                }
             })
         );
+    }
+
+    private async handleConfigurationChange(): Promise<void> {
+        const config = vscode.workspace.getConfiguration('smile-ai');
+        const newConfig: ModelConfig = {
+            modelPath: config.get('modelPath') || this.config.modelPath,
+            contextSize: config.get('contextSize') || this.config.contextSize,
+            temperature: config.get('temperature') || this.config.temperature,
+            topP: config.get('topP') || this.config.topP,
+            maxTokens: config.get('maxTokens') || this.config.maxTokens,
+            stopTokens: config.get('stopTokens') || this.config.stopTokens
+        };
+
+        if (this.shouldReloadModel(newConfig)) {
+            this.config = newConfig;
+            await this.reloadModel();
+        }
+    }
+
+    private shouldReloadModel(newConfig: ModelConfig): boolean {
+        return (
+            newConfig.modelPath !== this.config.modelPath ||
+            newConfig.contextSize !== this.config.contextSize
+        );
+    }
+
+    private async reloadModel(): Promise<void> {
+        await this.dispose();
+        await this.loadModel();
+        await this.updateModelMetadata();
     }
 
     public async executeTask(task: AgentTask): Promise<TaskResult> {
@@ -78,14 +188,28 @@ export class LlamaService {
 
             const prompt = this.buildPrompt(task);
             const response = await this.generateResponse(prompt);
+            const endTime = Date.now();
+            
+            // Performans metriklerini güncelle
+            if (this.modelMetadata) {
+                const executionTime = endTime - startTime;
+                const tokensGenerated = response.length / 4; // Yaklaşık token sayısı
+                
+                this.modelMetadata.performance.totalTokensGenerated += tokensGenerated;
+                this.modelMetadata.performance.averageResponseTime = 
+                    (this.modelMetadata.performance.averageResponseTime + executionTime) / 2;
+                this.modelMetadata.performance.tokensPerSecond = 
+                    tokensGenerated / (executionTime / 1000);
+                this.modelMetadata.lastUsed = new Date();
+            }
 
             return {
                 success: true,
                 output: response,
                 metadata: {
-                    tokensUsed: 0, // TODO: Get actual token count
-                    executionTime: Date.now() - startTime,
-                    modelName: 'llama2' // TODO: Get actual model name
+                    tokensUsed: response.length / 4, // Yaklaşık token sayısı
+                    executionTime: endTime - startTime,
+                    modelName: this.modelMetadata?.name || 'llama2'
                 }
             };
         } catch (error) {
@@ -96,7 +220,7 @@ export class LlamaService {
                 metadata: {
                     tokensUsed: 0,
                     executionTime: Date.now() - startTime,
-                    modelName: 'llama2'
+                    modelName: this.modelMetadata?.name || 'llama2'
                 }
             };
         }
@@ -118,34 +242,38 @@ export class LlamaService {
     }
 
     private async generateResponse(prompt: string): Promise<string> {
-        if (!this.model) {
+        if (!this.chatSession) {
             throw new Error('Model not initialized');
         }
 
-        // TODO: Implement actual model inference
-        // const response = await this.model.generate(prompt, {
-        //     maxTokens: this.config.maxTokens,
-        //     temperature: this.config.temperature,
-        //     topP: this.config.topP,
-        //     stopTokens: this.config.stopTokens
-        // });
-
-        // Temporary mock response
-        return `Mock response for prompt: ${prompt.substring(0, 100)}...`;
+        return await this.chatSession.prompt(prompt, {
+            temperature: this.config.temperature,
+            topP: this.config.topP,
+            maxTokens: this.config.maxTokens,
+            stopSequences: this.config.stopTokens
+        });
     }
 
     public getCapabilities(): AgentCapability[] {
         return Array.from(this.capabilities.values());
     }
 
-    public dispose(): void {
-        // Cleanup resources
+    public getModelMetadata(): ModelMetadata | null {
+        return this.modelMetadata;
+    }
+
+    public async dispose(): Promise<void> {
         this.disposables.forEach(d => d.dispose());
         this.disposables = [];
         
+        if (this.chatSession) {
+            this.chatSession = null;
+        }
+        if (this.context) {
+            this.context = null;
+        }
         if (this.model) {
-            // TODO: Cleanup model resources
-            // await this.model.dispose();
+            await this.model.dispose();
             this.model = null;
         }
     }
