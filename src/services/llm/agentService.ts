@@ -51,7 +51,7 @@ export class AgentService {
         const context = this.getCodeContext(document, position);
         
         const task: AgentTask = {
-            type: 'code_completion',
+            type: 'code_completion' as const,
             input: document.getText(editor.selection),
             context,
             constraints: {
@@ -72,7 +72,7 @@ export class AgentService {
 
         const document = editor.document;
         const task: AgentTask = {
-            type: 'code_analysis',
+            type: 'code_analysis' as const,
             input: 'Analyze the following code for quality, potential issues, and improvements',
             context: document.getText(),
             constraints: {
@@ -92,7 +92,7 @@ export class AgentService {
         if (!input) return;
 
         const task: AgentTask = {
-            type: 'code_generation',
+            type: 'code_generation' as const,
             input,
             constraints: {
                 language: await this.promptForLanguage()
@@ -111,7 +111,7 @@ export class AgentService {
 
         const document = editor.document;
         const task: AgentTask = {
-            type: 'documentation',
+            type: 'documentation' as const,
             input: 'Generate comprehensive documentation for the following code',
             context: document.getText(editor.selection) || document.getText(),
             constraints: {
@@ -131,7 +131,7 @@ export class AgentService {
 
         const document = editor.document;
         const task: AgentTask = {
-            type: 'test_generation',
+            type: 'test_generation' as const,
             input: 'Generate comprehensive test cases for the following code',
             context: document.getText(editor.selection) || document.getText(),
             constraints: {
@@ -151,7 +151,7 @@ export class AgentService {
 
         const document = editor.document;
         const task: AgentTask = {
-            type: 'refactoring',
+            type: 'refactoring' as const,
             input: 'Refactor the following code to improve its quality and maintainability',
             context: document.getText(editor.selection) || document.getText(),
             constraints: {
@@ -178,7 +178,7 @@ export class AgentService {
         if (!description) return;
 
         const task: AgentTask = {
-            type: 'bug_fix',
+            type: 'bug_fix' as const,
             input: description,
             context: document.getText(editor.selection) || document.getText(),
             constraints: {

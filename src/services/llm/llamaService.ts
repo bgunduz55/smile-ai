@@ -50,6 +50,7 @@ export class LlamaService {
 
     private getTaskDescription(taskType: TaskType): string {
         const descriptions: Record<TaskType, string> = {
+            text_generation: 'Metin üretme ve sohbet yanıtları oluşturur',
             code_completion: 'Kod tamamlama önerileri sunar',
             code_analysis: 'Kod kalitesi, olası hatalar ve iyileştirmeler için analiz yapar',
             code_generation: 'Belirtilen gereksinimlere göre kod üretir',
