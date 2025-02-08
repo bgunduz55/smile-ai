@@ -175,6 +175,41 @@
           "type": "number",
           "default": 3600000,
           "description": "Önbellek girişlerinin yaşam süresi (ms)"
+        },
+        "smile-ai.ollama": {
+          "type": "object",
+          "title": "Ollama Yapılandırması",
+          "properties": {
+            "endpoint": {
+              "type": "string",
+              "default": "http://localhost:11434",
+              "description": "Ollama API endpoint adresi"
+            },
+            "defaultModel": {
+              "type": "string",
+              "default": "llama2",
+              "description": "Varsayılan Ollama modeli"
+            },
+            "temperature": {
+              "type": "number",
+              "default": 0.7,
+              "minimum": 0,
+              "maximum": 1,
+              "description": "Model sıcaklık değeri"
+            },
+            "topP": {
+              "type": "number",
+              "default": 0.9,
+              "minimum": 0,
+              "maximum": 1,
+              "description": "Top-p örnekleme değeri"
+            },
+            "maxTokens": {
+              "type": "number",
+              "default": 4096,
+              "description": "Maksimum token sayısı"
+            }
+          }
         }
       }
     }

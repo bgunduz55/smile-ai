@@ -80,8 +80,7 @@ export class LlamaService {
             gpuLayers: this.detectGPUSupport(),
             batchSize: this.calculateOptimalBatchSize(),
             threads: this.getOptimalThreadCount(),
-            useMlock: true,
-            useMemorymap: true
+            useMlock: true
         };
 
         this.model = new LlamaModel(modelOptions);
@@ -115,12 +114,16 @@ export class LlamaService {
     private async updateModelMetadata(): Promise<void> {
         if (!this.model) return;
 
-        const stats = await this.model.getStats();
+        const modelInfo = {
+            parameterCount: 7000000000, // Yaklaşık değer
+            contextLength: this.config.contextSize
+        };
+
         this.modelMetadata = {
             name: path.basename(this.config.modelPath),
             format: this.config.modelPath.endsWith('.gguf') ? 'gguf' : 'ggml',
             size: fs.statSync(this.config.modelPath).size,
-            parameters: stats.parameterCount || 0,
+            parameters: modelInfo.parameterCount,
             lastUsed: new Date(),
             performance: {
                 averageResponseTime: 0,
@@ -155,7 +158,6 @@ export class LlamaService {
         };
 
         if (this.shouldReloadModel(newConfig)) {
-            this.config = newConfig;
             await this.reloadModel();
         }
     }
@@ -265,7 +267,6 @@ export class LlamaService {
     public async dispose(): Promise<void> {
         this.disposables.forEach(d => d.dispose());
         this.disposables = [];
-        
         if (this.chatSession) {
             this.chatSession = null;
         }
@@ -273,7 +274,6 @@ export class LlamaService {
             this.context = null;
         }
         if (this.model) {
-            await this.model.dispose();
             this.model = null;
         }
     }

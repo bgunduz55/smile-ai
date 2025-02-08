@@ -8,6 +8,7 @@ import { indexService } from './services/indexService';
 import { CompletionService } from './services/completionService';
 import { AgentService } from './services/llm/agentService';
 import { ModelConfig } from './services/llm/types';
+import { OllamaService } from './services/llm/ollamaService';
 
 let completionServiceInstance: CompletionService;
 let agentService: AgentService;
@@ -18,7 +19,9 @@ const COMMANDS = {
 	START_COMPOSER: 'smile-ai.startComposer',
 	TOGGLE_CODE_COMPLETION: 'smile-ai.toggleCodeCompletion',
 	OPEN_SETTINGS: 'smile-ai.openSettings',
-	SWITCH_VIEW: 'smile-ai.switchView'
+	SWITCH_VIEW: 'smile-ai.switchView',
+	SELECT_PROVIDER: 'smile-ai.selectProvider',
+	SELECT_OLLAMA_MODEL: 'smile-ai.selectOllamaModel'
 };
 
 // This method is called when your extension is activated
@@ -128,6 +131,51 @@ export async function activate(context: vscode.ExtensionContext) {
 
 			vscode.commands.registerCommand('smile-ai.fixBug', () => {
 				vscode.window.showInformationMessage('Hata düzeltme başlatılıyor...');
+			}),
+
+			vscode.commands.registerCommand(COMMANDS.SELECT_PROVIDER, async () => {
+				const providers = ['openai', 'anthropic', 'ollama'];
+				const selected = await vscode.window.showQuickPick(providers, {
+					placeHolder: 'AI sağlayıcısını seçin'
+				});
+
+				if (selected) {
+					await vscode.workspace.getConfiguration('smile-ai').update('provider', selected, true);
+					vscode.window.showInformationMessage(`AI sağlayıcısı ${selected} olarak değiştirildi`);
+				}
+			}),
+
+			vscode.commands.registerCommand(COMMANDS.SELECT_OLLAMA_MODEL, async () => {
+				const config = vscode.workspace.getConfiguration('smile-ai');
+				if (config.get('provider') !== 'ollama') {
+					vscode.window.showErrorMessage('Bu komut yalnızca Ollama sağlayıcısı seçiliyken kullanılabilir');
+					return;
+				}
+
+				try {
+					const ollamaService = new OllamaService();
+					await ollamaService.initialize();
+					const models = await ollamaService.listModels();
+					
+					const selected = await vscode.window.showQuickPick(
+						models.map(m => ({
+							label: m.name,
+							description: `${m.details.parameter_size} - ${m.details.format}`,
+							detail: `Son güncelleme: ${new Date(m.modified_at).toLocaleString()}`
+						})),
+						{ placeHolder: 'Ollama modelini seçin' }
+					);
+
+					if (selected) {
+						await ollamaService.setModel(selected.label);
+						vscode.window.showInformationMessage(`Ollama modeli ${selected.label} olarak değiştirildi`);
+					}
+
+					ollamaService.dispose();
+				} catch (error) {
+					vscode.window.showErrorMessage('Ollama modelleri yüklenirken hata oluştu: ' + 
+						(error instanceof Error ? error.message : 'Bilinmeyen bir hata'));
+				}
 			})
 		);
 
