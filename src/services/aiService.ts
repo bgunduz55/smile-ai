@@ -2,6 +2,10 @@ import * as vscode from 'vscode';
 import { OpenAIService } from './llm/openaiService';
 import { AnthropicService } from './llm/anthropicService';
 import { OllamaService } from './llm/ollamaService';
+import { LMStudioService } from './llm/lmStudioService';
+import { LocalAIService } from './llm/localAIService';
+import { DeepseekService } from './llm/deepseekService';
+import { QwenService } from './llm/qwenService';
 import { LLMService } from './llm/llmService';
 import { AgentTask, TaskResult } from './llm/types';
 
@@ -9,6 +13,10 @@ export class AIService implements vscode.Disposable {
     private openai: OpenAIService | null = null;
     private anthropic: AnthropicService | null = null;
     private ollama: OllamaService | null = null;
+    private lmstudio: LMStudioService | null = null;
+    private localai: LocalAIService | null = null;
+    private deepseek: DeepseekService | null = null;
+    private qwen: QwenService | null = null;
     private currentProvider: string = 'openai';
     private disposables: vscode.Disposable[] = [];
 
@@ -39,6 +47,18 @@ export class AIService implements vscode.Disposable {
             case 'ollama':
                 await this.initializeOllama();
                 break;
+            case 'lmstudio':
+                await this.initializeLMStudio();
+                break;
+            case 'localai':
+                await this.initializeLocalAI();
+                break;
+            case 'deepseek':
+                await this.initializeDeepseek();
+                break;
+            case 'qwen':
+                await this.initializeQwen();
+                break;
             default:
                 throw new Error(`Unsupported provider: ${this.currentProvider}`);
         }
@@ -60,6 +80,34 @@ export class AIService implements vscode.Disposable {
         if (!this.ollama) {
             this.ollama = new OllamaService();
             await this.ollama.initialize();
+        }
+    }
+
+    private async initializeLMStudio(): Promise<void> {
+        if (!this.lmstudio) {
+            this.lmstudio = new LMStudioService();
+            await this.lmstudio.initialize();
+        }
+    }
+
+    private async initializeLocalAI(): Promise<void> {
+        if (!this.localai) {
+            this.localai = new LocalAIService();
+            await this.localai.initialize();
+        }
+    }
+
+    private async initializeDeepseek(): Promise<void> {
+        if (!this.deepseek) {
+            this.deepseek = new DeepseekService();
+            await this.deepseek.initialize();
+        }
+    }
+
+    private async initializeQwen(): Promise<void> {
+        if (!this.qwen) {
+            this.qwen = new QwenService();
+            await this.qwen.initialize();
         }
     }
 
@@ -112,6 +160,18 @@ export class AIService implements vscode.Disposable {
             case 'ollama':
                 service = this.ollama;
                 break;
+            case 'lmstudio':
+                service = this.lmstudio;
+                break;
+            case 'localai':
+                service = this.localai;
+                break;
+            case 'deepseek':
+                service = this.deepseek;
+                break;
+            case 'qwen':
+                service = this.qwen;
+                break;
         }
 
         if (!service) {
@@ -136,6 +196,22 @@ export class AIService implements vscode.Disposable {
         if (this.ollama) {
             this.ollama.dispose();
             this.ollama = null;
+        }
+        if (this.lmstudio) {
+            this.lmstudio.dispose();
+            this.lmstudio = null;
+        }
+        if (this.localai) {
+            this.localai.dispose();
+            this.localai = null;
+        }
+        if (this.deepseek) {
+            this.deepseek.dispose();
+            this.deepseek = null;
+        }
+        if (this.qwen) {
+            this.qwen.dispose();
+            this.qwen = null;
         }
     }
 }

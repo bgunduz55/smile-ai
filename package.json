@@ -208,6 +208,381 @@
               "type": "number",
               "default": 4096,
               "description": "Maksimum token sayısı"
+            },
+            "contextSize": {
+              "type": "number",
+              "default": 4096,
+              "description": "Bağlam penceresi boyutu"
+            },
+            "gpuLayers": {
+              "type": "number",
+              "default": 0,
+              "description": "GPU'da çalıştırılacak katman sayısı"
+            },
+            "threads": {
+              "type": "number",
+              "default": 4,
+              "description": "Kullanılacak CPU thread sayısı"
+            },
+            "batchSize": {
+              "type": "number",
+              "default": 512,
+              "description": "İşlem batch boyutu"
+            },
+            "stopTokens": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "default": ["</s>", "<s>"],
+              "description": "Yanıt üretimini durduracak token'lar"
+            },
+            "repeatPenalty": {
+              "type": "number",
+              "default": 1.1,
+              "minimum": 0,
+              "description": "Tekrar cezası katsayısı"
+            },
+            "repeatLastN": {
+              "type": "number",
+              "default": 64,
+              "description": "Tekrar kontrolü için bakılacak son token sayısı"
+            },
+            "seed": {
+              "type": "number",
+              "description": "Rastgele sayı üreteci için başlangıç değeri"
+            },
+            "mirostat": {
+              "type": "number",
+              "enum": [0, 1, 2],
+              "default": 0,
+              "description": "Mirostat örnekleme modu"
+            },
+            "mirostatTau": {
+              "type": "number",
+              "default": 5.0,
+              "description": "Mirostat hedef entropi"
+            },
+            "mirostatEta": {
+              "type": "number",
+              "default": 0.1,
+              "description": "Mirostat öğrenme oranı"
+            }
+          }
+        },
+        "smile-ai.lmstudio": {
+          "type": "object",
+          "title": "LM Studio Yapılandırması",
+          "properties": {
+            "endpoint": {
+              "type": "string",
+              "default": "http://localhost:1234/v1",
+              "description": "LM Studio API endpoint adresi"
+            },
+            "defaultModel": {
+              "type": "string",
+              "default": "default",
+              "description": "Varsayılan LM Studio modeli"
+            },
+            "temperature": {
+              "type": "number",
+              "default": 0.7,
+              "minimum": 0,
+              "maximum": 1,
+              "description": "Model sıcaklık değeri"
+            },
+            "topP": {
+              "type": "number",
+              "default": 0.9,
+              "minimum": 0,
+              "maximum": 1,
+              "description": "Top-p örnekleme değeri"
+            },
+            "maxTokens": {
+              "type": "number",
+              "default": 2048,
+              "description": "Maksimum token sayısı"
+            },
+            "stopTokens": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "default": ["</s>", "<s>"],
+              "description": "Yanıt üretimini durduracak token'lar"
+            },
+            "systemPrompt": {
+              "type": "string",
+              "default": "You are a helpful AI assistant specialized in software development.",
+              "description": "Sistem prompt'u"
+            },
+            "requestTimeout": {
+              "type": "number",
+              "default": 60000,
+              "description": "İstek zaman aşımı süresi (ms)"
+            },
+            "retryAttempts": {
+              "type": "number",
+              "default": 3,
+              "description": "Başarısız istekler için yeniden deneme sayısı"
+            },
+            "retryDelay": {
+              "type": "number",
+              "default": 1000,
+              "description": "Yeniden denemeler arasındaki bekleme süresi (ms)"
+            }
+          }
+        },
+        "smile-ai.localai": {
+          "type": "object",
+          "title": "LocalAI Yapılandırması",
+          "properties": {
+            "endpoint": {
+              "type": "string",
+              "default": "http://localhost:8080/v1",
+              "description": "LocalAI API endpoint adresi"
+            },
+            "defaultModel": {
+              "type": "string",
+              "default": "default",
+              "description": "Varsayılan LocalAI modeli"
+            },
+            "modelsPath": {
+              "type": "string",
+              "description": "LocalAI modellerinin bulunduğu dizin"
+            },
+            "gpuEnabled": {
+              "type": "boolean",
+              "default": false,
+              "description": "GPU desteğini etkinleştir"
+            },
+            "debug": {
+              "type": "boolean",
+              "default": false,
+              "description": "Debug modunu etkinleştir"
+            },
+            "temperature": {
+              "type": "number",
+              "default": 0.7,
+              "minimum": 0,
+              "maximum": 1,
+              "description": "Model sıcaklık değeri"
+            },
+            "topP": {
+              "type": "number",
+              "default": 0.9,
+              "minimum": 0,
+              "maximum": 1,
+              "description": "Top-p örnekleme değeri"
+            },
+            "maxTokens": {
+              "type": "number",
+              "default": 2048,
+              "description": "Maksimum token sayısı"
+            },
+            "stopTokens": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "default": ["</s>", "<s>"],
+              "description": "Yanıt üretimini durduracak token'lar"
+            },
+            "systemPrompt": {
+              "type": "string",
+              "default": "You are a helpful AI assistant specialized in software development.",
+              "description": "Sistem prompt'u"
+            },
+            "docker": {
+              "type": "object",
+              "properties": {
+                "image": {
+                  "type": "string",
+                  "default": "localai/localai:latest",
+                  "description": "Kullanılacak Docker image"
+                },
+                "containerName": {
+                  "type": "string",
+                  "default": "smile-ai-localai",
+                  "description": "Container adı"
+                },
+                "port": {
+                  "type": "number",
+                  "default": 8080,
+                  "description": "LocalAI servisinin çalışacağı port"
+                },
+                "autoRestart": {
+                  "type": "boolean",
+                  "default": true,
+                  "description": "Container'ı otomatik yeniden başlat"
+                },
+                "resources": {
+                  "type": "object",
+                  "properties": {
+                    "cpuLimit": {
+                      "type": "string",
+                      "default": "2",
+                      "description": "CPU limiti"
+                    },
+                    "memoryLimit": {
+                      "type": "string",
+                      "default": "4g",
+                      "description": "Bellek limiti"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "smile-ai.deepseek": {
+          "type": "object",
+          "title": "Deepseek Yapılandırması",
+          "properties": {
+            "endpoint": {
+              "type": "string",
+              "default": "https://api.deepseek.com/v1",
+              "description": "Deepseek API endpoint adresi"
+            },
+            "apiKey": {
+              "type": "string",
+              "description": "Deepseek API anahtarı"
+            },
+            "model": {
+              "type": "string",
+              "default": "deepseek-coder-33b-instruct",
+              "enum": [
+                "deepseek-coder-33b-instruct",
+                "deepseek-coder-6.7b-instruct",
+                "deepseek-coder-1.3b-instruct"
+              ],
+              "description": "Kullanılacak model"
+            },
+            "temperature": {
+              "type": "number",
+              "default": 0.7,
+              "minimum": 0,
+              "maximum": 1,
+              "description": "Model sıcaklık değeri"
+            },
+            "topP": {
+              "type": "number",
+              "default": 0.9,
+              "minimum": 0,
+              "maximum": 1,
+              "description": "Top-p örnekleme değeri"
+            },
+            "maxTokens": {
+              "type": "number",
+              "default": 2048,
+              "description": "Maksimum token sayısı"
+            },
+            "stopTokens": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "default": ["</s>", "<s>"],
+              "description": "Yanıt üretimini durduracak token'lar"
+            },
+            "systemPrompt": {
+              "type": "string",
+              "default": "You are a helpful AI assistant specialized in software development.",
+              "description": "Sistem prompt'u"
+            },
+            "frequencyPenalty": {
+              "type": "number",
+              "default": 0,
+              "minimum": -2,
+              "maximum": 2,
+              "description": "Kelime tekrarı cezası"
+            },
+            "presencePenalty": {
+              "type": "number",
+              "default": 0,
+              "minimum": -2,
+              "maximum": 2,
+              "description": "Konu tekrarı cezası"
+            }
+          }
+        },
+        "smile-ai.qwen": {
+          "type": "object",
+          "title": "Qwen Yapılandırması",
+          "properties": {
+            "endpoint": {
+              "type": "string",
+              "default": "https://dashscope.aliyuncs.com/api/v1",
+              "description": "Qwen API endpoint adresi"
+            },
+            "apiKey": {
+              "type": "string",
+              "description": "Qwen API anahtarı"
+            },
+            "model": {
+              "type": "string",
+              "default": "qwen2.5-turbo",
+              "enum": [
+                "qwen2.5-turbo",
+                "qwen2.5-pro",
+                "qwen1.5-72b",
+                "qwen1.5-14b"
+              ],
+              "description": "Kullanılacak model"
+            },
+            "temperature": {
+              "type": "number",
+              "default": 0.7,
+              "minimum": 0,
+              "maximum": 1,
+              "description": "Model sıcaklık değeri"
+            },
+            "topP": {
+              "type": "number",
+              "default": 0.9,
+              "minimum": 0,
+              "maximum": 1,
+              "description": "Top-p örnekleme değeri"
+            },
+            "maxTokens": {
+              "type": "number",
+              "default": 2048,
+              "description": "Maksimum token sayısı"
+            },
+            "stopTokens": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "default": ["</s>", "<s>"],
+              "description": "Yanıt üretimini durduracak token'lar"
+            },
+            "systemPrompt": {
+              "type": "string",
+              "default": "You are a helpful AI assistant specialized in software development.",
+              "description": "Sistem prompt'u"
+            },
+            "enableSearch": {
+              "type": "boolean",
+              "default": true,
+              "description": "Web araması özelliğini etkinleştir"
+            },
+            "seed": {
+              "type": "number",
+              "description": "Rastgele sayı üreteci için başlangıç değeri"
+            },
+            "repetitionPenalty": {
+              "type": "number",
+              "default": 1.1,
+              "minimum": 1.0,
+              "maximum": 2.0,
+              "description": "Tekrar cezası katsayısı"
+            },
+            "topK": {
+              "type": "number",
+              "default": 50,
+              "minimum": 1,
+              "description": "Top-k örnekleme değeri"
             }
           }
         }

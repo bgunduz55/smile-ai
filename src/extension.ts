@@ -134,7 +134,7 @@ export async function activate(context: vscode.ExtensionContext) {
 			}),
 
 			vscode.commands.registerCommand(COMMANDS.SELECT_PROVIDER, async () => {
-				const providers = ['openai', 'anthropic', 'ollama'];
+				const providers = ['openai', 'anthropic', 'ollama', 'lmstudio', 'localai', 'deepseek', 'qwen'];
 				const selected = await vscode.window.showQuickPick(providers, {
 					placeHolder: 'AI sağlayıcısını seçin'
 				});
