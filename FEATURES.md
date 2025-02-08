@@ -1,52 +1,54 @@
 # Smile AI VSCode Extension - Özellikler ve Geliştirme Planı
 
-## 1. Yerel AI Entegrasyonu
+## 1. AI Provider Entegrasyonları
 ### Mevcut Özellikler
-- ✅ node-llama-cpp temel entegrasyonu
-- ✅ OpenAI fallback desteği
-- ✅ Anthropic Claude desteği
+- ✅ OpenAI API entegrasyonu
+- ✅ Anthropic Claude entegrasyonu
 - ✅ Basit Ollama entegrasyonu
 
 ### Geliştirilecek Özellikler
-- [ ] Gelişmiş Llama.cpp Entegrasyonu
-  - Model yükleme ve yapılandırma arayüzü
-  - GGUF/GGML model format desteği
-  - Bağlam boyutu optimizasyonu
-  - Çoklu model desteği
-
-- [ ] GPT4All Entegrasyonu
-  - Node.js binding'leri
-  - Model yönetimi
-  - Performans optimizasyonları
-
-- [ ] LocalAI Entegrasyonu
-  - REST API entegrasyonu
-  - Model yönetimi
-  - Docker desteği
-
 - [ ] Gelişmiş Ollama Entegrasyonu
-  - Model yönetimi arayüzü
-  - Özel model desteği
+  - Model listesi görüntüleme
+  - Model parametrelerini yapılandırma
+  - Performans izleme
+  - Hata yönetimi
+
+- [ ] LM Studio Entegrasyonu
+  - API bağlantısı
+  - Model seçimi
+  - Parametre yapılandırması
   - Performans izleme
 
-## 2. Model Yönetimi
+- [ ] LocalAI Entegrasyonu
+  - REST API bağlantısı
+  - Model seçimi
+  - Docker desteği
+  - Hata yönetimi
+
+- [ ] Deepseek Qwen Entegrasyonu
+  - API entegrasyonu
+  - Model seçimi
+  - Parametre yönetimi
+
+## 2. Provider Yönetimi
 ### Planlanan Özellikler
-- [ ] Model İndirme ve Yönetim Arayüzü
-  - Model marketplace
-  - Otomatik güncelleme
-  - Model metadata yönetimi
-  - Model performans metrikleri
+- [ ] Provider Seçim Arayüzü
+  - Provider listesi
+  - Hızlı geçiş
+  - Durum göstergeleri
+  - Bağlantı testi
 
-- [ ] Model Önbelleğe Alma
-  - Akıllı önbellek stratejisi
-  - Önbellek boyutu yönetimi
-  - Önbellek temizleme
+- [ ] Yapılandırma Yönetimi
+  - API anahtarı yönetimi
+  - Endpoint yapılandırması
+  - Model parametreleri
+  - Önbellek ayarları
 
-- [ ] GPU Desteği
-  - CUDA entegrasyonu
-  - Metal desteği (macOS)
-  - DirectML desteği (Windows)
-  - GPU kullanım optimizasyonu
+- [ ] Performans İzleme
+  - Yanıt süreleri
+  - Token kullanımı
+  - Hata oranları
+  - Maliyet takibi
 
 ## 3. Kod Analizi ve İndeksleme
 ### Mevcut Özellikler
@@ -214,8 +216,8 @@
 ## Öncelik ve Zaman Çizelgesi
 
 ### Faz 1 (1-2 Ay)
-1. Yerel AI Entegrasyonu geliştirmeleri
-2. Model Yönetimi temel özellikleri
+1. AI Provider Entegrasyonları geliştirmeleri
+2. Provider Yönetimi temel özellikleri
 3. Gelişmiş Kod Analizi
 
 ### Faz 2 (2-3 Ay)
