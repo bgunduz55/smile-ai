@@ -1,7 +1,8 @@
-export type TaskType = 
+export type TaskType =
+    | 'text_generation'
+    | 'code_generation'
     | 'code_completion'
     | 'code_analysis'
-    | 'code_generation'
     | 'documentation'
     | 'test_generation'
     | 'refactoring'
@@ -67,10 +68,27 @@ export interface TaskResult {
     };
 }
 
+export interface ModelMetadata {
+    name: string;
+    format: 'gguf' | 'ggml';
+    size: number;
+    parameters: number;
+    lastUsed: Date;
+    performance: {
+        averageResponseTime: number;
+        tokensPerSecond: number;
+        totalTokensGenerated: number;
+    };
+}
+
 export interface AgentCapability {
     taskType: TaskType;
     supportedLanguages: string[];
     requiresContext: boolean;
     maxInputLength: number;
     description: string;
-} 
+}
+
+export type PromptTemplates = {
+    [K in TaskType]: string;
+}; 

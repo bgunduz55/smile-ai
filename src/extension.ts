@@ -14,7 +14,7 @@ let completionServiceInstance: CompletionService;
 let agentService: AgentService;
 
 // Command identifiers
-const COMMANDS = {
+export const COMMANDS = {
 	OPEN_CHAT: 'smile-ai.openChat',
 	START_COMPOSER: 'smile-ai.startComposer',
 	TOGGLE_CODE_COMPLETION: 'smile-ai.toggleCodeCompletion',

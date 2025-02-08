@@ -251,8 +251,7 @@ export class LlamaService {
         return await this.chatSession.prompt(prompt, {
             temperature: this.config.temperature,
             topP: this.config.topP,
-            maxTokens: this.config.maxTokens,
-            stopSequences: this.config.stopTokens
+            maxTokens: this.config.maxTokens
         });
     }
 
