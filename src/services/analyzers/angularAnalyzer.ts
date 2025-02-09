@@ -1,7 +1,6 @@
 import * as vscode from 'vscode';
 import * as ts from 'typescript';
 import { CompilerHost, createProgram } from '@angular/compiler-cli';
-import { StaticSymbol } from '@angular/compiler';
 import { LanguageAnalyzer, AnalysisResult, SemanticNode, CodeMetrics } from '../types/analysis';
 
 interface AngularSymbol {

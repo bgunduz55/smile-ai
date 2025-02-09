@@ -10,7 +10,6 @@ import { PHPAnalyzer } from './analyzers/phpAnalyzer';
 import { RubyAnalyzer } from './analyzers/rubyAnalyzer';
 import { AngularAnalyzer } from './analyzers/angularAnalyzer';
 import { ReactAnalyzer } from './analyzers/reactAnalyzer';
-import { VueAnalyzer } from './analyzers/vueAnalyzer';
 import { SvelteAnalyzer } from './analyzers/svelteAnalyzer';
 import { ExpressAnalyzer } from './analyzers/expressAnalyzer';
 import { LanguageAnalyzer, AnalysisResult } from './types/analysis';
@@ -55,7 +54,7 @@ export class SemanticAnalysisService {
     }
 
     private initializeAnalyzers(): void {
-        // Use the same analyzer for TypeScript/JavaScript
+        // Add TypeScript analyzer
         const tsAnalyzer = new TypeScriptAnalyzer();
         this.analyzers.set('typescript', tsAnalyzer);
         this.analyzers.set('javascript', tsAnalyzer);
@@ -102,50 +101,29 @@ export class SemanticAnalysisService {
         this.analyzers.set('ruby', rubyAnalyzer);
 
 
-        // Add Angular analyzer
-        const angularAnalyzer = new AngularAnalyzer();
-        this.analyzers.set('angular-ts', angularAnalyzer);
-        this.analyzers.set('angular-html', angularAnalyzer);
-        this.analyzers.set('angular-css', angularAnalyzer);
-
-
+        // Comment out other analyzers
+        /*
         // Add React analyzer
         const reactAnalyzer = new ReactAnalyzer();
-        this.analyzers.set('react-ts', reactAnalyzer);
-        this.analyzers.set('react-jsx', reactAnalyzer);
-        this.analyzers.set('react-tsx', reactAnalyzer);
-
-
-        // Add Vue.js analyzer
-        const vueAnalyzer = new VueAnalyzer();
-        this.analyzers.set('vue', vueAnalyzer);
-        this.analyzers.set('vue-html', vueAnalyzer);
-        this.analyzers.set('vue-css', vueAnalyzer);
-        this.analyzers.set('vue-ts', vueAnalyzer);
-
-        this.analyzers.set('vue-js', vueAnalyzer);
+        this.analyzers.set('typescriptreact', reactAnalyzer);
+        this.analyzers.set('javascriptreact', reactAnalyzer);
 
         // Add Svelte analyzer
         const svelteAnalyzer = new SvelteAnalyzer();
         this.analyzers.set('svelte', svelteAnalyzer);
-        this.analyzers.set('svelte-ts', svelteAnalyzer);
-        this.analyzers.set('svelte-js', svelteAnalyzer);
 
-
-        // Add Express.js analyzer
-        const expressAnalyzer = new ExpressAnalyzer();
-        this.analyzers.set('javascript', expressAnalyzer);
-        this.analyzers.set('typescript', expressAnalyzer);
-        this.analyzers.set('express', expressAnalyzer);
-        this.analyzers.set('node', expressAnalyzer);
-
+        // Add Angular analyzer
+        const angularAnalyzer = new AngularAnalyzer();
+        this.analyzers.set('angular', angularAnalyzer);
 
         // Add NestJS analyzer
         const nestAnalyzer = new NestAnalyzer();
-        this.analyzers.set('typescript', nestAnalyzer);
-        this.analyzers.set('javascript', nestAnalyzer);
         this.analyzers.set('nest', nestAnalyzer);
-        this.analyzers.set('nestjs', nestAnalyzer);
+
+        // Add Express analyzer
+        const expressAnalyzer = new ExpressAnalyzer();
+        this.analyzers.set('express', expressAnalyzer);
+        */
 
 
         // Add Spring Boot analyzer

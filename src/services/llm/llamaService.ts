@@ -1,9 +1,10 @@
 import * as vscode from 'vscode';
-import { LlamaModel, LlamaContext, LlamaChatSession, LlamaModelOptions } from 'node-llama-cpp';
+import { LlamaModel, LlamaContext, LlamaChatSession, LlamaModelOptions, LLamaChatPromptOptions } from 'node-llama-cpp';
 import { ModelConfig, AgentTask, TaskResult, TaskType, AgentCapability } from './types';
 import { promptTemplates } from './promptTemplates';
 import path from 'path';
 import fs from 'fs';
+import { LLMService } from './llmService';
 
 interface ModelMetadata {
     name: string;
@@ -18,7 +19,7 @@ interface ModelMetadata {
     };
 }
 
-export class LlamaService {
+export class LlamaService implements LLMService {
     private model: LlamaModel | null = null;
     private context: LlamaContext | null = null;
     private chatSession: LlamaChatSession | null = null;
@@ -26,10 +27,29 @@ export class LlamaService {
     private disposables: vscode.Disposable[] = [];
     private modelMetadata: ModelMetadata | null = null;
     private readonly config: ModelConfig;
+    private isInitialized: boolean = false;
+    private lastError?: Error;
+    private statusBarItem: vscode.StatusBarItem;
 
     constructor(config: ModelConfig) {
         this.config = config;
         this.capabilities = this.initializeCapabilities();
+        this.statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right);
+        this.updateStatusBar();
+    }
+
+    private updateStatusBar(): void {
+        if (!this.isInitialized) {
+            this.statusBarItem.text = "$(sync~spin) Llama";
+            this.statusBarItem.tooltip = "Llama is starting...";
+        } else if (this.lastError) {
+            this.statusBarItem.text = "$(error) Llama";
+            this.statusBarItem.tooltip = `Error: ${this.lastError.message}`;
+        } else {
+            this.statusBarItem.text = "$(check) Llama";
+            this.statusBarItem.tooltip = `Model: ${this.modelMetadata?.name || 'Unknown'}\nTPS: ${this.modelMetadata?.performance.tokensPerSecond.toFixed(2) || 0}`;
+        }
+        this.statusBarItem.show();
     }
 
     private initializeCapabilities(): Map<TaskType, AgentCapability> {
@@ -65,32 +85,81 @@ export class LlamaService {
 
     public async initialize(): Promise<void> {
         try {
+            await this.validateConfig();
             await this.loadModel();
             this.registerEventHandlers();
             await this.updateModelMetadata();
+            this.isInitialized = true;
+            this.updateStatusBar();
         } catch (error) {
+            this.lastError = error instanceof Error ? error : new Error('Unknown error');
+            this.updateStatusBar();
             console.error('Llama model initialization failed:', error);
             throw error;
         }
     }
 
-    private async loadModel(): Promise<void> {
-        const modelOptions: LlamaModelOptions = {
-            modelPath: this.config.modelPath,
-            contextSize: this.config.contextSize,
-            gpuLayers: this.detectGPUSupport(),
-            batchSize: this.calculateOptimalBatchSize(),
-            threads: this.getOptimalThreadCount(),
-            useMlock: true
-        };
+    private async validateConfig(): Promise<void> {
+        if (!this.config.modelPath) {
+            throw new Error('Model path is not configured');
+        }
 
-        this.model = new LlamaModel(modelOptions);
-        this.context = new LlamaContext({ model: this.model });
-        this.chatSession = new LlamaChatSession({ context: this.context });
+        if (!fs.existsSync(this.config.modelPath)) {
+            throw new Error(`Model file not found at: ${this.config.modelPath}`);
+        }
+
+        const fileStats = fs.statSync(this.config.modelPath);
+        if (fileStats.size < 1024 * 1024) { // 1MB'dan küçük
+            throw new Error('Invalid model file: File size is too small');
+        }
     }
 
-    private detectGPUSupport(): number {
-        // TODO: Implement GPU detection logic
+    private async loadModel(): Promise<void> {
+        try {
+            const modelOptions = {
+                path: this.config.modelPath,
+                enableLogging: false,
+                nCtx: this.config.contextSize || 4096,
+                nGpuLayers: await this.detectGPUSupport(),
+                batchSize: this.calculateOptimalBatchSize(),
+                nThreads: this.getOptimalThreadCount(),
+                useMlock: true,
+                useMemorymap: true
+            };
+
+            this.model = new LlamaModel(modelOptions);
+            this.context = new LlamaContext(this.model);
+            this.chatSession = new LlamaChatSession(this.context);
+        } catch (error) {
+            throw new Error(`Failed to load model: ${error instanceof Error ? error.message : 'Unknown error'}`);
+        }
+    }
+
+    private async detectGPUSupport(): Promise<number> {
+        const config = vscode.workspace.getConfiguration('smile-ai');
+        const gpuEnabled = config.get<boolean>('gpu.enabled') ?? true;
+        
+        if (!gpuEnabled) {
+            return 0;
+        }
+
+        try {
+            const gpuLayers = config.get<number>('gpu.layers') ?? 32;
+            const gpuDevice = config.get<string>('gpu.device') ?? 'cuda';
+            
+            // GPU desteğini kontrol et
+            if (process.platform === 'win32' && gpuDevice === 'cuda') {
+                const nvidiaSmiPath = 'C:\\Windows\\System32\\nvidia-smi.exe';
+                if (fs.existsSync(nvidiaSmiPath)) {
+                    return gpuLayers;
+                }
+            } else if (process.platform === 'darwin' && gpuDevice === 'metal') {
+                return gpuLayers;
+            }
+        } catch (error) {
+            console.warn('GPU detection failed:', error);
+        }
+
         return 0;
     }
 
@@ -137,7 +206,7 @@ export class LlamaService {
     private registerEventHandlers(): void {
         this.disposables.push(
             vscode.commands.registerCommand('smile-ai.executeTask', async (task: AgentTask) => {
-                return await this.executeTask(task);
+                return await this.processTask(task);
             }),
             vscode.workspace.onDidChangeConfiguration(async e => {
                 if (e.affectsConfiguration('smile-ai')) {
@@ -176,7 +245,11 @@ export class LlamaService {
         await this.updateModelMetadata();
     }
 
-    public async executeTask(task: AgentTask): Promise<TaskResult> {
+    public async processTask(task: AgentTask): Promise<TaskResult> {
+        if (!this.isInitialized) {
+            throw new Error('LlamaService is not initialized');
+        }
+
         const startTime = Date.now();
         
         try {
@@ -204,22 +277,26 @@ export class LlamaService {
                 this.modelMetadata.performance.tokensPerSecond = 
                     tokensGenerated / (executionTime / 1000);
                 this.modelMetadata.lastUsed = new Date();
+                this.updateStatusBar();
             }
 
             return {
                 success: true,
                 output: response,
                 metadata: {
-                    tokensUsed: response.length / 4, // Yaklaşık token sayısı
+                    tokensUsed: response.length / 4,
                     executionTime: endTime - startTime,
                     modelName: this.modelMetadata?.name || 'llama2'
                 }
             };
         } catch (error) {
+            this.lastError = error instanceof Error ? error : new Error('Unknown error');
+            this.updateStatusBar();
+            
             return {
                 success: false,
                 output: '',
-                error: error instanceof Error ? error.message : 'Unknown error occurred',
+                error: this.lastError.message,
                 metadata: {
                     tokensUsed: 0,
                     executionTime: Date.now() - startTime,
@@ -249,11 +326,17 @@ export class LlamaService {
             throw new Error('Model not initialized');
         }
 
-        return await this.chatSession.prompt(prompt, {
-            temperature: this.config.temperature,
-            topP: this.config.topP,
-            maxTokens: this.config.maxTokens
-        });
+        try {
+            const options: LLamaChatPromptOptions = {
+                temperature: this.config.temperature || 0.7,
+                topP: this.config.topP || 0.9,
+                maxTokens: this.config.maxTokens || 2048
+            };
+
+            return await this.chatSession.prompt(prompt, options);
+        } catch (error) {
+            throw new Error(`Failed to generate response: ${error instanceof Error ? error.message : 'Unknown error'}`);
+        }
     }
 
     public getCapabilities(): AgentCapability[] {
@@ -267,6 +350,8 @@ export class LlamaService {
     public async dispose(): Promise<void> {
         this.disposables.forEach(d => d.dispose());
         this.disposables = [];
+        this.statusBarItem.dispose();
+        
         if (this.chatSession) {
             this.chatSession = null;
         }
@@ -276,5 +361,7 @@ export class LlamaService {
         if (this.model) {
             this.model = null;
         }
+        
+        this.isInitialized = false;
     }
 } 

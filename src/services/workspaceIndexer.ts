@@ -28,11 +28,14 @@ export class WorkspaceIndexer {
         } finally {
             this.isIndexing = false;
         }
-
     }
 
     public async searchFiles(_query: string): Promise<void> {
         // TODO: Later, search functionality will be added
+    }
+
+    public dispose(): void {
+        // Clean up resources
     }
 }
 

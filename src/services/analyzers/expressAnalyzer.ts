@@ -148,7 +148,7 @@ export class ExpressAnalyzer implements LanguageAnalyzer {
                 controllers.push({
                     type: 'controller',
                     name: node.name?.text || 'anonymous',
-                    methods: this.extractControllerMethods(node),
+                    method: this.extractControllerMethods(node)[0],
                     documentation: this.getNodeDocumentation(node),
                     location: this.getNodeLocation(node)
                 });
@@ -160,19 +160,20 @@ export class ExpressAnalyzer implements LanguageAnalyzer {
     }
 
     private isController(node: ts.ClassDeclaration): boolean {
-        return node.name?.text.toLowerCase().includes('controller') || 
-               node.members.some(member => 
-                   ts.isMethodDeclaration(member) && 
-                   member.parameters.length >= 2 &&
-                   member.parameters[0].type?.getText().includes('Request') &&
-                   member.parameters[1].type?.getText().includes('Response')
-               );
+        const hasControllerName = node.name?.text.toLowerCase().includes('controller');
+        const hasRequestResponseMethods = node.members.some(member => 
+            ts.isMethodDeclaration(member) && 
+            member.parameters.length >= 2 &&
+            member.parameters[0].type?.getText().includes('Request') &&
+            member.parameters[1].type?.getText().includes('Response')
+        );
+        return hasControllerName || hasRequestResponseMethods;
     }
 
     private extractControllerMethods(node: ts.ClassDeclaration): string[] {
         return node.members
-            .filter(ts.isMethodDeclaration)
-            .map(method => method.name.getText());
+            .filter(member => ts.isMethodDeclaration(member))
+            .map(method => (method as ts.MethodDeclaration).name.getText());
     }
 
     private analyzeModels(sourceFile: ts.SourceFile): ExpressSymbol[] {
@@ -193,11 +194,14 @@ export class ExpressAnalyzer implements LanguageAnalyzer {
     }
 
     private isModel(node: ts.ClassDeclaration): boolean {
-        return node.name?.text.toLowerCase().includes('model') ||
-               node.decorators?.some(d => 
-                   d.expression.getText().includes('model') ||
-                   d.expression.getText().includes('entity')
-               );
+        const hasModelName = node.name?.text.toLowerCase().includes('model');
+        const hasModelDecorator = ts.canHaveDecorators(node) && 
+            ts.getDecorators(node)?.some(decorator => 
+                ts.isCallExpression(decorator.expression) &&
+                (decorator.expression.getText().includes('model') ||
+                 decorator.expression.getText().includes('entity'))
+            );
+        return hasModelName || !!hasModelDecorator;
     }
 
     private analyzeAuth(sourceFile: ts.SourceFile): ExpressSymbol[] {
@@ -262,7 +266,7 @@ export class ExpressAnalyzer implements LanguageAnalyzer {
 
     private extractMiddleware(nodes: ts.Node[]): string[] {
         return nodes
-            .filter(ts.isFunctionExpression)
+            .filter(node => ts.isIdentifier(node) || ts.isFunctionExpression(node))
             .map(node => {
                 if (ts.isIdentifier(node)) {
                     return node.text;

@@ -24,12 +24,21 @@ interface PerformanceMetrics {
     tokensPerSecond: number;
     totalTokensGenerated: number;
     memoryUsage?: {
-        total: number;
-        used: number;
+        heapUsed: number;
+        heapTotal: number;
+        external: number;
+    };
+    gpuUsage?: {
+        memoryUsed: number;
+        utilization: number;
     };
 }
 
 export class LMStudioService implements LLMService {
+    private static readonly DEFAULT_PORT = 1234;
+    private static readonly MAX_RETRIES = 5;
+    private static readonly RETRY_DELAY = 1000;
+
     private endpoint: string;
     private currentModel: string;
     private models: LMStudioModel[] = [];
@@ -42,13 +51,15 @@ export class LMStudioService implements LLMService {
     private errorCount: number = 0;
     private lastError?: Error;
     private isInitialized: boolean = false;
+    private disposables: vscode.Disposable[] = [];
 
     constructor() {
         const config = vscode.workspace.getConfiguration('smile-ai.lmstudio');
-        this.endpoint = config.get('endpoint') || 'http://localhost:1234/v1';
-        this.currentModel = config.get('defaultModel') || 'default';
+        this.endpoint = config.get<string>('endpoint') || `http://localhost:${LMStudioService.DEFAULT_PORT}/v1`;
+        this.currentModel = config.get<string>('defaultModel') || 'default';
         this.statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right);
         this.updateStatusBar();
+        this.registerEventHandlers();
     }
 
     private updateStatusBar(): void {
@@ -58,12 +69,33 @@ export class LMStudioService implements LLMService {
         } else if (this.lastError) {
             this.statusBarItem.text = "$(error) LM Studio";
             this.statusBarItem.tooltip = `Error: ${this.lastError.message}`;
-
         } else {
             this.statusBarItem.text = "$(check) LM Studio";
             this.statusBarItem.tooltip = `Model: ${this.currentModel}\nTPS: ${this.performanceMetrics.tokensPerSecond.toFixed(2)}`;
         }
         this.statusBarItem.show();
+    }
+
+    private registerEventHandlers(): void {
+        this.disposables.push(
+            vscode.workspace.onDidChangeConfiguration(async e => {
+                if (e.affectsConfiguration('smile-ai.lmstudio')) {
+                    await this.handleConfigurationChange();
+                }
+            })
+        );
+    }
+
+    private async handleConfigurationChange(): Promise<void> {
+        const config = vscode.workspace.getConfiguration('smile-ai.lmstudio');
+        const newEndpoint = config.get<string>('endpoint') || `http://localhost:${LMStudioService.DEFAULT_PORT}/v1`;
+        const newModel = config.get<string>('defaultModel') || 'default';
+
+        if (this.endpoint !== newEndpoint || this.currentModel !== newModel) {
+            this.endpoint = newEndpoint;
+            this.currentModel = newModel;
+            await this.initialize();
+        }
     }
 
     public async initialize(): Promise<void> {
@@ -77,46 +109,58 @@ export class LMStudioService implements LLMService {
             this.updateStatusBar();
             throw error;
         }
-
     }
 
     private async checkConnection(): Promise<void> {
-        try {
-            await axios.get(`${this.endpoint}/models`);
-        } catch (error) {
-            throw new Error('LM Studio connection failed. Ensure the service is running.');
+        for (let i = 0; i < LMStudioService.MAX_RETRIES; i++) {
+            try {
+                const response = await axios.get(`${this.endpoint}/models`);
+                if (response.status === 200) {
+                    return;
+                }
+            } catch (error) {
+                if (i === LMStudioService.MAX_RETRIES - 1) {
+                    throw new Error('LM Studio connection failed. Ensure the service is running.');
+                }
+                await new Promise(resolve => setTimeout(resolve, LMStudioService.RETRY_DELAY));
+            }
         }
-
     }
 
     private async loadModelInfo(): Promise<void> {
         try {
             const response = await axios.get(`${this.endpoint}/models`);
-            this.models = response.data.data.map((model: any) => ({
-                id: model.id,
-                name: model.name || 'Bilinmeyen Model',
-                format: model.format || 'Bilinmeyen',
-                size: model.size || 0,
-                parameters: model.parameters || 0,
-                lastUsed: new Date()
-            }));
+            if (response.data?.data) {
+                this.models = response.data.data.map((model: any) => ({
+                    id: model.id,
+                    name: model.name || 'Unknown Model',
+                    format: model.format || 'Unknown',
+                    size: model.size || 0,
+                    parameters: model.parameters || 0,
+                    lastUsed: new Date()
+                }));
+            } else {
+                throw new Error('Invalid response format from LM Studio service');
+            }
         } catch (error) {
             console.error('Model information could not be retrieved:', error);
-            // Continue operation even if model information is not available
+            // Varsayılan model bilgisi
             this.models = [{
                 id: 'default',
-
                 name: 'Default Model',
                 format: 'Unknown',
                 size: 0,
                 parameters: 0,
                 lastUsed: new Date()
             }];
-
         }
     }
 
     public async processTask(task: AgentTask): Promise<TaskResult> {
+        if (!this.isInitialized) {
+            throw new Error('LM Studio service is not initialized');
+        }
+
         const startTime = Date.now();
 
         try {
@@ -128,17 +172,17 @@ export class LMStudioService implements LLMService {
                 messages: [
                     {
                         role: 'system',
-                        content: 'You are a helpful AI assistant specialized in software development.'
+                        content: config.get<string>('systemPrompt') || 'You are a helpful AI assistant specialized in software development.'
                     },
                     {
                         role: 'user',
                         content: prompt
                     }
                 ],
-                temperature: config.get('temperature') ?? 0.7,
-                top_p: config.get('topP') ?? 0.9,
-                max_tokens: config.get('maxTokens') ?? 2048,
-                stop: config.get('stopTokens') ?? ['</s>', '<s>']
+                temperature: config.get<number>('temperature') ?? 0.7,
+                top_p: config.get<number>('topP') ?? 0.9,
+                max_tokens: config.get<number>('maxTokens') ?? 2048,
+                stop: config.get<string[]>('stopTokens') ?? ['</s>', '<s>']
             });
 
             const stats: LMStudioStats = {
@@ -148,7 +192,6 @@ export class LMStudioService implements LLMService {
                 duration: Date.now() - startTime
             };
 
-            // Performans metriklerini güncelle
             this.updatePerformanceMetrics(stats);
 
             return {
@@ -157,12 +200,7 @@ export class LMStudioService implements LLMService {
                 metadata: {
                     tokensUsed: stats.totalTokens,
                     executionTime: stats.duration,
-                    modelName: this.currentModel,
-                    memoryUsage: this.performanceMetrics.memoryUsage ? {
-                        heapUsed: this.performanceMetrics.memoryUsage.used,
-                        heapTotal: this.performanceMetrics.memoryUsage.total,
-                        external: 0
-                    } : undefined
+                    modelName: this.currentModel
                 }
             };
         } catch (error) {
@@ -170,13 +208,12 @@ export class LMStudioService implements LLMService {
             return {
                 success: false,
                 output: '',
-                error: error instanceof Error ? error.message : 'Unknown error',
+                error: this.lastError?.message || 'Unknown error',
                 metadata: {
                     tokensUsed: 0,
                     executionTime: Date.now() - startTime,
                     modelName: this.currentModel
                 }
-
             };
         }
     }
@@ -196,17 +233,18 @@ export class LMStudioService implements LLMService {
     private handleError(error: unknown): void {
         this.errorCount++;
         this.lastError = error instanceof Error ? error : new Error('Unknown error');
-        
-
-        // Show error status
         this.updateStatusBar();
-        
 
-        // Restart the service after a certain number of errors
-
-        if (this.errorCount >= 5) {
+        if (this.errorCount >= LMStudioService.MAX_RETRIES) {
             this.errorCount = 0;
-            this.initialize().catch(console.error);
+            vscode.window.showErrorMessage(
+                `LM Studio service encountered multiple errors. Please check the service status.`,
+                'Retry Connection'
+            ).then(selection => {
+                if (selection === 'Retry Connection') {
+                    this.initialize().catch(console.error);
+                }
+            });
         }
     }
 
@@ -234,7 +272,6 @@ export class LMStudioService implements LLMService {
             throw new Error(`Model not found: ${modelId}`);
         }
         
-
         this.currentModel = modelId;
         model.lastUsed = new Date();
         
@@ -249,6 +286,7 @@ export class LMStudioService implements LLMService {
     }
 
     public dispose(): void {
+        this.disposables.forEach(d => d.dispose());
         this.statusBarItem.dispose();
     }
 } 

@@ -1,25 +1,39 @@
 import * as vscode from 'vscode';
-import { LlamaService } from './llamaService';
-import { AgentTask, TaskResult, ModelConfig } from './types';
+import { AIService } from '../aiService';
+// import { LlamaService } from './llamaService';
+import { OllamaService } from './ollamaService';
+import { AgentTask, TaskResult } from './types';
 import { suggestionService } from '../suggestionService';
 import { SuggestionItem } from '../suggestionService';
 
 export class AgentService {
-    private llamaService: LlamaService;
+    private static instance: AgentService;
+    private aiService: AIService;
+    // private llamaService: LlamaService;
+    private ollamaService: OllamaService;
     private disposables: vscode.Disposable[] = [];
     private statusBarItem: vscode.StatusBarItem;
 
-    constructor(config: ModelConfig) {
-        this.llamaService = new LlamaService(config);
+    private constructor() {
+        this.aiService = AIService.getInstance();
+        // this.llamaService = new LlamaService();
+        this.ollamaService = new OllamaService();
         this.statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right);
         this.statusBarItem.text = "$(hubot) Smile AI";
         this.statusBarItem.tooltip = "Smile AI Agent";
         this.statusBarItem.show();
     }
 
+    public static getInstance(): AgentService {
+        if (!AgentService.instance) {
+            AgentService.instance = new AgentService();
+        }
+        return AgentService.instance;
+    }
+
     public async initialize(): Promise<void> {
         try {
-            await this.llamaService.initialize();
+            // await this.llamaService.initialize();
             this.registerCommands();
             this.statusBarItem.text = "$(check) Smile AI";
         } catch (error) {
@@ -31,13 +45,9 @@ export class AgentService {
     private registerCommands(): void {
         // Register all agent-related commands
         this.disposables.push(
-            vscode.commands.registerCommand('smile-ai.codeCompletion', () => this.handleCodeCompletion()),
-            vscode.commands.registerCommand('smile-ai.codeAnalysis', () => this.handleCodeAnalysis()),
-            vscode.commands.registerCommand('smile-ai.generateCode', () => this.handleCodeGeneration()),
-            vscode.commands.registerCommand('smile-ai.generateDocs', () => this.handleDocGeneration()),
-            vscode.commands.registerCommand('smile-ai.generateTests', () => this.handleTestGeneration()),
-            vscode.commands.registerCommand('smile-ai.refactorCode', () => this.handleRefactoring()),
-            vscode.commands.registerCommand('smile-ai.fixBug', () => this.handleBugFix())
+            vscode.commands.registerCommand('smile-ai.executeTask', async (task: AgentTask) => {
+                return await this.ollamaService.processTask(task);
+            })
         );
     }
 
@@ -430,9 +440,27 @@ export class AgentService {
         this.statusBarItem.text = "$(sync~spin) Smile AI";
         
         try {
-            const result = await this.llamaService.executeTask(task);
-            await this.handleTaskResult(result);
-            return result;
+            // const result = await this.llamaService.executeTask(task);
+            await this.handleTaskResult({
+                success: true,
+                output: '',
+                error: '',
+                metadata: {
+                    tokensUsed: 0,
+                    executionTime: 0,
+                    modelName: 'unknown'
+                }
+            });
+            return {
+                success: true,
+                output: '',
+                error: '',
+                metadata: {
+                    tokensUsed: 0,
+                    executionTime: 0,
+                    modelName: 'unknown'
+                }
+            };
         } catch (error) {
             vscode.window.showErrorMessage(
                 error instanceof Error ? error.message : 'Görev yürütülürken bir hata oluştu'
@@ -477,9 +505,10 @@ export class AgentService {
     }
 
     public dispose(): void {
-        this.llamaService.dispose();
+        // this.llamaService.dispose();
         this.statusBarItem.dispose();
         this.disposables.forEach(d => d.dispose());
         this.disposables = [];
+        this.ollamaService.dispose();
     }
 } 

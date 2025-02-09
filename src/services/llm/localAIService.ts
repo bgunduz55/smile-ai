@@ -30,11 +30,30 @@ interface PerformanceMetrics {
         used: number;
     };
     cpuUsage?: number;
+    gpuUtilization?: number;
+}
+
+interface TaskMetadata {
+    tokensUsed: number;
+    executionTime: number;
+    modelName: string;
+    memoryUsage?: {
+        heapUsed: number;
+        heapTotal: number;
+        external: number;
+    };
+    gpuUsage?: {
+        memoryUsed: number;
+        utilization: number;
+    };
 }
 
 export class LocalAIService implements LLMService {
     private static readonly CONTAINER_NAME = 'smile-ai-localai';
     private static readonly IMAGE_NAME = 'localai/localai:latest';
+    private static readonly DEFAULT_PORT = 8080;
+    private static readonly MAX_RETRIES = 5;
+    private static readonly RETRY_DELAY = 1000;
 
     private endpoint: string;
     private currentModel: string;
@@ -50,14 +69,16 @@ export class LocalAIService implements LLMService {
     private isInitialized: boolean = false;
     private dockerService: DockerService;
     private statsInterval: NodeJS.Timeout | null = null;
+    private disposables: vscode.Disposable[] = [];
 
     constructor() {
         const config = vscode.workspace.getConfiguration('smile-ai.localai');
-        this.endpoint = config.get('endpoint') || 'http://localhost:8080/v1';
+        this.endpoint = config.get('endpoint') || `http://localhost:${LocalAIService.DEFAULT_PORT}/v1`;
         this.currentModel = config.get('defaultModel') || 'default';
         this.statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right);
         this.dockerService = DockerService.getInstance();
         this.updateStatusBar();
+        this.registerEventHandlers();
     }
 
     private updateStatusBar(): void {
@@ -67,12 +88,33 @@ export class LocalAIService implements LLMService {
         } else if (this.lastError) {
             this.statusBarItem.text = "$(error) LocalAI";
             this.statusBarItem.tooltip = `Error: ${this.lastError.message}`;
-
         } else {
             this.statusBarItem.text = "$(check) LocalAI";
-            this.statusBarItem.tooltip = `Model: ${this.currentModel}\nTPS: ${this.performanceMetrics.tokensPerSecond.toFixed(2)}\nCPU: ${this.performanceMetrics.cpuUsage?.toFixed(1)}%`;
+            this.statusBarItem.tooltip = `Model: ${this.currentModel}\nTPS: ${this.performanceMetrics.tokensPerSecond.toFixed(2)}\nCPU: ${this.performanceMetrics.cpuUsage?.toFixed(1)}%${this.performanceMetrics.gpuUtilization ? `\nGPU: ${this.performanceMetrics.gpuUtilization}` : ''}`;
         }
         this.statusBarItem.show();
+    }
+
+    private registerEventHandlers(): void {
+        this.disposables.push(
+            vscode.workspace.onDidChangeConfiguration(async e => {
+                if (e.affectsConfiguration('smile-ai.localai')) {
+                    await this.handleConfigurationChange();
+                }
+            })
+        );
+    }
+
+    private async handleConfigurationChange(): Promise<void> {
+        const config = vscode.workspace.getConfiguration('smile-ai.localai');
+        const newEndpoint = config.get('endpoint') || `http://localhost:${LocalAIService.DEFAULT_PORT}/v1`;
+        const newModel = config.get('defaultModel') || 'default';
+
+        if (this.endpoint !== newEndpoint || this.currentModel !== newModel) {
+            this.endpoint = newEndpoint;
+            this.currentModel = newModel;
+            await this.initialize();
+        }
     }
 
     public async initialize(): Promise<void> {
@@ -88,66 +130,81 @@ export class LocalAIService implements LLMService {
             this.updateStatusBar();
             throw error;
         }
-
     }
 
     private async ensureDockerContainer(): Promise<void> {
-        const config = vscode.workspace.getConfiguration('smile-ai.localai');
-        const modelsPath = config.get('modelsPath') || path.join(process.env.HOME || process.env.USERPROFILE || '', '.smile-ai', 'models');
+        try {
+            const config = vscode.workspace.getConfiguration('smile-ai.localai');
+            const modelsPath = config.get<string>('modelsPath') || path.join(process.env.HOME || process.env.USERPROFILE || '', '.smile-ai', 'models');
+            const port = parseInt(this.endpoint.match(/:(\d+)/)?.[1] || LocalAIService.DEFAULT_PORT.toString(), 10);
 
-        // Start the LocalAI container
+            // Container'ı başlat
+            await this.dockerService.startContainer(
+                LocalAIService.CONTAINER_NAME,
+                LocalAIService.IMAGE_NAME,
+                [`${port}:${port}`],
+                [`${modelsPath}:/models`],
+                {
+                    'CUDA_VISIBLE_DEVICES': config.get<boolean>('gpuEnabled', false) ? '0' : '',
+                    'DEBUG': config.get<boolean>('debug', false) ? '1' : '0',
+                    'PORT': port.toString(),
+                    'MODELS_PATH': '/models'
+                }
+            );
+        } catch (error) {
+            throw new Error(`Failed to start LocalAI container: ${error instanceof Error ? error.message : 'Unknown error'}`);
+        }
+    }
 
-        await this.dockerService.startContainer(
-            LocalAIService.CONTAINER_NAME,
-            LocalAIService.IMAGE_NAME,
-            ['8080:8080'],
-            [`${modelsPath}:/models`],
-            {
-                'CUDA_VISIBLE_DEVICES': config.get('gpuEnabled') ? '0' : '',
-                'DEBUG': config.get('debug') ? '1' : '0'
-            }
+    private shouldRestartContainer(current: any, desired: any): boolean {
+        return (
+            current.ports !== desired.ports ||
+            current.volumes !== desired.volumes ||
+            JSON.stringify(current.env) !== JSON.stringify(desired.env)
         );
     }
 
-    private async waitForService(retries: number = 30, delay: number = 1000): Promise<void> {
+    private async waitForService(retries: number = LocalAIService.MAX_RETRIES): Promise<void> {
         for (let i = 0; i < retries; i++) {
             try {
-                await axios.get(`${this.endpoint}/health`);
-                return;
+                const response = await axios.get(`${this.endpoint}/health`);
+                if (response.status === 200) {
+                    return;
+                }
             } catch (error) {
                 if (i === retries - 1) {
                     throw new Error('LocalAI service could not be started');
                 }
-                await new Promise(resolve => setTimeout(resolve, delay));
+                await new Promise(resolve => setTimeout(resolve, LocalAIService.RETRY_DELAY));
             }
-
         }
     }
 
     private async loadModelInfo(): Promise<void> {
         try {
             const response = await axios.get(`${this.endpoint}/models`);
-            this.models = response.data.data.map((model: any) => ({
-                id: model.id,
-                name: model.name || 'Unknown Model',
-                format: model.format || 'Unknown',
-                size: model.size || 0,
-                parameters: model.parameters || 0,
-                lastUsed: new Date()
-
-            }));
+            if (response.data?.data) {
+                this.models = response.data.data.map((model: any) => ({
+                    id: model.id,
+                    name: model.name || 'Unknown Model',
+                    format: model.format || 'Unknown',
+                    size: model.size || 0,
+                    parameters: model.parameters || 0,
+                    lastUsed: new Date()
+                }));
+            } else {
+                throw new Error('Invalid response format from LocalAI service');
+            }
         } catch (error) {
             console.error('Model information could not be retrieved:', error);
-            // Continue operation even if model information is not available
+            // Varsayılan model bilgisi
             this.models = [{
-
                 id: 'default',
                 name: 'Default Model',
                 format: 'Unknown',
                 size: 0,
                 parameters: 0,
                 lastUsed: new Date()
-
             }];
         }
     }
@@ -160,20 +217,30 @@ export class LocalAIService implements LLMService {
         this.statsInterval = setInterval(async () => {
             try {
                 const stats = await this.dockerService.getContainerStats(LocalAIService.CONTAINER_NAME);
-                this.performanceMetrics.cpuUsage = stats.cpuUsage;
-                this.performanceMetrics.memoryUsage = {
-                    total: stats.memoryUsage,
-                    used: stats.memoryUsage
-                };
-                this.updateStatusBar();
+                if (stats) {
+                    this.performanceMetrics.cpuUsage = stats.cpuUsage;
+                    const memoryBytes = this.parseMemoryToBytes(stats.memoryUsage);
+                    this.performanceMetrics.memoryUsage = {
+                        total: memoryBytes,
+                        used: memoryBytes
+                    };
+                    this.updateStatusBar();
+                }
             } catch (error) {
-                console.error('Performance metrics could not be retrieved:', error);
+                console.warn('Performance metrics could not be retrieved:', error);
             }
         }, 5000);
+    }
 
+    private parseMemoryToBytes(memory: number): number {
+        return Math.floor(memory * 1024 * 1024); // Convert MB to bytes
     }
 
     public async processTask(task: AgentTask): Promise<TaskResult> {
+        if (!this.isInitialized) {
+            throw new Error('LocalAI service is not initialized');
+        }
+
         const startTime = Date.now();
 
         try {
@@ -205,35 +272,44 @@ export class LocalAIService implements LLMService {
                 duration: Date.now() - startTime
             };
 
-            // Performans metriklerini güncelle
             this.updatePerformanceMetrics(stats);
+
+            const metadata: TaskMetadata = {
+                tokensUsed: stats.totalTokens,
+                executionTime: stats.duration,
+                modelName: this.currentModel
+            };
+
+            if (this.performanceMetrics.memoryUsage) {
+                metadata.memoryUsage = {
+                    heapUsed: this.performanceMetrics.memoryUsage.used,
+                    heapTotal: this.performanceMetrics.memoryUsage.total,
+                    external: 0
+                };
+            }
+            if (this.performanceMetrics.cpuUsage !== undefined) {
+                metadata.gpuUsage = {
+                    memoryUsed: 0,
+                    utilization: this.performanceMetrics.cpuUsage
+                };
+            }
 
             return {
                 success: true,
                 output: response.data.choices[0]?.message?.content || '',
-                metadata: {
-                    tokensUsed: stats.totalTokens,
-                    executionTime: stats.duration,
-                    modelName: this.currentModel,
-                    memoryUsage: this.performanceMetrics.memoryUsage ? {
-                        heapUsed: this.performanceMetrics.memoryUsage.used,
-                        heapTotal: this.performanceMetrics.memoryUsage.total,
-                        external: 0
-                    } : undefined
-                }
+                metadata
             };
         } catch (error) {
             this.handleError(error);
             return {
                 success: false,
                 output: '',
-                error: error instanceof Error ? error.message : 'Unknown error',
+                error: this.lastError?.message || 'Unknown error',
                 metadata: {
                     tokensUsed: 0,
                     executionTime: Date.now() - startTime,
                     modelName: this.currentModel
                 }
-
             };
         }
     }
@@ -253,17 +329,18 @@ export class LocalAIService implements LLMService {
     private handleError(error: unknown): void {
         this.errorCount++;
         this.lastError = error instanceof Error ? error : new Error('Unknown error');
-        
-
-        // Show error status
         this.updateStatusBar();
-        
 
-        // Restart the service after a certain number of errors
-
-        if (this.errorCount >= 5) {
+        if (this.errorCount >= LocalAIService.MAX_RETRIES) {
             this.errorCount = 0;
-            this.initialize().catch(console.error);
+            vscode.window.showErrorMessage(
+                `LocalAI service encountered multiple errors. Attempting to restart...`,
+                'Restart Now'
+            ).then(selection => {
+                if (selection === 'Restart Now') {
+                    this.initialize().catch(console.error);
+                }
+            });
         }
     }
 
@@ -312,6 +389,7 @@ export class LocalAIService implements LLMService {
         if (this.statsInterval) {
             clearInterval(this.statsInterval);
         }
+        this.disposables.forEach(d => d.dispose());
         this.statusBarItem.dispose();
         this.dockerService.stopContainer(LocalAIService.CONTAINER_NAME).catch(console.error);
     }

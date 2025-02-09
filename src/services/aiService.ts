@@ -10,6 +10,7 @@ import { LLMService } from './llm/llmService';
 import { AgentTask, TaskResult } from './llm/types';
 
 export class AIService implements vscode.Disposable {
+    private static instance: AIService;
     private openai: OpenAIService | null = null;
     private anthropic: AnthropicService | null = null;
     private ollama: OllamaService | null = null;
@@ -20,7 +21,7 @@ export class AIService implements vscode.Disposable {
     private currentProvider: string = 'openai';
     private disposables: vscode.Disposable[] = [];
 
-    constructor() {
+    private constructor() {
         this.disposables.push(
             vscode.workspace.onDidChangeConfiguration(e => {
                 if (e.affectsConfiguration('smile-ai.provider')) {
@@ -28,6 +29,13 @@ export class AIService implements vscode.Disposable {
                 }
             })
         );
+    }
+
+    public static getInstance(): AIService {
+        if (!AIService.instance) {
+            AIService.instance = new AIService();
+        }
+        return AIService.instance;
     }
 
     private async updateProvider(): Promise<void> {
@@ -216,4 +224,4 @@ export class AIService implements vscode.Disposable {
     }
 }
 
-export const aiService = new AIService(); 
+export const aiService = AIService.getInstance(); 

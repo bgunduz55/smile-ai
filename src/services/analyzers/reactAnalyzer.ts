@@ -94,10 +94,14 @@ export class ReactAnalyzer implements LanguageAnalyzer {
                 }
             },
 
-            // Hook analizi
-            CallExpression(path) {
-                if (this.isReactHook(path.node)) {
-                    symbols.push(this.createHookSymbol(path.node));
+            // Hook ve HOC analizi
+            CallExpression: {
+                enter(path) {
+                    if (this.isReactHook(path.node)) {
+                        symbols.push(this.createHookSymbol(path.node));
+                    } else if (this.isHigherOrderComponent(path.node)) {
+                        symbols.push(this.createHOCSymbol(path.node));
+                    }
                 }
             },
 
@@ -105,13 +109,6 @@ export class ReactAnalyzer implements LanguageAnalyzer {
             MemberExpression(path) {
                 if (this.isReactContext(path.node)) {
                     symbols.push(this.createContextSymbol(path.node));
-                }
-            },
-
-            // HOC analizi
-            CallExpression(path) {
-                if (this.isHigherOrderComponent(path.node)) {
-                    symbols.push(this.createHOCSymbol(path.node));
                 }
             }
         });
@@ -293,32 +290,24 @@ export class ReactAnalyzer implements LanguageAnalyzer {
 
     private analyzeDependencies(ast: parser.ParseResult<t.File>, symbols: ReactSymbol[]): Map<string, string[]> {
         const dependencies = new Map<string, string[]>();
-        
-        // Import bağımlılıkları
+
         traverse(ast, {
             ImportDeclaration(path) {
                 const source = path.node.source.value;
-                const imports = path.node.specifiers.map(specifier => {
-                    if (t.isImportDefaultSpecifier(specifier)) {
-                        return specifier.local.name;
-                    } else if (t.isImportSpecifier(specifier)) {
-                        return specifier.imported.name;
+                const imports: string[] = [];
+
+                path.node.specifiers.forEach(specifier => {
+                    if (t.isImportSpecifier(specifier)) {
+                        const importedName = t.isIdentifier(specifier.imported) ? 
+                            specifier.imported.name : specifier.imported.value;
+                        imports.push(importedName);
+                    } else if (t.isImportDefaultSpecifier(specifier)) {
+                        imports.push(specifier.local.name);
                     }
-                    return '';
-                }).filter(Boolean);
+                });
 
-                dependencies.set(source, imports);
-            }
-        });
-
-        // Component bağımlılıkları
-        symbols.forEach(symbol => {
-            if (symbol.type === 'component') {
-                const deps: string[] = [];
-                if (symbol.hooks) deps.push(...symbol.hooks);
-                if (symbol.children) deps.push(...symbol.children);
-                if (deps.length > 0) {
-                    dependencies.set(symbol.name, deps);
+                if (imports.length > 0) {
+                    dependencies.set(source, imports);
                 }
             }
         });
@@ -336,49 +325,40 @@ export class ReactAnalyzer implements LanguageAnalyzer {
         let commentLines = 0;
 
         // Yorum satırlarını say
-        const lines = content.split('\n');
-        lines.forEach(line => {
-            if (line.trim().startsWith('//') || line.trim().startsWith('/*') || line.trim().startsWith('*')) {
+        content.split('\n').forEach(line => {
+            if (line.trim().startsWith('//') || line.trim().startsWith('/*')) {
                 commentLines++;
             }
         });
 
-        // Karmaşıklık hesapla
-        complexity += symbols.length; // Her React yapısı için +1
-
+        // Karmaşıklığı hesapla
         traverse(ast, {
-            // Koşullu render
             ConditionalExpression() { complexity++; },
             IfStatement() { complexity++; },
             SwitchStatement() { complexity++; },
-            
-            // Döngüsel render
-            CallExpression(path) {
-                if (t.isMemberExpression(path.node.callee) &&
-                    t.isIdentifier(path.node.callee.property, { name: 'map' })) {
-                    complexity++;
-                }
-            },
-
-            // Hook kullanımı
-            CallExpression(path) {
-                if (t.isIdentifier(path.node.callee) && 
-                    path.node.callee.name.startsWith('use')) {
-                    complexity++;
-                }
-            }
+            LogicalExpression() { complexity++; },
+            ForStatement() { complexity++; },
+            WhileStatement() { complexity++; },
+            DoWhileStatement() { complexity++; },
+            TryStatement() { complexity++; }
         });
+
+        // Maintainability Index hesapla
+        const maintainabilityIndex = this.calculateMaintainabilityIndex(
+            complexity,
+            linesOfCode,
+            commentLines
+        );
+
+        // Bağımlılıkları say
+        const dependencies = Array.from(this.analyzeDependencies(ast, symbols).keys()).length;
 
         return {
             complexity,
             linesOfCode,
             commentLines,
-            dependencies: Array.from(this.analyzeDependencies(ast, symbols).keys()).length,
-            maintainabilityIndex: this.calculateMaintainabilityIndex(
-                complexity,
-                linesOfCode,
-                commentLines
-            )
+            dependencies,
+            maintainabilityIndex
         };
     }
 
@@ -403,8 +383,8 @@ export class ReactAnalyzer implements LanguageAnalyzer {
 
     private createASTNode(ast: parser.ParseResult<t.File>): SemanticNode {
         return {
-            type: 'ReactModule',
-            name: ast.program.sourceFile || '',
+            type: 'Program',
+            name: 'Program',
             location: new vscode.Location(
                 vscode.Uri.file(''),
                 new vscode.Range(0, 0, 0, 0)

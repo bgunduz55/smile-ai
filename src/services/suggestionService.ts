@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
+import * as crypto from 'crypto';
 
 export interface SuggestionItem {
     id: string;
@@ -91,28 +92,36 @@ export class SuggestionService {
     }
 
 
-    public async addSuggestion(suggestion: Omit<SuggestionItem, 'id' | 'createdAt' | 'updatedAt'>): Promise<void> {
-        const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
-        if (!workspaceFolder) return;
+    public async addSuggestion(suggestion?: Omit<SuggestionItem, 'id' | 'createdAt' | 'updatedAt'>): Promise<void> {
+        const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+        if (!workspaceRoot) {
+            vscode.window.showErrorMessage('No workspace folder found');
+            return;
+        }
 
-        const workspaceRoot = workspaceFolder.uri.fsPath;
-        const items = this.suggestions.get(workspaceRoot) || [];
-
-        const newSuggestion: SuggestionItem = {
-            ...suggestion,
-            id: `suggestion-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-            createdAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString()
+        const defaultSuggestion: Omit<SuggestionItem, 'id' | 'createdAt' | 'updatedAt'> = suggestion || {
+            type: 'improvement',
+            title: 'New Suggestion',
+            description: 'Description',
+            priority: 'medium',
+            status: 'pending'
         };
 
-        items.push(newSuggestion);
-        this.suggestions.set(workspaceRoot, items);
+        const id = crypto.randomUUID();
+        const now = new Date().toISOString();
+        const newSuggestion: SuggestionItem = {
+            ...defaultSuggestion,
+            id,
+            createdAt: now,
+            updatedAt: now
+        };
+
+        const suggestions = this.suggestions.get(workspaceRoot) || [];
+        suggestions.push(newSuggestion);
+        this.suggestions.set(workspaceRoot, suggestions);
+
         await this.saveSuggestions(workspaceRoot);
         this.updateStatusBar();
-
-        // Show notification to user
-        vscode.window.showInformationMessage(`New suggestion added: ${suggestion.title}`);
-
     }
 
     public async completeSuggestion(id: string): Promise<void> {

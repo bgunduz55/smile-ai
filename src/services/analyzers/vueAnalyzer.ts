@@ -50,17 +50,15 @@ export class VueAnalyzer implements LanguageAnalyzer {
             const { descriptor } = parse(content);
             
             // Script analizi
-            const scriptSymbols = descriptor.script || descriptor.scriptSetup
-                ? this.analyzeScript(descriptor.script?.content || descriptor.scriptSetup?.content || '')
-                : [];
+            const scriptContent = descriptor.script?.content || descriptor.scriptSetup?.content || '';
+            const scriptSymbols = scriptContent ? await this.analyzeScript(scriptContent) : [];
             
             // Template analizi
-            const templateSymbols = descriptor.template
-                ? this.analyzeTemplate(descriptor.template.content)
-                : [];
+            const templateContent = descriptor.template?.content || '';
+            const templateSymbols = templateContent ? await this.analyzeTemplate(templateContent) : [];
             
             // Style analizi
-            const styleMetrics = descriptor.styles
+            const styleMetrics = descriptor.styles && descriptor.styles.length > 0
                 ? this.analyzeStyles(descriptor.styles)
                 : { linesOfCode: 0, commentLines: 0 };
 
@@ -68,13 +66,13 @@ export class VueAnalyzer implements LanguageAnalyzer {
             const symbols = [...scriptSymbols, ...templateSymbols];
             
             // Bağımlılıkları analiz et
-            const dependencies = this.analyzeDependencies(descriptor);
+            const dependencies = await this.analyzeDependencies(descriptor);
             
             // Kod metriklerini hesapla
-            const metrics = this.calculateMetrics(descriptor, symbols, styleMetrics);
+            const metrics = await this.calculateMetrics(descriptor, symbols, styleMetrics);
 
             return {
-                ast: this.createASTNode(descriptor),
+                ast: await this.createASTNode(descriptor),
                 symbols: this.createSymbolsMap(symbols),
                 dependencies: dependencies,
                 metrics: metrics
@@ -153,16 +151,20 @@ export class VueAnalyzer implements LanguageAnalyzer {
         let linesOfCode = 0;
         let commentLines = 0;
 
-        styles.forEach(style => {
-            const lines = style.content.split('\n');
-            linesOfCode += lines.length;
-            
-            lines.forEach(line => {
-                if (line.trim().startsWith('/*') || line.trim().startsWith('*') || line.trim().startsWith('//')) {
-                    commentLines++;
+        if (Array.isArray(styles)) {
+            styles.forEach(style => {
+                if (style && typeof style.content === 'string') {
+                    const lines = style.content.split('\n');
+                    linesOfCode += lines.length;
+                    
+                    lines.forEach(line => {
+                        if (line.trim().startsWith('/*') || line.trim().startsWith('*') || line.trim().startsWith('//')) {
+                            commentLines++;
+                        }
+                    });
                 }
             });
-        });
+        }
 
         return { linesOfCode, commentLines };
     }
@@ -361,29 +363,39 @@ export class VueAnalyzer implements LanguageAnalyzer {
     private analyzeDependencies(descriptor: SFCParseResult['descriptor']): Map<string, string[]> {
         const dependencies = new Map<string, string[]>();
         
-        // Script bağımlılıkları
-        if (descriptor.script || descriptor.scriptSetup) {
-            const content = descriptor.script?.content || descriptor.scriptSetup?.content || '';
-            const ast = parseScript(content, {
-                sourceType: 'module',
-                plugins: ['typescript', 'decorators-legacy']
-            });
+        try {
+            // Script bağımlılıkları
+            if (descriptor.script?.content || descriptor.scriptSetup?.content) {
+                const scriptContent = descriptor.script?.content || descriptor.scriptSetup?.content || '';
+                const ast = parseScript(scriptContent, {
+                    sourceType: 'module',
+                    plugins: ['typescript', 'decorators-legacy']
+                });
 
-            traverse(ast, {
-                ImportDeclaration(path) {
-                    const source = path.node.source.value;
-                    const imports = path.node.specifiers.map(specifier => {
-                        if (t.isImportDefaultSpecifier(specifier)) {
-                            return specifier.local.name;
-                        } else if (t.isImportSpecifier(specifier)) {
-                            return specifier.imported.name;
-                        }
-                        return '';
-                    }).filter(Boolean);
+                traverse(ast, {
+                    ImportDeclaration(path) {
+                        const source = path.node.source.value;
+                        const importedNames: string[] = [];
 
-                    dependencies.set(source, imports);
-                }
-            });
+                        path.node.specifiers.forEach(specifier => {
+                            if (t.isImportSpecifier(specifier)) {
+                                const imported = specifier.imported;
+                                if (t.isIdentifier(imported)) {
+                                    importedNames.push(imported.name);
+                                } else if (t.isStringLiteral(imported)) {
+                                    importedNames.push(imported.value);
+                                }
+                            } else if (t.isImportDefaultSpecifier(specifier) && specifier.local) {
+                                importedNames.push(specifier.local.name);
+                            }
+                        });
+
+                        dependencies.set(source, importedNames);
+                    }
+                });
+            }
+        } catch (error) {
+            console.error('Bağımlılık analiz hatası:', error);
         }
 
         return dependencies;

@@ -45,29 +45,29 @@ export class SvelteAnalyzer implements LanguageAnalyzer {
     private async analyzeSvelteContent(content: string, filePath: string): Promise<AnalysisResult> {
         try {
             // Svelte dosyasını parse et
-            const preprocessed = await preprocess(content, {
-                typescript: true,
-                scss: true
-            });
+            const preprocessed = await preprocess(content, [{
+                script: ({ content }) => ({ code: content }),
+                style: ({ content }) => ({ code: content })
+            }]);
 
             const parsed = parse(preprocessed.code);
             
             // Script analizi
-            const scriptSymbols = parsed.instance
-                ? this.analyzeScript(parsed.instance.content)
+            const scriptSymbols = parsed.instance?.content
+                ? await this.analyzeScript(String(parsed.instance.content))
                 : [];
             
             // Module script analizi
-            const moduleSymbols = parsed.module
-                ? this.analyzeModuleScript(parsed.module.content)
+            const moduleSymbols = parsed.module?.content
+                ? await this.analyzeScript(String(parsed.module.content))
                 : [];
             
             // Template analizi
             const templateSymbols = this.analyzeTemplate(parsed.html);
             
             // Style analizi
-            const styleMetrics = parsed.css
-                ? this.analyzeStyles(parsed.css.content)
+            const styleMetrics = parsed.css?.styles
+                ? this.analyzeStyles(String(parsed.css.styles))
                 : { linesOfCode: 0, commentLines: 0 };
 
             // Tüm sembolleri birleştir
@@ -91,7 +91,7 @@ export class SvelteAnalyzer implements LanguageAnalyzer {
         }
     }
 
-    private analyzeScript(content: string): SvelteSymbol[] {
+    private async analyzeScript(content: string): Promise<SvelteSymbol[]> {
         const symbols: SvelteSymbol[] = [];
         
         try {
@@ -285,9 +285,17 @@ export class SvelteAnalyzer implements LanguageAnalyzer {
     }
 
     private extractStoreName(node: t.CallExpression): string | undefined {
-        const parent = node.parent;
-        if (t.isVariableDeclarator(parent) && t.isIdentifier(parent.id)) {
-            return parent.id.name;
+        let parentNode: t.Node | null = null;
+        traverse(node, {
+            enter(path) {
+                if (path.parentPath) {
+                    parentNode = path.parentPath.node;
+                }
+            }
+        });
+        
+        if (parentNode && t.isVariableDeclarator(parentNode) && t.isIdentifier(parentNode.id)) {
+            return parentNode.id.name;
         }
         return undefined;
     }
@@ -322,7 +330,7 @@ export class SvelteAnalyzer implements LanguageAnalyzer {
         
         // Script ve module script bağımlılıkları
         [parsed.instance, parsed.module].forEach(script => {
-            if (script) {
+            if (script?.content) {
                 const ast = parseScript(script.content, {
                     sourceType: 'module',
                     plugins: ['typescript', 'decorators-legacy']
@@ -335,7 +343,8 @@ export class SvelteAnalyzer implements LanguageAnalyzer {
                             if (t.isImportDefaultSpecifier(specifier)) {
                                 return specifier.local.name;
                             } else if (t.isImportSpecifier(specifier)) {
-                                return specifier.imported.name;
+                                const imported = specifier.imported;
+                                return t.isIdentifier(imported) ? imported.name : imported.value;
                             }
                             return '';
                         }).filter(Boolean);

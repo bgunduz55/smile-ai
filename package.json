@@ -1,7 +1,7 @@
 {
   "name": "smile-ai",
   "displayName": "Smile AI",
-  "description": "VS Code için yerel AI destekli geliştirici asistanı",
+  "description": "A local AI developer assistant for VS Code",
   "version": "0.0.1",
   "engines": {
     "vscode": "^1.85.0"
@@ -13,6 +13,50 @@
     "onStartupFinished"
   ],
   "main": "./dist/extension.js",
+  "dependencies": {
+    "@angular/compiler": "^17.1.0",
+    "@angular/compiler-cli": "^17.1.0",
+    "@anthropic-ai/sdk": "^0.36.3",
+    "@babel/parser": "^7.23.0",
+    "@babel/traverse": "^7.23.0",
+    "@babel/types": "^7.23.0",
+    "@types/mocha": "^10.0.10",
+    "@vscode/test-electron": "^2.4.1",
+    "@vue/compiler-dom": "^3.4.0",
+    "@vue/compiler-sfc": "^3.4.0",
+    "axios": "^1.7.9",
+    "chokidar": "^3.5.3",
+    "coffeescript": "^2.7.0",
+    "dustjs-linkedin": "^3.0.1",
+    "ejs": "^3.1.10",
+    "handlebars": "^4.7.8",
+    "lodash": "^4.17.21",
+    "mocha": "^10.2.0",
+    "mustache": "^4.2.0",
+    "node-llama-cpp": "^3.5.0",
+    "nunjucks": "^3.2.4",
+    "openai": "^4.83.0",
+    "pug": "^3.0.3",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "sqlite3": "^5.1.0",
+    "svelte": "^4.2.0",
+    "twig": "^1.17.1",
+    "typescript": "^5.3.0",
+    "underscore": "^1.13.7",
+    "velocityjs": "^2.0.6",
+    "vscode-languageclient": "^8.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^18.0.0",
+    "@types/vscode": "^1.85.0",
+    "@typescript-eslint/eslint-plugin": "^6.21.0",
+    "@typescript-eslint/parser": "^6.21.0",
+    "eslint": "^8.56.0",
+    "ts-loader": "^9.5.0",
+    "webpack": "^5.97.0",
+    "webpack-cli": "^5.1.0"
+  },
   "contributes": {
     "viewsContainers": {
       "activitybar": [
@@ -165,7 +209,11 @@
         "smile-ai.gpu.device": {
           "type": "string",
           "default": "cuda",
-          "enum": ["cuda", "metal", "directml"],
+          "enum": [
+            "cuda",
+            "metal",
+            "directml"
+          ],
           "description": "Kullanılacak GPU cihazı"
         },
         "smile-ai.performance.batchSize": {
@@ -250,50 +298,6 @@
               "type": "number",
               "default": 4,
               "description": "Kullanılacak CPU thread sayısı"
-            },
-            "batchSize": {
-              "type": "number",
-              "default": 512,
-              "description": "İşlem batch boyutu"
-            },
-            "stopTokens": {
-              "type": "array",
-              "items": {
-                "type": "string"
-              },
-              "default": ["</s>", "<s>"],
-              "description": "Yanıt üretimini durduracak token'lar"
-            },
-            "repeatPenalty": {
-              "type": "number",
-              "default": 1.1,
-              "minimum": 0,
-              "description": "Tekrar cezası katsayısı"
-            },
-            "repeatLastN": {
-              "type": "number",
-              "default": 64,
-              "description": "Tekrar kontrolü için bakılacak son token sayısı"
-            },
-            "seed": {
-              "type": "number",
-              "description": "Rastgele sayı üreteci için başlangıç değeri"
-            },
-            "mirostat": {
-              "type": "number",
-              "enum": [0, 1, 2],
-              "default": 0,
-              "description": "Mirostat örnekleme modu"
-            },
-            "mirostatTau": {
-              "type": "number",
-              "default": 5.0,
-              "description": "Mirostat hedef entropi"
-            },
-            "mirostatEta": {
-              "type": "number",
-              "default": 0.1,
-              "description": "Mirostat öğrenme oranı"
             }
           }
         },
@@ -335,7 +339,10 @@
               "items": {
                 "type": "string"
               },
-              "default": ["</s>", "<s>"],
+              "default": [
+                "</s>",
+                "<s>"
+              ],
               "description": "Yanıt üretimini durduracak token'lar"
             },
             "systemPrompt": {
@@ -412,7 +419,10 @@
               "items": {
                 "type": "string"
               },
-              "default": ["</s>", "<s>"],
+              "default": [
+                "</s>",
+                "<s>"
+              ],
               "description": "Yanıt üretimini durduracak token'lar"
             },
             "systemPrompt": {
@@ -509,7 +519,10 @@
               "items": {
                 "type": "string"
               },
-              "default": ["</s>", "<s>"],
+              "default": [
+                "</s>",
+                "<s>"
+              ],
               "description": "Yanıt üretimini durduracak token'lar"
             },
             "systemPrompt": {
@@ -581,7 +594,10 @@
               "items": {
                 "type": "string"
               },
-              "default": ["</s>", "<s>"],
+              "default": [
+                "</s>",
+                "<s>"
+              ],
               "description": "Yanıt üretimini durduracak token'lar"
             },
             "systemPrompt": {
@@ -601,8 +617,8 @@
             "repetitionPenalty": {
               "type": "number",
               "default": 1.1,
-              "minimum": 1.0,
-              "maximum": 2.0,
+              "minimum": 1,
+              "maximum": 2,
               "description": "Tekrar cezası katsayısı"
             },
             "topK": {
@@ -627,7 +643,16 @@
               "items": {
                 "type": "string"
               },
-              "default": ["code-style", "naming", "testing", "documentation", "git", "architecture", "security", "performance"],
+              "default": [
+                "code-style",
+                "naming",
+                "testing",
+                "documentation",
+                "git",
+                "architecture",
+                "security",
+                "performance"
+              ],
               "description": "Aktif kural setleri"
             },
             "customRules": {
@@ -680,7 +705,10 @@
             },
             "quoteStyle": {
               "type": "string",
-              "enum": ["single", "double"],
+              "enum": [
+                "single",
+                "double"
+              ],
               "default": "single",
               "description": "Tırnak işareti stili"
             },
@@ -697,31 +725,52 @@
           "properties": {
             "variables": {
               "type": "string",
-              "enum": ["camelCase", "snake_case", "PascalCase"],
+              "enum": [
+                "camelCase",
+                "snake_case",
+                "PascalCase"
+              ],
               "default": "camelCase",
               "description": "Değişken isimlendirme stili"
             },
             "functions": {
               "type": "string",
-              "enum": ["camelCase", "snake_case", "PascalCase"],
+              "enum": [
+                "camelCase",
+                "snake_case",
+                "PascalCase"
+              ],
               "default": "camelCase",
               "description": "Fonksiyon isimlendirme stili"
             },
             "classes": {
               "type": "string",
-              "enum": ["camelCase", "snake_case", "PascalCase"],
+              "enum": [
+                "camelCase",
+                "snake_case",
+                "PascalCase"
+              ],
               "default": "PascalCase",
               "description": "Sınıf isimlendirme stili"
             },
             "interfaces": {
               "type": "string",
-              "enum": ["camelCase", "snake_case", "PascalCase"],
+              "enum": [
+                "camelCase",
+                "snake_case",
+                "PascalCase"
+              ],
               "default": "PascalCase",
               "description": "Interface isimlendirme stili"
             },
             "constants": {
               "type": "string",
-              "enum": ["camelCase", "snake_case", "PascalCase", "UPPER_CASE"],
+              "enum": [
+                "camelCase",
+                "snake_case",
+                "PascalCase",
+                "UPPER_CASE"
+              ],
               "default": "UPPER_CASE",
               "description": "Sabit isimlendirme stili"
             }
@@ -774,7 +823,12 @@
             },
             "style": {
               "type": "string",
-              "enum": ["JSDoc", "TSDoc", "docstring", "custom"],
+              "enum": [
+                "JSDoc",
+                "TSDoc",
+                "docstring",
+                "custom"
+              ],
               "default": "JSDoc",
               "description": "Dokümantasyon stili"
             },
@@ -803,76 +857,6 @@
     "pretest": "pnpm run compile-tests && pnpm run compile && pnpm run lint",
     "lint": "eslint src --ext ts",
     "test": "vscode-test"
-  },
-  "devDependencies": {
-    "@types/chokidar": "^2.1.7",
-    "@types/glob": "^8.1.0",
-    "@types/minimatch": "^5.1.2",
-    "@types/mocha": "^10.0.10",
-    "@types/node": "18.x",
-    "@types/sqlite3": "^3.1.11",
-    "@types/vscode": "^1.85.0",
-    "@typescript-eslint/eslint-plugin": "^6.15.0",
-    "@typescript-eslint/parser": "^6.15.0",
-    "@vscode/test-cli": "^0.0.4",
-    "@vscode/test-electron": "^2.3.8",
-    "eslint": "^8.56.0",
-    "ts-loader": "^9.5.1",
-    "typescript": "^5.3.3",
-    "webpack": "^5.89.0",
-    "webpack-cli": "^5.1.4"
-  },
-  "dependencies": {
-    "@anthropic-ai/sdk": "^0.36.3",
-    "axios": "^1.7.9",
-    "chokidar": "^4.0.3",
-    "glob": "^11.0.1",
-    "lru-cache": "^7.18.3",
-    "minimatch": "^10.0.1",
-    "node-llama-cpp": "^2.8.3",
-    "openai": "^4.83.0",
-    "sqlite3": "^5.1.7",
-    "javaparser": "^3.18.0",
-    "json": "^20231013",
-    "dotnet-sdk": "^6.0.0",
-    "microsoft.codeanalysis.csharp": "^4.8.0",
-    "microsoft.codeanalysis.csharp.workspaces": "^4.8.0",
-    "python-shell": "^5.0.0",
-    "clang": "^7.0.0",
-    "go": "^3.0.1",
-    "rust-analyzer": "^0.4.0",
-    "php-parser": "^3.1.5",
-    "ruby-parser": "^3.0.1",
-    "@angular/compiler": "^17.0.0",
-    "@angular/core": "^17.0.0",
-    "@angular/compiler-cli": "^17.0.0",
-    "typescript": "~5.3.0",
-    "@babel/core": "^7.23.0",
-    "@babel/parser": "^7.23.0",
-    "@babel/traverse": "^7.23.0",
-    "@babel/types": "^7.23.0",
-    "@types/react": "^18.2.0",
-    "@types/react-dom": "^18.2.0",
-    "react": "^18.2.0",
-    "react-dom": "^18.2.0",
-    "@vue/compiler-sfc": "^3.4.0",
-    "@vue/compiler-dom": "^3.4.0",
-    "@vue/compiler-core": "^3.4.0",
-    "svelte": "^4.2.0",
-    "@sveltejs/vite-plugin-svelte": "^3.0.0",
-    "svelte-preprocess": "^5.1.0",
-    "@types/express": "^4.17.21",
-    "express": "^4.18.2",
-    "@types/express-session": "^1.17.10",
-    "express-session": "^1.17.3",
-    "@types/body-parser": "^1.19.5",
-    "body-parser": "^1.20.2",
-    "@nestjs/common": "^10.0.0",
-    "@nestjs/core": "^10.0.0",
-    "@nestjs/platform-express": "^10.0.0",
-    "@nestjs/swagger": "^7.0.0",
-    "@nestjs/typeorm": "^10.0.0",
-    "reflect-metadata": "^0.2.0"
   },
   "pnpm": {
     "ignoredBuiltDependencies": [

@@ -73,9 +73,11 @@ export class NestAnalyzer implements LanguageAnalyzer {
 
         const visit = (node: ts.Node) => {
             if (ts.isClassDeclaration(node)) {
-                const decorators = node.decorators?.map(d => 
-                    (d.expression as ts.CallExpression).expression.getText()
-                ) || [];
+                const decorators = ts.canHaveDecorators(node) ? 
+                    ts.getDecorators(node)?.map(d => 
+                        ts.isCallExpression(d.expression) ? 
+                            d.expression.expression.getText() : ''
+                    ) || [] : [];
 
                 if (decorators.includes('Module')) {
                     symbols.push(this.createModuleSymbol(node));
@@ -120,13 +122,18 @@ export class NestAnalyzer implements LanguageAnalyzer {
                expression.expression.getText().startsWith('createParamDecorator');
     }
 
+    private getDecoratorTexts(node: ts.ClassDeclaration): string[] {
+        if (!ts.canHaveDecorators(node)) return [];
+        return ts.getDecorators(node)?.map(d => d.getText()) || [];
+    }
+
     private createModuleSymbol(node: ts.ClassDeclaration): NestSymbol {
         const metadata = this.extractDecoratorMetadata(node, 'Module');
         return {
             name: node.name?.text || 'AnonymousModule',
             type: 'module',
             dependencies: metadata?.imports?.map((imp: any) => imp.name) || [],
-            decorators: node.decorators?.map(d => d.getText()) || [],
+            decorators: this.getDecoratorTexts(node),
             metadata,
             documentation: this.getNodeDocumentation(node),
             location: this.getNodeLocation(node)
@@ -141,7 +148,7 @@ export class NestAnalyzer implements LanguageAnalyzer {
             type: 'controller',
             path: metadata?.path,
             methods,
-            decorators: node.decorators?.map(d => d.getText()) || [],
+            decorators: this.getDecoratorTexts(node),
             metadata,
             documentation: this.getNodeDocumentation(node),
             location: this.getNodeLocation(node)
@@ -153,7 +160,7 @@ export class NestAnalyzer implements LanguageAnalyzer {
             name: node.name?.text || 'AnonymousService',
             type: 'service',
             dependencies: this.extractServiceDependencies(node),
-            decorators: node.decorators?.map(d => d.getText()) || [],
+            decorators: this.getDecoratorTexts(node),
             documentation: this.getNodeDocumentation(node),
             location: this.getNodeLocation(node)
         };
@@ -163,7 +170,7 @@ export class NestAnalyzer implements LanguageAnalyzer {
         return {
             name: node.name?.text || 'AnonymousGuard',
             type: 'guard',
-            decorators: node.decorators?.map(d => d.getText()) || [],
+            decorators: this.getDecoratorTexts(node),
             documentation: this.getNodeDocumentation(node),
             location: this.getNodeLocation(node)
         };
@@ -173,7 +180,7 @@ export class NestAnalyzer implements LanguageAnalyzer {
         return {
             name: node.name?.text || 'AnonymousPipe',
             type: 'pipe',
-            decorators: node.decorators?.map(d => d.getText()) || [],
+            decorators: this.getDecoratorTexts(node),
             documentation: this.getNodeDocumentation(node),
             location: this.getNodeLocation(node)
         };
@@ -183,7 +190,7 @@ export class NestAnalyzer implements LanguageAnalyzer {
         return {
             name: node.name?.text || 'AnonymousFilter',
             type: 'filter',
-            decorators: node.decorators?.map(d => d.getText()) || [],
+            decorators: this.getDecoratorTexts(node),
             documentation: this.getNodeDocumentation(node),
             location: this.getNodeLocation(node)
         };
@@ -193,7 +200,7 @@ export class NestAnalyzer implements LanguageAnalyzer {
         return {
             name: node.name?.text || 'AnonymousInterceptor',
             type: 'interceptor',
-            decorators: node.decorators?.map(d => d.getText()) || [],
+            decorators: this.getDecoratorTexts(node),
             documentation: this.getNodeDocumentation(node),
             location: this.getNodeLocation(node)
         };
@@ -209,13 +216,18 @@ export class NestAnalyzer implements LanguageAnalyzer {
     }
 
     private extractDecoratorMetadata(node: ts.ClassDeclaration, decoratorName: string): any {
-        const decorator = node.decorators?.find(d => 
-            (d.expression as ts.CallExpression).expression.getText() === decoratorName
+        if (!ts.canHaveDecorators(node)) return {};
+
+        const decorator = ts.getDecorators(node)?.find(d => 
+            ts.isCallExpression(d.expression) &&
+            d.expression.expression.getText() === decoratorName
         );
 
         if (!decorator) return {};
 
-        const expression = decorator.expression as ts.CallExpression;
+        const expression = decorator.expression;
+        if (!ts.isCallExpression(expression)) return {};
+
         const argument = expression.arguments[0];
 
         if (ts.isObjectLiteralExpression(argument)) {
@@ -251,39 +263,27 @@ export class NestAnalyzer implements LanguageAnalyzer {
     }
 
     private extractControllerMethods(node: ts.ClassDeclaration): string[] {
-        const methods: string[] = [];
-
-        node.members.forEach(member => {
-            if (ts.isMethodDeclaration(member) && member.decorators) {
-                const httpMethods = ['Get', 'Post', 'Put', 'Delete', 'Patch', 'Options', 'Head'];
-                const hasHttpDecorator = member.decorators.some(d => 
-                    httpMethods.includes((d.expression as ts.CallExpression).expression.getText())
-                );
-
-                if (hasHttpDecorator) {
-                    methods.push(member.name.getText());
-                }
-            }
-        });
-
-        return methods;
+        return node.members
+            .filter(member => ts.isMethodDeclaration(member))
+            .map(method => (method as ts.MethodDeclaration).name.getText());
     }
 
     private extractServiceDependencies(node: ts.ClassDeclaration): string[] {
-        const dependencies: string[] = [];
+        const constructor = node.members.find(member => 
+            ts.isConstructorDeclaration(member)
+        ) as ts.ConstructorDeclaration | undefined;
 
-        // Constructor enjeksiyonlarını kontrol et
-        node.members.forEach(member => {
-            if (ts.isConstructorDeclaration(member)) {
-                member.parameters.forEach(param => {
-                    if (param.type && ts.isTypeReferenceNode(param.type)) {
-                        dependencies.push(param.type.typeName.getText());
-                    }
-                });
-            }
-        });
+        if (!constructor) return [];
 
-        return dependencies;
+        return constructor.parameters
+            .filter(param => ts.isParameter(param))
+            .map(param => {
+                if (ts.isIdentifier(param.name)) {
+                    return param.name.text;
+                }
+                return '';
+            })
+            .filter(name => name !== '');
     }
 
     private analyzeDependencies(sourceFile: ts.SourceFile, symbols: NestSymbol[]): Map<string, string[]> {

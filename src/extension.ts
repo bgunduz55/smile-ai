@@ -19,7 +19,7 @@ import { RulesService } from './services/rulesService';
 import { RulesViewProvider } from './webview/rulesViewProvider';
 
 let completionServiceInstance: CompletionService;
-let agentService: AgentService;
+let agentServiceInstance: AgentService;
 
 // Command identifiers
 export const COMMANDS = {
@@ -40,8 +40,17 @@ export const COMMANDS = {
 export async function activate(context: vscode.ExtensionContext) {
 	console.log('Smile AI Extension activation started');
 
-
 	try {
+		// Initialize services
+		agentServiceInstance = AgentService.getInstance();
+		await agentServiceInstance.initialize();
+
+		// Register views
+		const chatViewProvider = new ChatViewProvider(context.extensionUri);
+		const composerViewProvider = new ComposerViewProvider(context.extensionUri);
+		const suggestionViewProvider = new SuggestionViewProvider(context.extensionUri);
+		const rulesViewProvider = new RulesViewProvider(context.extensionUri);
+
 		// Model konfigürasyonunu yükle
 		const config: ModelConfig = {
 			modelPath: context.asAbsolutePath('models/llama-2-7b-chat.gguf'),
@@ -68,14 +77,6 @@ export async function activate(context: vscode.ExtensionContext) {
 			}
 		};
 
-		// Agent servisini başlat
-		agentService = new AgentService(config);
-		await agentService.initialize();
-
-		// View providers
-		const chatViewProvider = new ChatViewProvider(context.extensionUri);
-		const composerViewProvider = new ComposerViewProvider(context.extensionUri);
-
 		// Initialize services
 		completionServiceInstance = new CompletionService();
 		
@@ -88,8 +89,8 @@ export async function activate(context: vscode.ExtensionContext) {
 		context.subscriptions.push(
 			vscode.window.registerWebviewViewProvider('smile-ai.chatView', chatViewProvider),
 			vscode.window.registerWebviewViewProvider('smile-ai.composerView', composerViewProvider),
-			vscode.window.registerWebviewViewProvider(SuggestionViewProvider.viewType, new SuggestionViewProvider(context.extensionUri)),
-			vscode.window.registerWebviewViewProvider(RulesViewProvider.viewType, new RulesViewProvider(context.extensionUri))
+			vscode.window.registerWebviewViewProvider(SuggestionViewProvider.viewType, suggestionViewProvider),
+			vscode.window.registerWebviewViewProvider(RulesViewProvider.viewType, rulesViewProvider)
 		);
 
 		// Register commands
@@ -401,7 +402,7 @@ export async function activate(context: vscode.ExtensionContext) {
 
 		// Add services to context
 		context.subscriptions.push(completionServiceInstance);
-		context.subscriptions.push(agentService);
+		context.subscriptions.push(agentServiceInstance);
 
 		// Servisleri başlat
 		context.subscriptions.push(
@@ -421,6 +422,13 @@ export async function activate(context: vscode.ExtensionContext) {
 		// Show success message
 		vscode.window.showInformationMessage('Smile AI successfully activated!');
 
+		// Dispose services on deactivation
+		context.subscriptions.push({
+			dispose: () => {
+				agentServiceInstance.dispose();
+			}
+		});
+
 	} catch (error) {
 		console.error('Smile AI activation error:', error);
 		vscode.window.showErrorMessage('Smile AI activation failed: ' + 
@@ -436,7 +444,7 @@ export function deactivate() {
 	if (completionServiceInstance) {
 		completionServiceInstance.dispose();
 	}
-	if (agentService) {
-		agentService.dispose();
+	if (agentServiceInstance) {
+		agentServiceInstance.dispose();
 	}
 }
