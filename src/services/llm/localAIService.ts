@@ -21,6 +21,27 @@ interface LocalAIStats {
     duration: number;
 }
 
+interface LocalAIConfig {
+    endpoint: string;
+    model: string;
+    temperature: number;
+    maxTokens: number;
+}
+
+interface LocalAIResponse {
+    choices: Array<{
+        message: {
+            content: string;
+        };
+        finish_reason: string;
+    }>;
+    usage: {
+        prompt_tokens: number;
+        completion_tokens: number;
+        total_tokens: number;
+    };
+}
+
 interface PerformanceMetrics {
     averageResponseTime: number;
     tokensPerSecond: number;
@@ -55,6 +76,7 @@ export class LocalAIService implements LLMService {
     private static readonly MAX_RETRIES = 5;
     private static readonly RETRY_DELAY = 1000;
 
+    private config: LocalAIConfig;
     private endpoint: string;
     private currentModel: string;
     private models: LocalAIModel[] = [];
@@ -72,13 +94,23 @@ export class LocalAIService implements LLMService {
     private disposables: vscode.Disposable[] = [];
 
     constructor() {
-        const config = vscode.workspace.getConfiguration('smile-ai.localai');
-        this.endpoint = config.get('endpoint') || `http://localhost:${LocalAIService.DEFAULT_PORT}/v1`;
-        this.currentModel = config.get('defaultModel') || 'default';
+        this.config = this.loadConfig();
+        this.endpoint = this.config.endpoint;
+        this.currentModel = this.config.model;
         this.statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right);
         this.dockerService = DockerService.getInstance();
         this.updateStatusBar();
         this.registerEventHandlers();
+    }
+
+    private loadConfig(): LocalAIConfig {
+        const config = vscode.workspace.getConfiguration('smile-ai.localai');
+        return {
+            endpoint: config.get<string>('endpoint') || 'http://localhost:8080',
+            model: config.get<string>('model') || 'gpt-3.5-turbo',
+            temperature: config.get<number>('temperature') || 0.7,
+            maxTokens: config.get<number>('maxTokens') || 2048
+        };
     }
 
     private updateStatusBar(): void {
@@ -107,8 +139,8 @@ export class LocalAIService implements LLMService {
 
     private async handleConfigurationChange(): Promise<void> {
         const config = vscode.workspace.getConfiguration('smile-ai.localai');
-        const newEndpoint = config.get('endpoint') || `http://localhost:${LocalAIService.DEFAULT_PORT}/v1`;
-        const newModel = config.get('defaultModel') || 'default';
+        const newEndpoint = config.get<string>('endpoint') || 'http://localhost:8080';
+        const newModel = config.get<string>('model') || 'gpt-3.5-turbo';
 
         if (this.endpoint !== newEndpoint || this.currentModel !== newModel) {
             this.endpoint = newEndpoint;
@@ -119,10 +151,10 @@ export class LocalAIService implements LLMService {
 
     public async initialize(): Promise<void> {
         try {
-            await this.ensureDockerContainer();
-            await this.waitForService();
-            await this.loadModelInfo();
-            this.startStatsMonitoring();
+            const response = await fetch(this.endpoint + '/health');
+            if (!response.ok) {
+                throw new Error('LocalAI service is not available');
+            }
             this.isInitialized = true;
             this.updateStatusBar();
         } catch (error) {
@@ -244,31 +276,33 @@ export class LocalAIService implements LLMService {
         const startTime = Date.now();
 
         try {
-            const prompt = this.buildPrompt(task);
-            const config = vscode.workspace.getConfiguration('smile-ai.localai');
-            
-            const response = await axios.post(`${this.endpoint}/chat/completions`, {
-                model: this.currentModel,
-                messages: [
-                    {
-                        role: 'system',
-                        content: config.get('systemPrompt') || 'You are a helpful AI assistant specialized in software development.'
-                    },
-                    {
-                        role: 'user',
-                        content: prompt
-                    }
-                ],
-                temperature: config.get('temperature') ?? 0.7,
-                top_p: config.get('topP') ?? 0.9,
-                max_tokens: config.get('maxTokens') ?? 2048,
-                stop: config.get('stopTokens') ?? ['</s>', '<s>']
+            const response = await fetch(this.endpoint + '/v1/chat/completions', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    model: this.currentModel,
+                    messages: [
+                        { role: 'system', content: 'You are a helpful AI assistant.' },
+                        { role: 'user', content: task.input }
+                    ],
+                    temperature: this.config.temperature,
+                    max_tokens: this.config.maxTokens
+                })
             });
 
+            if (!response.ok) {
+                throw new Error(`API request failed: ${response.statusText}`);
+            }
+
+            const result = await response.json();
+            const data = this.validateResponse(result);
+
             const stats: LocalAIStats = {
-                promptTokens: response.data.usage?.prompt_tokens || 0,
-                completionTokens: response.data.usage?.completion_tokens || 0,
-                totalTokens: response.data.usage?.total_tokens || 0,
+                promptTokens: data.usage?.prompt_tokens || 0,
+                completionTokens: data.usage?.completion_tokens || 0,
+                totalTokens: data.usage?.total_tokens || 0,
                 duration: Date.now() - startTime
             };
 
@@ -296,7 +330,8 @@ export class LocalAIService implements LLMService {
 
             return {
                 success: true,
-                output: response.data.choices[0]?.message?.content || '',
+                output: data.choices[0].message.content,
+                finishReason: data.choices[0].finish_reason,
                 metadata
             };
         } catch (error) {
@@ -312,6 +347,31 @@ export class LocalAIService implements LLMService {
                 }
             };
         }
+    }
+
+    private validateResponse(response: unknown): {
+        choices: Array<{
+            message: { content: string };
+            finish_reason: string;
+        }>;
+        usage: {
+            prompt_tokens: number;
+            completion_tokens: number;
+            total_tokens: number;
+        };
+    } {
+        if (
+            typeof response === 'object' && 
+            response !== null &&
+            'choices' in response &&
+            Array.isArray((response as any).choices) &&
+            (response as any).choices.length > 0 &&
+            typeof (response as any).choices[0].message?.content === 'string' &&
+            typeof (response as any).choices[0].finish_reason === 'string'
+        ) {
+            return response as any;
+        }
+        throw new Error('Invalid response format from the model');
     }
 
     private updatePerformanceMetrics(stats: LocalAIStats): void {
@@ -372,7 +432,7 @@ export class LocalAIService implements LLMService {
         model.lastUsed = new Date();
         
         await vscode.workspace.getConfiguration('smile-ai.localai')
-            .update('defaultModel', modelId, true);
+            .update('model', modelId, true);
         
         this.updateStatusBar();
     }

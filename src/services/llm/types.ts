@@ -52,19 +52,9 @@ export interface TaskResult {
     success: boolean;
     output: string;
     error?: string;
+    finishReason?: string;
     metadata?: {
-        tokensUsed: number;
-        executionTime: number;
-        modelName: string;
-        memoryUsage?: {
-            heapUsed: number;
-            heapTotal: number;
-            external: number;
-        };
-        gpuUsage?: {
-            memoryUsed: number;
-            utilization: number;
-        };
+        [key: string]: any;
     };
 }
 
