@@ -1,71 +1,62 @@
-# smile-ai README
+# Smile AI - VS Code Eklentisi
 
-This is the README for your extension "smile-ai". After writing up a brief description, we recommend including the following sections.
+Smile AI, VS Code için geliştirilmiş bir yapay zeka destekli geliştirici asistanıdır. Yerel AI modellerini kullanarak kod analizi, tamamlama, düzeltme ve geliştirme önerileri sunar.
 
-## Features
+## Özellikler
 
-Describe specific features of your extension including screenshots of your extension in action. Image paths are relative to this README file.
+- 💬 AI Sohbet: Kod ve geliştirme ile ilgili sorularınızı yanıtlar
+- ✨ Kod Tamamlama: Akıllı kod önerileri sunar
+- 🔍 Kod Analizi: Kodunuzu analiz eder ve iyileştirme önerileri sunar
+- 📝 Dokümantasyon: Kod için otomatik dokümantasyon oluşturur
+- 🧪 Test Üretimi: Birim testleri oluşturur
+- 🔄 Kod Düzenleme: Kodunuzu daha iyi hale getirir
+- 🐛 Hata Düzeltme: Hataları tespit eder ve çözüm önerir
 
-For example if there is an image subfolder under your extension project workspace:
+## Gereksinimler
 
-\!\[feature X\]\(images/feature-x.png\)
+- VS Code 1.85.0 veya üzeri
+- Node.js 18.0.0 veya üzeri
+- LocalAI, Ollama veya LM Studio gibi yerel bir AI servisi
 
-> Tip: Many popular extensions utilize animations. This is an excellent way to show off your extension! We recommend short, focused animations that are easy to follow.
+## Kurulum
 
-## Requirements
+1. VS Code'u açın
+2. Extensions sekmesine gidin
+3. "Smile AI" araması yapın
+4. Install butonuna tıklayın
 
-If you have any requirements or dependencies, add a section describing those and how to install and configure them.
+## Kullanım
 
-## Extension Settings
+1. Command Palette'i açın (Ctrl+Shift+P / Cmd+Shift+P)
+2. "Smile AI" komutlarından birini seçin:
+   - Chat View'ı Göster
+   - Composer View'ı Göster
+   - Kod Tamamlama
+   - Kod Analizi
+   - Kod Üret
+   - Dokümantasyon Üret
+   - Test Üret
+   - Kodu Yeniden Düzenle
+   - Hata Düzelt
 
-Include if your extension adds any VS Code settings through the `contributes.configuration` extension point.
+## Ayarlar
 
-For example:
+Eklenti ayarlarını VS Code Settings'den özelleştirebilirsiniz:
 
-This extension contributes the following settings:
+- AI Sağlayıcı Seçimi (LocalAI, Ollama, LM Studio vb.)
+- Model Yapılandırması
+- GPU Kullanımı
+- Performans Ayarları
+- Önbellek Yapılandırması
 
-* `myExtension.enable`: Enable/disable this extension.
-* `myExtension.thing`: Set to `blah` to do something.
+## Katkıda Bulunma
 
-## Known Issues
+1. Bu repoyu fork edin
+2. Feature branch oluşturun (`git checkout -b feature/amazing-feature`)
+3. Değişikliklerinizi commit edin (`git commit -m 'Add amazing feature'`)
+4. Branch'inizi push edin (`git push origin feature/amazing-feature`)
+5. Pull Request oluşturun
 
-Calling out known issues can help limit users opening duplicate issues against your extension.
+## Lisans
 
-## Release Notes
-
-Users appreciate release notes as you update your extension.
-
-### 1.0.0
-
-Initial release of ...
-
-### 1.0.1
-
-Fixed issue #.
-
-### 1.1.0
-
-Added features X, Y, and Z.
-
----
-
-## Following extension guidelines
-
-Ensure that you've read through the extensions guidelines and follow the best practices for creating your extension.
-
-* [Extension Guidelines](https://code.visualstudio.com/api/references/extension-guidelines)
-
-## Working with Markdown
-
-You can author your README using Visual Studio Code. Here are some useful editor keyboard shortcuts:
-
-* Split the editor (`Cmd+\` on macOS or `Ctrl+\` on Windows and Linux).
-* Toggle preview (`Shift+Cmd+V` on macOS or `Shift+Ctrl+V` on Windows and Linux).
-* Press `Ctrl+Space` (Windows, Linux, macOS) to see a list of Markdown snippets.
-
-## For more information
-
-* [Visual Studio Code's Markdown Support](http://code.visualstudio.com/docs/languages/markdown)
-* [Markdown Syntax Reference](https://help.github.com/articles/markdown-basics/)
-
-**Enjoy!**
+MIT Lisansı altında dağıtılmaktadır. Daha fazla bilgi için `LICENSE` dosyasına bakın.
