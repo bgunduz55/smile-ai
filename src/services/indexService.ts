@@ -14,18 +14,35 @@ interface IndexedFile {
     lastModified: number;
 }
 
+interface SmileIgnoreConfig {
+    excludePatterns: string[];
+    includePatterns: string[];
+}
+
 export class IndexService {
     private static instance: IndexService;
     private db: sqlite3.Database;
     private watcher: chokidar.FSWatcher | null = null;
     private indexingPromise: Promise<void> | null = null;
-    private excludePatterns: string[] = [
+    private defaultExcludePatterns: string[] = [
         '**/node_modules/**',
         '**/dist/**',
         '**/build/**',
         '**/.git/**',
-        '**/out/**'
+        '**/out/**',
+        '**/.DS_Store',
+        '**/thumbs.db',
+        '**/*.min.js',
+        '**/*.min.css',
+        '**/vendor/**',
+        '**/coverage/**',
+        '**/tmp/**',
+        '**/temp/**'
     ];
+    private ignoreConfig: SmileIgnoreConfig = {
+        excludePatterns: [...this.defaultExcludePatterns],
+        includePatterns: []
+    };
     private run: (sql: string, params?: any) => Promise<void>;
     private get: (sql: string, params?: any) => Promise<any>;
     private all: (sql: string, params?: any) => Promise<any[]>;
@@ -56,11 +73,94 @@ export class IndexService {
         `);
     }
 
+    private async loadSmileIgnore(workspaceRoot: string): Promise<void> {
+        const smileIgnorePath = path.join(workspaceRoot, '.smileignore');
+        
+        try {
+            if (fs.existsSync(smileIgnorePath)) {
+                const content = fs.readFileSync(smileIgnorePath, 'utf-8');
+                const lines = content.split('\n')
+                    .map(line => line.trim())
+                    .filter(line => line && !line.startsWith('#'));
+
+                this.ignoreConfig = {
+                    excludePatterns: [...this.defaultExcludePatterns],
+                    includePatterns: []
+                };
+
+                lines.forEach(line => {
+                    if (line.startsWith('!')) {
+                        // Include pattern (override exclude)
+                        this.ignoreConfig.includePatterns.push(line.slice(1));
+                    } else {
+                        // Exclude pattern
+                        this.ignoreConfig.excludePatterns.push(line);
+                    }
+                });
+
+                vscode.window.showInformationMessage('.smileignore dosyası yüklendi');
+            } else {
+                // .smileignore yoksa varsayılan bir tane oluştur
+                const defaultContent = `# Smile AI tarafından indexlenmeyecek dosya ve klasörler
+# Her satır bir glob pattern içermelidir
+# ! ile başlayan satırlar dahil edilecek öğeleri belirtir
+
+# Genel dışlamalar
+**/node_modules/**
+**/dist/**
+**/build/**
+**/.git/**
+**/out/**
+**/.DS_Store
+**/thumbs.db
+**/*.min.js
+**/*.min.css
+**/vendor/**
+**/coverage/**
+**/tmp/**
+**/temp/**
+
+# Büyük dosyalar
+**/*.{png,jpg,jpeg,gif,ico,svg,woff,woff2,ttf,eot}
+**/*.{zip,tar,gz,rar,7z}
+**/*.{mp3,mp4,avi,mov,wmv}
+**/*.{pdf,doc,docx,xls,xlsx,ppt,pptx}
+
+# IDE ve editör dosyaları
+**/.idea/**
+**/.vscode/**
+**/.vs/**
+**/*.sublime-*
+**/*.swp
+**/*.swo
+
+# Log ve veritabanı dosyaları
+**/*.log
+**/*.sqlite
+**/*.db
+
+# Özel dışlamalar
+# my-secret-folder/**
+
+# Özel dahil etmeler (dışlanan klasörlerdeki belirli dosyaları dahil et)
+# !**/node_modules/önemli-paket/önemli-dosya.js
+# !**/dist/index.html`;
+
+                fs.writeFileSync(smileIgnorePath, defaultContent, 'utf-8');
+                vscode.window.showInformationMessage('Varsayılan .smileignore dosyası oluşturuldu');
+            }
+        } catch (error) {
+            console.error('.smileignore yükleme hatası:', error);
+            vscode.window.showErrorMessage('.smileignore dosyası yüklenirken hata oluştu');
+        }
+    }
+
     public async startIndexing(workspaceFolder: vscode.WorkspaceFolder): Promise<void> {
         if (this.indexingPromise) {
             return this.indexingPromise;
         }
 
+        await this.loadSmileIgnore(workspaceFolder.uri.fsPath);
         this.indexingPromise = this.doIndexing(workspaceFolder);
         return this.indexingPromise;
     }
@@ -70,12 +170,16 @@ export class IndexService {
             // Mevcut dosyaları indexle
             const files = await glob('**/*', {
                 cwd: workspaceFolder.uri.fsPath,
-                ignore: this.excludePatterns,
-                nodir: true
+                ignore: this.ignoreConfig.excludePatterns,
+                nodir: true,
+                dot: true
             });
 
             for (const file of files) {
-                await this.indexFile(path.join(workspaceFolder.uri.fsPath, file));
+                const filePath = path.join(workspaceFolder.uri.fsPath, file);
+                if (this.shouldIndexFile(filePath)) {
+                    await this.indexFile(filePath);
+                }
             }
 
             // Dosya değişikliklerini izle
@@ -90,10 +194,29 @@ export class IndexService {
         }
     }
 
+    private shouldIndexFile(filePath: string): boolean {
+        const relativePath = vscode.workspace.asRelativePath(filePath);
+
+        // Önce include pattern'leri kontrol et
+        for (const pattern of this.ignoreConfig.includePatterns) {
+            if (minimatch(relativePath, pattern)) {
+                return true;
+            }
+        }
+
+        // Sonra exclude pattern'leri kontrol et
+        for (const pattern of this.ignoreConfig.excludePatterns) {
+            if (minimatch(relativePath, pattern)) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
     public async indexFile(filePath: string): Promise<void> {
         try {
-            // Dosya dışlanmış mı kontrol et
-            if (this.isFileExcluded(filePath)) {
+            if (!this.shouldIndexFile(filePath)) {
                 return;
             }
 
@@ -122,23 +245,36 @@ export class IndexService {
 
         this.watcher = chokidar.watch('**/*', {
             cwd: workspaceFolder.uri.fsPath,
-            ignored: this.excludePatterns,
-            ignoreInitial: true
+            ignored: this.ignoreConfig.excludePatterns,
+            ignoreInitial: true,
+            persistent: true,
+            ignorePermissionErrors: true,
+            awaitWriteFinish: {
+                stabilityThreshold: 300,
+                pollInterval: 100
+            }
         });
 
         this.watcher
             .on('add', (filePath) => this.indexFile(path.join(workspaceFolder.uri.fsPath, filePath)))
             .on('change', (filePath) => this.indexFile(path.join(workspaceFolder.uri.fsPath, filePath)))
             .on('unlink', (filePath) => this.removeFile(path.join(workspaceFolder.uri.fsPath, filePath)));
+
+        // .smileignore değişikliklerini izle
+        const smileIgnorePath = path.join(workspaceFolder.uri.fsPath, '.smileignore');
+        fs.watch(smileIgnorePath, async (eventType) => {
+            if (eventType === 'change') {
+                await this.loadSmileIgnore(workspaceFolder.uri.fsPath);
+                // Yeniden indexleme başlat
+                this.indexingPromise = null;
+                await this.startIndexing(workspaceFolder);
+            }
+        });
     }
 
     public async removeFile(filePath: string): Promise<void> {
         const sql = 'DELETE FROM files WHERE file_path = ?';
         await this.run(sql, [filePath]);
-    }
-
-    private isFileExcluded(filePath: string): boolean {
-        return this.excludePatterns.some(pattern => minimatch(filePath, pattern));
     }
 
     private getFileLanguage(filePath: string): string {

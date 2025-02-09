@@ -34,6 +34,12 @@
           "type": "webview",
           "id": "smile-ai.composerView",
           "name": "Composer"
+        },
+        {
+          "type": "webview",
+          "id": "smile-ai.suggestionView",
+          "name": "Geliştirme Önerileri",
+          "icon": "$(lightbulb)"
         }
       ]
     },

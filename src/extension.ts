@@ -14,6 +14,7 @@ import { chatService } from './services/chatService';
 import { composerService } from './services/composerService';
 import { workspaceIndexer } from './services/workspaceIndexer';
 import { suggestionService } from './services/suggestionService';
+import { SuggestionViewProvider } from './webview/suggestionViewProvider';
 
 let completionServiceInstance: CompletionService;
 let agentService: AgentService;
@@ -80,7 +81,8 @@ export async function activate(context: vscode.ExtensionContext) {
 		// Register views
 		context.subscriptions.push(
 			vscode.window.registerWebviewViewProvider('smile-ai.chatView', chatViewProvider),
-			vscode.window.registerWebviewViewProvider('smile-ai.composerView', composerViewProvider)
+			vscode.window.registerWebviewViewProvider('smile-ai.composerView', composerViewProvider),
+			vscode.window.registerWebviewViewProvider(SuggestionViewProvider.viewType, new SuggestionViewProvider(context.extensionUri))
 		);
 
 		// Register commands
