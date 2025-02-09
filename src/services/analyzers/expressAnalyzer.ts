@@ -1,7 +1,5 @@
 import * as vscode from 'vscode';
-import { parse as parseScript } from '@babel/parser';
-import traverse from '@babel/traverse';
-import * as t from '@babel/types';
+import * as ts from 'typescript';
 import { LanguageAnalyzer, AnalysisResult, SemanticNode, CodeMetrics } from '../types/analysis';
 
 interface ExpressSymbol {
@@ -41,377 +39,288 @@ export class ExpressAnalyzer implements LanguageAnalyzer {
 
     private async analyzeExpressContent(content: string): Promise<AnalysisResult> {
         try {
-            const ast = parseScript(content, {
-                sourceType: 'module',
-                plugins: ['typescript', 'decorators-legacy']
-            });
+            // TypeScript kaynak dosyasını oluştur
+            const sourceFile = ts.createSourceFile(
+                'temp.ts',
+                content,
+                ts.ScriptTarget.Latest,
+                true
+            );
 
-            // Route ve middleware analizi
-            const routeSymbols = this.analyzeRoutes(ast);
-            
-            // Controller analizi
-            const controllerSymbols = this.analyzeControllers(ast);
-            
-            // Model analizi
-            const modelSymbols = this.analyzeModels(ast);
-            
-            // Auth analizi
-            const authSymbols = this.analyzeAuth(ast);
-            
-            // Database analizi
-            const dbSymbols = this.analyzeDatabase(ast);
+            // Express.js sembollerini topla
+            const symbols: ExpressSymbol[] = [];
 
-            // Tüm sembolleri birleştir
-            const symbols = [
-                ...routeSymbols,
-                ...controllerSymbols,
-                ...modelSymbols,
-                ...authSymbols,
-                ...dbSymbols
-            ];
+            // Route tanımlarını analiz et
+            const routes = this.analyzeRoutes(sourceFile);
+            symbols.push(...routes);
+
+            // Controller'ları analiz et
+            const controllers = this.analyzeControllers(sourceFile);
+            symbols.push(...controllers);
+
+            // Middleware'leri analiz et
+            const middleware = this.analyzeMiddleware(sourceFile);
+            symbols.push(...middleware);
+
+            // Model'leri analiz et
+            const models = this.analyzeModels(sourceFile);
+            symbols.push(...models);
+
+            // Auth işlemlerini analiz et
+            const auth = this.analyzeAuth(sourceFile);
+            symbols.push(...auth);
+
+            // Database işlemlerini analiz et
+            const database = this.analyzeDatabase(sourceFile);
+            symbols.push(...database);
 
             // Bağımlılıkları analiz et
-            const dependencies = this.analyzeDependencies(ast);
+            const dependencies = this.analyzeDependencies(sourceFile);
 
-            // Kod metriklerini hesapla
+            // Metrikleri hesapla
             const metrics = this.calculateMetrics(content, symbols);
 
             return {
-                ast: this.createASTNode(ast),
+                ast: this.createASTNode(sourceFile),
                 symbols: this.createSymbolsMap(symbols),
                 dependencies,
                 metrics
             };
+
         } catch (error) {
-            console.error('Express analiz hatası:', error);
+            console.error('Express.js analiz hatası:', error);
             throw error;
         }
     }
 
-    private analyzeRoutes(ast: t.File): ExpressSymbol[] {
-        const symbols: ExpressSymbol[] = [];
-
-        traverse(ast, {
-            CallExpression(path) {
-                // app.get/post/put/delete vb. metodları
-                if (
-                    t.isMemberExpression(path.node.callee) &&
-                    t.isIdentifier(path.node.callee.object) &&
-                    t.isIdentifier(path.node.callee.property) &&
-                    ['get', 'post', 'put', 'delete', 'patch', 'options', 'head'].includes(path.node.callee.property.name)
-                ) {
-                    const method = path.node.callee.property.name.toUpperCase();
-                    const routePath = t.isStringLiteral(path.node.arguments[0]) ? path.node.arguments[0].value : '';
-                    const params = this.extractRouteParams(routePath);
-                    const middleware = this.extractMiddleware(path.node.arguments.slice(1));
-
-                    symbols.push({
-                        name: `${method} ${routePath}`,
-                        type: 'route',
-                        method,
-                        path: routePath,
-                        params,
-                        middleware,
-                        location: this.getNodeLocation(path.node),
-                        documentation: this.getNodeDocumentation(path.node)
-                    });
+    private analyzeRoutes(sourceFile: ts.SourceFile): ExpressSymbol[] {
+        const routes: ExpressSymbol[] = [];
+        const visit = (node: ts.Node) => {
+            if (ts.isCallExpression(node)) {
+                const methodName = node.expression.getText();
+                if (['get', 'post', 'put', 'delete', 'patch', 'options', 'head'].includes(methodName)) {
+                    const [pathArg, ...handlers] = node.arguments;
+                    if (pathArg && ts.isStringLiteral(pathArg)) {
+                        routes.push({
+                            type: 'route',
+                            name: `${methodName.toUpperCase()} ${pathArg.text}`,
+                            method: methodName.toUpperCase(),
+                            path: pathArg.text,
+                            params: this.extractRouteParams(pathArg.text),
+                            middleware: this.extractMiddleware(handlers),
+                            location: this.getNodeLocation(node)
+                        });
+                    }
                 }
+            }
+            ts.forEachChild(node, visit);
+        };
+        visit(sourceFile);
+        return routes;
+    }
 
-                // Router tanımları
-                if (
-                    t.isMemberExpression(path.node.callee) &&
-                    t.isIdentifier(path.node.callee.object) &&
-                    t.isIdentifier(path.node.callee.property) &&
-                    path.node.callee.property.name === 'Router'
-                ) {
-                    symbols.push({
-                        name: 'Router',
-                        type: 'route',
-                        location: this.getNodeLocation(path.node),
-                        documentation: this.getNodeDocumentation(path.node)
-                    });
-                }
-
-                // Middleware tanımları
-                if (
-                    t.isMemberExpression(path.node.callee) &&
-                    t.isIdentifier(path.node.callee.object) &&
-                    t.isIdentifier(path.node.callee.property) &&
-                    path.node.callee.property.name === 'use'
-                ) {
-                    symbols.push({
-                        name: 'Middleware',
+    private analyzeMiddleware(sourceFile: ts.SourceFile): ExpressSymbol[] {
+        const middleware: ExpressSymbol[] = [];
+        const visit = (node: ts.Node) => {
+            if (ts.isFunctionDeclaration(node) && node.parameters.length >= 3) {
+                const [req, res, next] = node.parameters;
+                if (req && res && next && 
+                    req.type?.getText().includes('Request') && 
+                    res.type?.getText().includes('Response')) {
+                    middleware.push({
                         type: 'middleware',
-                        location: this.getNodeLocation(path.node),
-                        documentation: this.getNodeDocumentation(path.node)
+                        name: node.name?.text || 'anonymous',
+                        documentation: this.getNodeDocumentation(node),
+                        location: this.getNodeLocation(node)
                     });
                 }
             }
-        });
-
-        return symbols;
+            ts.forEachChild(node, visit);
+        };
+        visit(sourceFile);
+        return middleware;
     }
 
-    private analyzeControllers(ast: t.File): ExpressSymbol[] {
-        const symbols: ExpressSymbol[] = [];
-
-        traverse(ast, {
-            FunctionDeclaration(path) {
-                // Controller fonksiyonları
-                if (this.isControllerFunction(path.node)) {
-                    const validation = this.extractValidation(path.node);
-                    symbols.push({
-                        name: path.node.id?.name || 'AnonymousController',
-                        type: 'controller',
-                        validation,
-                        location: this.getNodeLocation(path.node),
-                        documentation: this.getNodeDocumentation(path.node)
-                    });
-                }
-            },
-
-            ArrowFunctionExpression(path) {
-                // Arrow function controller'lar
-                if (this.isControllerFunction(path.node)) {
-                    const validation = this.extractValidation(path.node);
-                    const parentName = this.getParentName(path);
-                    symbols.push({
-                        name: parentName || 'AnonymousController',
-                        type: 'controller',
-                        validation,
-                        location: this.getNodeLocation(path.node),
-                        documentation: this.getNodeDocumentation(path.node)
-                    });
-                }
+    private analyzeControllers(sourceFile: ts.SourceFile): ExpressSymbol[] {
+        const controllers: ExpressSymbol[] = [];
+        const visit = (node: ts.Node) => {
+            if (ts.isClassDeclaration(node) && this.isController(node)) {
+                controllers.push({
+                    type: 'controller',
+                    name: node.name?.text || 'anonymous',
+                    methods: this.extractControllerMethods(node),
+                    documentation: this.getNodeDocumentation(node),
+                    location: this.getNodeLocation(node)
+                });
             }
-        });
-
-        return symbols;
+            ts.forEachChild(node, visit);
+        };
+        visit(sourceFile);
+        return controllers;
     }
 
-    private analyzeModels(ast: t.File): ExpressSymbol[] {
-        const symbols: ExpressSymbol[] = [];
-
-        traverse(ast, {
-            CallExpression(path) {
-                // Mongoose/Sequelize model tanımları
-                if (this.isModelDefinition(path.node)) {
-                    symbols.push({
-                        name: this.extractModelName(path.node),
-                        type: 'model',
-                        location: this.getNodeLocation(path.node),
-                        documentation: this.getNodeDocumentation(path.node)
-                    });
-                }
-            }
-        });
-
-        return symbols;
+    private isController(node: ts.ClassDeclaration): boolean {
+        return node.name?.text.toLowerCase().includes('controller') || 
+               node.members.some(member => 
+                   ts.isMethodDeclaration(member) && 
+                   member.parameters.length >= 2 &&
+                   member.parameters[0].type?.getText().includes('Request') &&
+                   member.parameters[1].type?.getText().includes('Response')
+               );
     }
 
-    private analyzeAuth(ast: t.File): ExpressSymbol[] {
-        const symbols: ExpressSymbol[] = [];
-
-        traverse(ast, {
-            CallExpression(path) {
-                // Passport/JWT/Session middleware'leri
-                if (this.isAuthMiddleware(path.node)) {
-                    symbols.push({
-                        name: 'AuthMiddleware',
-                        type: 'auth',
-                        location: this.getNodeLocation(path.node),
-                        documentation: this.getNodeDocumentation(path.node)
-                    });
-                }
-            }
-        });
-
-        return symbols;
+    private extractControllerMethods(node: ts.ClassDeclaration): string[] {
+        return node.members
+            .filter(ts.isMethodDeclaration)
+            .map(method => method.name.getText());
     }
 
-    private analyzeDatabase(ast: t.File): ExpressSymbol[] {
-        const symbols: ExpressSymbol[] = [];
-
-        traverse(ast, {
-            CallExpression(path) {
-                // Database bağlantıları ve işlemleri
-                if (this.isDatabaseOperation(path.node)) {
-                    symbols.push({
-                        name: 'DatabaseOperation',
-                        type: 'database',
-                        location: this.getNodeLocation(path.node),
-                        documentation: this.getNodeDocumentation(path.node)
-                    });
-                }
+    private analyzeModels(sourceFile: ts.SourceFile): ExpressSymbol[] {
+        const models: ExpressSymbol[] = [];
+        const visit = (node: ts.Node) => {
+            if (ts.isClassDeclaration(node) && this.isModel(node)) {
+                models.push({
+                    type: 'model',
+                    name: node.name?.text || 'anonymous',
+                    documentation: this.getNodeDocumentation(node),
+                    location: this.getNodeLocation(node)
+                });
             }
-        });
+            ts.forEachChild(node, visit);
+        };
+        visit(sourceFile);
+        return models;
+    }
 
-        return symbols;
+    private isModel(node: ts.ClassDeclaration): boolean {
+        return node.name?.text.toLowerCase().includes('model') ||
+               node.decorators?.some(d => 
+                   d.expression.getText().includes('model') ||
+                   d.expression.getText().includes('entity')
+               );
+    }
+
+    private analyzeAuth(sourceFile: ts.SourceFile): ExpressSymbol[] {
+        const auth: ExpressSymbol[] = [];
+        const visit = (node: ts.Node) => {
+            if (ts.isFunctionDeclaration(node) && this.isAuthFunction(node)) {
+                auth.push({
+                    type: 'auth',
+                    name: node.name?.text || 'anonymous',
+                    documentation: this.getNodeDocumentation(node),
+                    location: this.getNodeLocation(node)
+                });
+            }
+            ts.forEachChild(node, visit);
+        };
+        visit(sourceFile);
+        return auth;
+    }
+
+    private isAuthFunction(node: ts.FunctionDeclaration): boolean {
+        return node.name?.text.toLowerCase().includes('auth') ||
+               node.name?.text.toLowerCase().includes('passport') ||
+               node.name?.text.toLowerCase().includes('login') ||
+               node.name?.text.toLowerCase().includes('logout');
+    }
+
+    private analyzeDatabase(sourceFile: ts.SourceFile): ExpressSymbol[] {
+        const database: ExpressSymbol[] = [];
+        const visit = (node: ts.Node) => {
+            if (ts.isCallExpression(node) && this.isDatabaseOperation(node)) {
+                database.push({
+                    type: 'database',
+                    name: node.expression.getText(),
+                    documentation: this.getNodeDocumentation(node),
+                    location: this.getNodeLocation(node)
+                });
+            }
+            ts.forEachChild(node, visit);
+        };
+        visit(sourceFile);
+        return database;
+    }
+
+    private isDatabaseOperation(node: ts.CallExpression): boolean {
+        const text = node.expression.getText().toLowerCase();
+        return text.includes('find') ||
+               text.includes('create') ||
+               text.includes('update') ||
+               text.includes('delete') ||
+               text.includes('query');
     }
 
     private extractRouteParams(path: string): string[] {
         const params: string[] = [];
-        const paramRegex = /:(\w+)/g;
+        const regex = /:(\w+)/g;
         let match;
-
-        while ((match = paramRegex.exec(path)) !== null) {
+        while ((match = regex.exec(path)) !== null) {
             params.push(match[1]);
         }
-
         return params;
     }
 
-    private extractMiddleware(args: t.Node[]): string[] {
-        return args
-            .filter(arg => t.isFunctionExpression(arg) || t.isArrowFunctionExpression(arg))
-            .map(arg => {
-                if (t.isFunctionExpression(arg) && arg.id) {
-                    return arg.id.name;
+    private extractMiddleware(nodes: ts.Node[]): string[] {
+        return nodes
+            .filter(ts.isFunctionExpression)
+            .map(node => {
+                if (ts.isIdentifier(node)) {
+                    return node.text;
                 }
                 return 'anonymous';
             });
     }
 
-    private extractValidation(node: t.Node): string[] {
-        const validation: string[] = [];
-
-        traverse(node, {
-            CallExpression(path) {
-                if (this.isValidationCall(path.node)) {
-                    validation.push(this.getValidationRule(path.node));
-                }
-            }
-        });
-
-        return validation;
-    }
-
-    private isControllerFunction(node: t.Node): boolean {
-        if (!t.isFunctionDeclaration(node) && !t.isArrowFunctionExpression(node)) {
-            return false;
-        }
-
-        // Request ve Response parametrelerini kontrol et
-        const params = 'params' in node ? node.params : [];
-        return params.length >= 2 &&
-               params.every(param => t.isIdentifier(param)) &&
-               (params[0] as t.Identifier).name === 'req' &&
-               (params[1] as t.Identifier).name === 'res';
-    }
-
-    private isModelDefinition(node: t.CallExpression): boolean {
-        return (
-            t.isMemberExpression(node.callee) &&
-            t.isIdentifier(node.callee.property) &&
-            ['model', 'define'].includes(node.callee.property.name)
-        );
-    }
-
-    private isAuthMiddleware(node: t.CallExpression): boolean {
-        return (
-            t.isIdentifier(node.callee) &&
-            ['passport', 'jwt', 'session'].some(name => node.callee.name.toLowerCase().includes(name))
-        );
-    }
-
-    private isDatabaseOperation(node: t.CallExpression): boolean {
-        return (
-            t.isMemberExpression(node.callee) &&
-            t.isIdentifier(node.callee.property) &&
-            ['find', 'findOne', 'create', 'update', 'delete', 'query'].includes(node.callee.property.name)
-        );
-    }
-
-    private isValidationCall(node: t.CallExpression): boolean {
-        return (
-            t.isMemberExpression(node.callee) &&
-            t.isIdentifier(node.callee.property) &&
-            ['check', 'body', 'param', 'query'].includes(node.callee.property.name)
-        );
-    }
-
-    private getValidationRule(node: t.CallExpression): string {
-        if (t.isStringLiteral(node.arguments[0])) {
-            return node.arguments[0].value;
-        }
-        return 'unknown';
-    }
-
-    private extractModelName(node: t.CallExpression): string {
-        if (node.arguments.length > 0 && t.isStringLiteral(node.arguments[0])) {
-            return node.arguments[0].value;
-        }
-        return 'AnonymousModel';
-    }
-
-    private getParentName(path: any): string {
-        const parent = path.parentPath;
-        if (parent && t.isVariableDeclarator(parent.node) && t.isIdentifier(parent.node.id)) {
-            return parent.node.id.name;
-        }
-        return 'AnonymousController';
-    }
-
-    private analyzeDependencies(ast: t.File): Map<string, string[]> {
+    private analyzeDependencies(sourceFile: ts.SourceFile): Map<string, string[]> {
         const dependencies = new Map<string, string[]>();
-
-        traverse(ast, {
-            ImportDeclaration(path) {
-                const source = path.node.source.value;
-                const imports = path.node.specifiers.map(specifier => {
-                    if (t.isImportDefaultSpecifier(specifier)) {
-                        return specifier.local.name;
-                    } else if (t.isImportSpecifier(specifier)) {
-                        return specifier.imported.name;
+        const visit = (node: ts.Node) => {
+            if (ts.isImportDeclaration(node)) {
+                const moduleName = node.moduleSpecifier.getText().replace(/['"]/g, '');
+                const imports: string[] = [];
+                
+                if (node.importClause) {
+                    if (node.importClause.name) {
+                        imports.push(node.importClause.name.text);
                     }
-                    return '';
-                }).filter(Boolean);
-
-                dependencies.set(source, imports);
+                    
+                    if (node.importClause.namedBindings) {
+                        if (ts.isNamedImports(node.importClause.namedBindings)) {
+                            imports.push(...node.importClause.namedBindings.elements.map(e => e.name.text));
+                        }
+                    }
+                }
+                
+                dependencies.set(moduleName, imports);
             }
-        });
-
+            ts.forEachChild(node, visit);
+        };
+        visit(sourceFile);
         return dependencies;
     }
 
     private calculateMetrics(content: string, symbols: ExpressSymbol[]): CodeMetrics {
         let complexity = 0;
-        let linesOfCode = 0;
+        let linesOfCode = content.split('\n').length;
         let commentLines = 0;
 
-        // Satır sayısı ve yorum satırları
+        // Yorum satırlarını say
         const lines = content.split('\n');
-        linesOfCode = lines.length;
-
-        lines.forEach(line => {
-            if (line.trim().startsWith('//') || line.trim().startsWith('/*') || line.trim().startsWith('*')) {
+        for (const line of lines) {
+            if (line.trim().startsWith('//') || line.trim().startsWith('/*')) {
                 commentLines++;
             }
-        });
+        }
 
-        // Karmaşıklık hesapla
-        complexity += symbols.length; // Her sembol için +1
-
-        const ast = parseScript(content, {
-            sourceType: 'module',
-            plugins: ['typescript', 'decorators-legacy']
-        });
-
-        traverse(ast, {
-            IfStatement() { complexity++; },
-            SwitchStatement() { complexity++; },
-            ForStatement() { complexity++; },
-            WhileStatement() { complexity++; },
-            DoWhileStatement() { complexity++; },
-            TryStatement() { complexity++; },
-            CatchClause() { complexity++; }
-        });
+        // Karmaşıklığı hesapla
+        complexity += symbols.length; // Her sembol için temel karmaşıklık
+        complexity += symbols.filter(s => s.type === 'route').length * 2; // Route'lar için ek karmaşıklık
+        complexity += symbols.filter(s => s.type === 'middleware').length * 1.5; // Middleware'ler için ek karmaşıklık
 
         return {
             complexity,
             linesOfCode,
             commentLines,
-            dependencies: Array.from(this.analyzeDependencies(ast).keys()).length,
+            dependencies: symbols.filter(s => s.type === 'database').length,
             maintainabilityIndex: this.calculateMaintainabilityIndex(
                 complexity,
                 linesOfCode,
@@ -420,31 +329,38 @@ export class ExpressAnalyzer implements LanguageAnalyzer {
         };
     }
 
-    private getNodeLocation(node: t.Node): { line: number; column: number; endLine: number; endColumn: number } {
+    private getNodeLocation(node: ts.Node): { line: number; column: number; endLine: number; endColumn: number } {
+        const sourceFile = node.getSourceFile();
+        const start = sourceFile.getLineAndCharacterOfPosition(node.getStart());
+        const end = sourceFile.getLineAndCharacterOfPosition(node.getEnd());
+        
         return {
-            line: node.loc?.start.line || 0,
-            column: node.loc?.start.column || 0,
-            endLine: node.loc?.end.line || 0,
-            endColumn: node.loc?.end.column || 0
+            line: start.line + 1,
+            column: start.character,
+            endLine: end.line + 1,
+            endColumn: end.character
         };
     }
 
-    private getNodeDocumentation(node: t.Node): string {
-        if (!node.leadingComments) {
+    private getNodeDocumentation(node: ts.Node): string {
+        const sourceFile = node.getSourceFile();
+        const commentRanges = ts.getLeadingCommentRanges(sourceFile.text, node.getFullStart());
+        
+        if (!commentRanges) {
             return '';
         }
 
-        return node.leadingComments
-            .map(comment => comment.value.trim())
+        return commentRanges
+            .map(range => sourceFile.text.substring(range.pos, range.end))
             .join('\n');
     }
 
-    private createASTNode(ast: t.File): SemanticNode {
+    private createASTNode(sourceFile: ts.SourceFile): SemanticNode {
         return {
-            type: 'ExpressApplication',
-            name: '',
+            type: 'File',
+            name: sourceFile.fileName,
             location: new vscode.Location(
-                vscode.Uri.file(''),
+                vscode.Uri.file(sourceFile.fileName),
                 new vscode.Range(0, 0, 0, 0)
             ),
             children: []
@@ -454,7 +370,7 @@ export class ExpressAnalyzer implements LanguageAnalyzer {
     private createSymbolsMap(symbols: ExpressSymbol[]): Map<string, SemanticNode> {
         const result = new Map<string, SemanticNode>();
         
-        symbols.forEach(symbol => {
+        for (const symbol of symbols) {
             result.set(symbol.name, {
                 type: symbol.type,
                 name: symbol.name,
@@ -469,7 +385,7 @@ export class ExpressAnalyzer implements LanguageAnalyzer {
                 ),
                 documentation: symbol.documentation
             });
-        });
+        }
         
         return result;
     }
