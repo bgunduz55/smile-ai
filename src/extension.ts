@@ -10,6 +10,10 @@ import { AgentService } from './services/llm/agentService';
 import { ModelConfig } from './services/llm/types';
 import { OllamaService } from './services/llm/ollamaService';
 import { semanticAnalysisService } from './services/semanticAnalysisService';
+import { chatService } from './services/chatService';
+import { composerService } from './services/composerService';
+import { workspaceIndexer } from './services/workspaceIndexer';
+import { suggestionService } from './services/suggestionService';
 
 let completionServiceInstance: CompletionService;
 let agentService: AgentService;
@@ -317,6 +321,21 @@ export async function activate(context: vscode.ExtensionContext) {
 		// Add services to context
 		context.subscriptions.push(completionServiceInstance);
 		context.subscriptions.push(agentService);
+
+		// Servisleri başlat
+		context.subscriptions.push(
+			chatService,
+			composerService,
+			completionService,
+			indexService,
+			workspaceIndexer,
+			suggestionService
+		);
+
+		// Workspace'i indexle
+		if (vscode.workspace.workspaceFolders?.length) {
+			await workspaceIndexer.startIndexing(vscode.workspace.workspaceFolders[0]);
+		}
 
 		vscode.window.showInformationMessage('Smile AI başarıyla aktive edildi!');
 	} catch (error) {

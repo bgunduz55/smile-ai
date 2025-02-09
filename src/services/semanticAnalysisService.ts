@@ -19,6 +19,7 @@ import { SpringBootAnalyzer } from './analyzers/springBootAnalyzer';
 import { DjangoAnalyzer } from './analyzers/djangoAnalyzer';
 import { LaravelAnalyzer } from './analyzers/laravelAnalyzer';
 import { RailsAnalyzer } from './analyzers/railsAnalyzer';
+import { AspNetAnalyzer } from './analyzers/aspnetAnalyzer';
 
 export class SemanticAnalysisService {
     private static instance: SemanticAnalysisService;
@@ -68,7 +69,9 @@ export class SemanticAnalysisService {
         this.analyzers.set('java', new JavaAnalyzer());
 
         // C# analyzer'ı ekle
-        this.analyzers.set('csharp', new CSharpAnalyzer());
+        const csharpAnalyzer = new CSharpAnalyzer();
+        this.analyzers.set('csharp', csharpAnalyzer);
+        this.analyzers.set('cs', csharpAnalyzer);
 
         // C/C++ analyzer'ı ekle
         const cppAnalyzer = new CppAnalyzer();
@@ -152,6 +155,14 @@ export class SemanticAnalysisService {
         this.analyzers.set('ruby', railsAnalyzer);
         this.analyzers.set('rails', railsAnalyzer);
         this.analyzers.set('erb', railsAnalyzer);
+
+        // ASP.NET Core analyzer'ı ekle
+        const aspnetAnalyzer = new AspNetAnalyzer();
+        this.analyzers.set('csharp', aspnetAnalyzer);
+        this.analyzers.set('cs', aspnetAnalyzer);
+        this.analyzers.set('aspnet', aspnetAnalyzer);
+        this.analyzers.set('aspnetcore', aspnetAnalyzer);
+        this.analyzers.set('razor', aspnetAnalyzer);
     }
 
     public async analyzeFile(document: vscode.TextDocument): Promise<AnalysisResult> {

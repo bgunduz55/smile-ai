@@ -63,10 +63,11 @@ export class LocalAIService implements LLMService {
     private updateStatusBar(): void {
         if (!this.isInitialized) {
             this.statusBarItem.text = "$(sync~spin) LocalAI";
-            this.statusBarItem.tooltip = "LocalAI başlatılıyor...";
+            this.statusBarItem.tooltip = "LocalAI is starting...";
         } else if (this.lastError) {
             this.statusBarItem.text = "$(error) LocalAI";
-            this.statusBarItem.tooltip = `Hata: ${this.lastError.message}`;
+            this.statusBarItem.tooltip = `Error: ${this.lastError.message}`;
+
         } else {
             this.statusBarItem.text = "$(check) LocalAI";
             this.statusBarItem.tooltip = `Model: ${this.currentModel}\nTPS: ${this.performanceMetrics.tokensPerSecond.toFixed(2)}\nCPU: ${this.performanceMetrics.cpuUsage?.toFixed(1)}%`;
@@ -83,17 +84,19 @@ export class LocalAIService implements LLMService {
             this.isInitialized = true;
             this.updateStatusBar();
         } catch (error) {
-            this.lastError = error instanceof Error ? error : new Error('Bilinmeyen bir hata oluştu');
+            this.lastError = error instanceof Error ? error : new Error('Unknown error');
             this.updateStatusBar();
             throw error;
         }
+
     }
 
     private async ensureDockerContainer(): Promise<void> {
         const config = vscode.workspace.getConfiguration('smile-ai.localai');
         const modelsPath = config.get('modelsPath') || path.join(process.env.HOME || process.env.USERPROFILE || '', '.smile-ai', 'models');
-        
-        // LocalAI container'ını başlat
+
+        // Start the LocalAI container
+
         await this.dockerService.startContainer(
             LocalAIService.CONTAINER_NAME,
             LocalAIService.IMAGE_NAME,
@@ -113,10 +116,11 @@ export class LocalAIService implements LLMService {
                 return;
             } catch (error) {
                 if (i === retries - 1) {
-                    throw new Error('LocalAI servisi başlatılamadı');
+                    throw new Error('LocalAI service could not be started');
                 }
                 await new Promise(resolve => setTimeout(resolve, delay));
             }
+
         }
     }
 
@@ -125,22 +129,25 @@ export class LocalAIService implements LLMService {
             const response = await axios.get(`${this.endpoint}/models`);
             this.models = response.data.data.map((model: any) => ({
                 id: model.id,
-                name: model.name || 'Bilinmeyen Model',
-                format: model.format || 'Bilinmeyen',
+                name: model.name || 'Unknown Model',
+                format: model.format || 'Unknown',
                 size: model.size || 0,
                 parameters: model.parameters || 0,
                 lastUsed: new Date()
+
             }));
         } catch (error) {
-            console.error('Model bilgileri alınamadı:', error);
-            // Model bilgileri alınamasa da çalışmaya devam et
+            console.error('Model information could not be retrieved:', error);
+            // Continue operation even if model information is not available
             this.models = [{
+
                 id: 'default',
-                name: 'Varsayılan Model',
-                format: 'Bilinmeyen',
+                name: 'Default Model',
+                format: 'Unknown',
                 size: 0,
                 parameters: 0,
                 lastUsed: new Date()
+
             }];
         }
     }
@@ -160,9 +167,10 @@ export class LocalAIService implements LLMService {
                 };
                 this.updateStatusBar();
             } catch (error) {
-                console.error('Performans metrikleri alınamadı:', error);
+                console.error('Performance metrics could not be retrieved:', error);
             }
         }, 5000);
+
     }
 
     public async processTask(task: AgentTask): Promise<TaskResult> {
@@ -219,12 +227,13 @@ export class LocalAIService implements LLMService {
             return {
                 success: false,
                 output: '',
-                error: error instanceof Error ? error.message : 'Bilinmeyen bir hata oluştu',
+                error: error instanceof Error ? error.message : 'Unknown error',
                 metadata: {
                     tokensUsed: 0,
                     executionTime: Date.now() - startTime,
                     modelName: this.currentModel
                 }
+
             };
         }
     }
@@ -243,12 +252,15 @@ export class LocalAIService implements LLMService {
 
     private handleError(error: unknown): void {
         this.errorCount++;
-        this.lastError = error instanceof Error ? error : new Error('Bilinmeyen bir hata oluştu');
+        this.lastError = error instanceof Error ? error : new Error('Unknown error');
         
-        // Hata durumunu göster
+
+        // Show error status
         this.updateStatusBar();
         
-        // Belirli bir hata sayısına ulaşıldığında servisi yeniden başlat
+
+        // Restart the service after a certain number of errors
+
         if (this.errorCount >= 5) {
             this.errorCount = 0;
             this.initialize().catch(console.error);
@@ -276,7 +288,7 @@ export class LocalAIService implements LLMService {
     public async setModel(modelId: string): Promise<void> {
         const model = this.models.find(m => m.id === modelId);
         if (!model) {
-            throw new Error(`Model bulunamadı: ${modelId}`);
+            throw new Error(`Model not found: ${modelId}`);
         }
         
         this.currentModel = modelId;

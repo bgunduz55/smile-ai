@@ -32,11 +32,12 @@ export class DockerService {
     private updateStatusBar(): void {
         if (this.isDockerRunning) {
             this.statusBarItem.text = "$(docker) Docker";
-            this.statusBarItem.tooltip = "Docker çalışıyor";
+            this.statusBarItem.tooltip = "Docker is running";
         } else {
             this.statusBarItem.text = "$(error) Docker";
-            this.statusBarItem.tooltip = "Docker çalışmıyor";
+            this.statusBarItem.tooltip = "Docker is not running";
         }
+
         this.statusBarItem.show();
     }
 
@@ -46,9 +47,10 @@ export class DockerService {
             this.isDockerRunning = true;
         } catch (error) {
             this.isDockerRunning = false;
-            console.error('Docker kontrol hatası:', error);
+            console.error('Docker control error:', error);
         }
         this.updateStatusBar();
+
     }
 
     public async isContainerRunning(containerName: string): Promise<boolean> {
@@ -68,24 +70,28 @@ export class DockerService {
         envVars: Record<string, string> = {}
     ): Promise<void> {
         if (!this.isDockerRunning) {
-            throw new Error('Docker servisine erişilemiyor. Docker\'ın çalıştığından emin olun.');
+            throw new Error('Docker service is not accessible. Please ensure Docker is running.');
         }
+
 
         const isRunning = await this.isContainerRunning(containerName);
         if (isRunning) {
-            return; // Container zaten çalışıyor
+            return; // Container is already running
         }
 
-        // Önce eski container'ı temizle
+        
+        // First remove the old container
         await this.removeContainer(containerName);
 
-        // Container'ı başlat
+
+        // Start the container
         const args = [
             'run',
             '-d',
             '--name', containerName,
             ...ports.flatMap(port => ['-p', port]),
             ...volumes.flatMap(volume => ['-v', volume]),
+
             ...Object.entries(envVars).flatMap(([key, value]) => ['-e', `${key}=${value}`]),
             '--restart', 'unless-stopped',
             image
@@ -98,32 +104,36 @@ export class DockerService {
                     if (code === 0) {
                         resolve();
                     } else {
-                        reject(new Error(`Container başlatılamadı (exit code: ${code})`));
+                        reject(new Error(`Container failed to start (exit code: ${code})`));
                     }
+
                 });
                 process.on('error', reject);
             });
         } catch (error) {
-            throw new Error(`Container başlatma hatası: ${error instanceof Error ? error.message : 'Bilinmeyen hata'}`);
+            throw new Error(`Container start error: ${error instanceof Error ? error.message : 'Unknown error'}`);
         }
     }
+
 
     public async stopContainer(containerName: string): Promise<void> {
         try {
             await execAsync(`docker stop ${containerName}`);
         } catch (error) {
-            console.error('Container durdurma hatası:', error);
+            console.error('Container stop error:', error);
         }
+
     }
 
     public async removeContainer(containerName: string): Promise<void> {
         try {
             await execAsync(`docker rm -f ${containerName}`);
         } catch (error) {
-            // Eğer container zaten yoksa hata verme
+            // If the container does not exist, do not throw an error
             if (error instanceof Error && !error.message.includes('No such container')) {
-                console.error('Container silme hatası:', error);
+                console.error('Container removal error:', error);
             }
+
         }
     }
 
@@ -136,24 +146,27 @@ export class DockerService {
             process.stdout.on('data', (data) => {
                 const output = data.toString();
                 if (output.includes('Pulling from')) {
-                    // Yeni layer başladı
+                    // New layer started
                     totalLayers++;
                 }
+
                 if (output.includes('Download complete') || output.includes('Pull complete')) {
-                    // Layer tamamlandı
+                    // Layer completed
                     completedLayers++;
                     if (onProgress && totalLayers > 0) {
                         onProgress((completedLayers / totalLayers) * 100);
                     }
                 }
+
             });
 
             process.on('close', (code) => {
                 if (code === 0) {
                     resolve();
                 } else {
-                    reject(new Error(`Image indirme hatası (exit code: ${code})`));
+                    reject(new Error(`Image download error (exit code: ${code})`));
                 }
+
             });
 
             process.on('error', reject);
@@ -165,9 +178,10 @@ export class DockerService {
             const { stdout } = await execAsync(`docker logs --tail ${lines} ${containerName}`);
             return stdout;
         } catch (error) {
-            throw new Error(`Container log hatası: ${error instanceof Error ? error.message : 'Bilinmeyen hata'}`);
+            throw new Error(`Container log error: ${error instanceof Error ? error.message : 'Unknown error'}`);
         }
     }
+
 
     public async listContainers(): Promise<DockerContainer[]> {
         try {
@@ -182,9 +196,10 @@ export class DockerService {
                     return { id, name, status, ports };
                 });
         } catch (error) {
-            console.error('Container listeleme hatası:', error);
+            console.error('Container listing error:', error);
             return [];
         }
+
     }
 
     public async getContainerStats(containerName: string): Promise<{
@@ -210,7 +225,7 @@ export class DockerService {
                 }
             };
         } catch (error) {
-            throw new Error(`Container istatistik hatası: ${error instanceof Error ? error.message : 'Bilinmeyen hata'}`);
+            throw new Error(`Container statistics error: ${error instanceof Error ? error.message : 'Unknown error'}`);
         }
     }
 

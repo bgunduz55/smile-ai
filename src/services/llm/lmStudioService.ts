@@ -54,10 +54,11 @@ export class LMStudioService implements LLMService {
     private updateStatusBar(): void {
         if (!this.isInitialized) {
             this.statusBarItem.text = "$(sync~spin) LM Studio";
-            this.statusBarItem.tooltip = "LM Studio başlatılıyor...";
+            this.statusBarItem.tooltip = "LM Studio is starting...";
         } else if (this.lastError) {
             this.statusBarItem.text = "$(error) LM Studio";
-            this.statusBarItem.tooltip = `Hata: ${this.lastError.message}`;
+            this.statusBarItem.tooltip = `Error: ${this.lastError.message}`;
+
         } else {
             this.statusBarItem.text = "$(check) LM Studio";
             this.statusBarItem.tooltip = `Model: ${this.currentModel}\nTPS: ${this.performanceMetrics.tokensPerSecond.toFixed(2)}`;
@@ -72,18 +73,20 @@ export class LMStudioService implements LLMService {
             this.isInitialized = true;
             this.updateStatusBar();
         } catch (error) {
-            this.lastError = error instanceof Error ? error : new Error('Bilinmeyen bir hata oluştu');
+            this.lastError = error instanceof Error ? error : new Error('Unknown error');
             this.updateStatusBar();
             throw error;
         }
+
     }
 
     private async checkConnection(): Promise<void> {
         try {
             await axios.get(`${this.endpoint}/models`);
         } catch (error) {
-            throw new Error('LM Studio bağlantısı kurulamadı. Servisin çalıştığından emin olun.');
+            throw new Error('LM Studio connection failed. Ensure the service is running.');
         }
+
     }
 
     private async loadModelInfo(): Promise<void> {
@@ -98,16 +101,18 @@ export class LMStudioService implements LLMService {
                 lastUsed: new Date()
             }));
         } catch (error) {
-            console.error('Model bilgileri alınamadı:', error);
-            // Model bilgileri alınamasa da çalışmaya devam et
+            console.error('Model information could not be retrieved:', error);
+            // Continue operation even if model information is not available
             this.models = [{
                 id: 'default',
-                name: 'Varsayılan Model',
-                format: 'Bilinmeyen',
+
+                name: 'Default Model',
+                format: 'Unknown',
                 size: 0,
                 parameters: 0,
                 lastUsed: new Date()
             }];
+
         }
     }
 
@@ -165,12 +170,13 @@ export class LMStudioService implements LLMService {
             return {
                 success: false,
                 output: '',
-                error: error instanceof Error ? error.message : 'Bilinmeyen bir hata oluştu',
+                error: error instanceof Error ? error.message : 'Unknown error',
                 metadata: {
                     tokensUsed: 0,
                     executionTime: Date.now() - startTime,
                     modelName: this.currentModel
                 }
+
             };
         }
     }
@@ -189,12 +195,15 @@ export class LMStudioService implements LLMService {
 
     private handleError(error: unknown): void {
         this.errorCount++;
-        this.lastError = error instanceof Error ? error : new Error('Bilinmeyen bir hata oluştu');
+        this.lastError = error instanceof Error ? error : new Error('Unknown error');
         
-        // Hata durumunu göster
+
+        // Show error status
         this.updateStatusBar();
         
-        // Belirli bir hata sayısına ulaşıldığında servisi yeniden başlat
+
+        // Restart the service after a certain number of errors
+
         if (this.errorCount >= 5) {
             this.errorCount = 0;
             this.initialize().catch(console.error);
@@ -222,9 +231,10 @@ export class LMStudioService implements LLMService {
     public async setModel(modelId: string): Promise<void> {
         const model = this.models.find(m => m.id === modelId);
         if (!model) {
-            throw new Error(`Model bulunamadı: ${modelId}`);
+            throw new Error(`Model not found: ${modelId}`);
         }
         
+
         this.currentModel = modelId;
         model.lastUsed = new Date();
         

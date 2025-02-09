@@ -50,14 +50,14 @@ export class LlamaService {
 
     private getTaskDescription(taskType: TaskType): string {
         const descriptions: Record<TaskType, string> = {
-            text_generation: 'Metin üretme ve sohbet yanıtları oluşturur',
-            code_completion: 'Kod tamamlama önerileri sunar',
-            code_analysis: 'Kod kalitesi, olası hatalar ve iyileştirmeler için analiz yapar',
-            code_generation: 'Belirtilen gereksinimlere göre kod üretir',
-            documentation: 'Kod için dokümantasyon oluşturur',
-            test_generation: 'Birim testleri ve test senaryoları oluşturur',
-            refactoring: 'Kodu daha iyi pratiklere uygun şekilde yeniden düzenler',
-            bug_fix: 'Hata tespiti ve düzeltme önerileri sunar'
+            text_generation: 'Text generation and chat responses',
+            code_completion: 'Code completion suggestions',
+            code_analysis: 'Code quality, potential errors, and improvements',
+            code_generation: 'Generate code based on the specified requirements',
+            documentation: 'Create documentation for the code',
+            test_generation: 'Create unit tests and test scenarios',
+            refactoring: 'Refactor the code to follow better practices',
+            bug_fix: 'Detect errors and provide fixes'
         };
 
         return descriptions[taskType];
