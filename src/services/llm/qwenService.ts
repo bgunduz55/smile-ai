@@ -42,10 +42,11 @@ export class QwenService implements LLMService {
     private updateStatusBar(): void {
         if (!this.isInitialized) {
             this.statusBarItem.text = "$(sync~spin) Qwen";
-            this.statusBarItem.tooltip = "Qwen başlatılıyor...";
+            this.statusBarItem.tooltip = "Qwen starting...";
         } else if (this.lastError) {
             this.statusBarItem.text = "$(error) Qwen";
-            this.statusBarItem.tooltip = `Hata: ${this.lastError.message}`;
+            this.statusBarItem.tooltip = `Error: ${this.lastError.message}`;
+
         } else {
             this.statusBarItem.text = "$(check) Qwen";
             this.statusBarItem.tooltip = `Model: ${this.model}\nTPS: ${this.performanceMetrics.tokensPerSecond.toFixed(2)}`;
@@ -56,18 +57,20 @@ export class QwenService implements LLMService {
     public async initialize(): Promise<void> {
         try {
             if (!this.apiKey) {
-                throw new Error('Qwen API anahtarı yapılandırılmamış');
+                throw new Error('Qwen API key is not configured');
             }
+
 
             // API bağlantısını test et
             await this.checkConnection();
             this.isInitialized = true;
             this.updateStatusBar();
         } catch (error) {
-            this.lastError = error instanceof Error ? error : new Error('Bilinmeyen bir hata oluştu');
+            this.lastError = error instanceof Error ? error : new Error('Unknown error');
             this.updateStatusBar();
             throw error;
         }
+
     }
 
     private async checkConnection(): Promise<void> {
@@ -78,9 +81,10 @@ export class QwenService implements LLMService {
                 }
             });
         } catch (error) {
-            throw new Error('Qwen API bağlantısı kurulamadı');
+            throw new Error('Qwen connection failed');
         }
     }
+
 
     public async processTask(task: AgentTask): Promise<TaskResult> {
         const startTime = Date.now();
@@ -149,12 +153,13 @@ export class QwenService implements LLMService {
             return {
                 success: false,
                 output: '',
-                error: error instanceof Error ? error.message : 'Bilinmeyen bir hata oluştu',
+                error: error instanceof Error ? error.message : 'Unknown error',
                 metadata: {
                     tokensUsed: 0,
                     executionTime: Date.now() - startTime,
                     modelName: this.model
                 }
+
             };
         }
     }
@@ -173,15 +178,17 @@ export class QwenService implements LLMService {
 
     private handleError(error: unknown): void {
         this.errorCount++;
-        this.lastError = error instanceof Error ? error : new Error('Bilinmeyen bir hata oluştu');
+        this.lastError = error instanceof Error ? error : new Error('Unknown error');
         
+
         // Hata durumunu göster
         this.updateStatusBar();
         
         // API anahtarı hatası varsa kullanıcıyı bilgilendir
         if (error instanceof Error && error.message.includes('401')) {
-            vscode.window.showErrorMessage('Qwen API anahtarı geçersiz veya süresi dolmuş');
+            vscode.window.showErrorMessage('Qwen API key is invalid or expired');
         }
+
     }
 
     private buildPrompt(task: AgentTask): string {

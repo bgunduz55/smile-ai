@@ -9,6 +9,7 @@ import { CompletionService } from './services/completionService';
 import { AgentService } from './services/llm/agentService';
 import { ModelConfig } from './services/llm/types';
 import { OllamaService } from './services/llm/ollamaService';
+import { semanticAnalysisService } from './services/semanticAnalysisService';
 
 let completionServiceInstance: CompletionService;
 let agentService: AgentService;
@@ -109,8 +110,120 @@ export async function activate(context: vscode.ExtensionContext) {
 				vscode.window.showInformationMessage('Kod tamamlama başlatılıyor...');
 			}),
 
-			vscode.commands.registerCommand('smile-ai.codeAnalysis', () => {
-				vscode.window.showInformationMessage('Kod analizi başlatılıyor...');
+			vscode.commands.registerCommand('smile-ai.codeAnalysis', async () => {
+				try {
+					const editor = vscode.window.activeTextEditor;
+					if (!editor) {
+						vscode.window.showWarningMessage('Lütfen analiz edilecek bir dosya açın');
+						return;
+					}
+
+					const document = editor.document;
+					const supportedLanguages = semanticAnalysisService.getSupportedLanguages();
+					
+					if (!supportedLanguages.includes(document.languageId)) {
+						vscode.window.showWarningMessage(
+							`Bu özellik şu anda sadece ${supportedLanguages.join(', ')} dilleri için desteklenmektedir`
+						);
+						return;
+					}
+
+					vscode.window.withProgress({
+						location: vscode.ProgressLocation.Notification,
+						title: "Kod analizi yapılıyor...",
+						cancellable: false
+					}, async () => {
+						const result = await semanticAnalysisService.analyzeFile(document);
+						
+						// Analiz sonuçlarını göster
+						const panel = vscode.window.createWebviewPanel(
+							'codeAnalysis',
+							'Kod Analizi Sonuçları',
+							vscode.ViewColumn.Two,
+							{
+								enableScripts: true
+							}
+						);
+
+						panel.webview.html = `
+							<!DOCTYPE html>
+							<html>
+							<head>
+								<style>
+									body { 
+										font-family: Arial, sans-serif; 
+										padding: 20px;
+										color: var(--vscode-foreground);
+										background-color: var(--vscode-editor-background);
+									}
+									.metric { margin-bottom: 20px; }
+									.metric-title { font-weight: bold; margin-bottom: 5px; }
+									.metric-value { color: var(--vscode-foreground); }
+									.section { margin-bottom: 30px; }
+									.section-title { 
+										font-size: 1.2em; 
+										color: var(--vscode-textLink-foreground); 
+										margin-bottom: 10px; 
+									}
+									.dependency { 
+										margin: 5px 0;
+										padding: 5px;
+										background-color: var(--vscode-editor-selectionBackground);
+										border-radius: 3px;
+									}
+									.symbol { 
+										padding: 5px;
+										border-bottom: 1px solid var(--vscode-editor-lineHighlightBorder);
+									}
+								</style>
+							</head>
+							<body>
+								<div class="section">
+									<div class="section-title">Kod Metrikleri</div>
+									<div class="metric">
+										<div class="metric-title">Karmaşıklık</div>
+										<div class="metric-value">${result.metrics.complexity}</div>
+									</div>
+									<div class="metric">
+										<div class="metric-title">Satır Sayısı</div>
+										<div class="metric-value">${result.metrics.linesOfCode}</div>
+									</div>
+									<div class="metric">
+										<div class="metric-title">Yorum Satırları</div>
+										<div class="metric-value">${result.metrics.commentLines}</div>
+									</div>
+									<div class="metric">
+										<div class="metric-title">Bakım İndeksi</div>
+										<div class="metric-value">${result.metrics.maintainabilityIndex.toFixed(2)}/100</div>
+									</div>
+								</div>
+
+								<div class="section">
+									<div class="section-title">Bağımlılıklar</div>
+									${Array.from(result.dependencies.entries()).map(([module, imports]) => `
+										<div class="dependency">
+											<strong>${module}</strong>: ${imports.join(', ')}
+										</div>
+									`).join('')}
+								</div>
+
+								<div class="section">
+									<div class="section-title">Semboller</div>
+									${Array.from(result.symbols.entries()).map(([name, symbol]) => `
+										<div class="symbol">
+											<div><strong>${name}</strong> (${symbol.type})</div>
+											${symbol.documentation ? `<div style="color: var(--vscode-textPreformat-foreground);">${symbol.documentation}</div>` : ''}
+										</div>
+									`).join('')}
+								</div>
+							</body>
+							</html>
+						`;
+					});
+				} catch (error) {
+					vscode.window.showErrorMessage('Kod analizi sırasında bir hata oluştu: ' + 
+						(error instanceof Error ? error.message : 'Bilinmeyen bir hata'));
+				}
 			}),
 
 			vscode.commands.registerCommand('smile-ai.generateCode', () => {
