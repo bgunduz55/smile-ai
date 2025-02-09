@@ -40,6 +40,12 @@
           "id": "smile-ai.suggestionView",
           "name": "Geliştirme Önerileri",
           "icon": "$(lightbulb)"
+        },
+        {
+          "type": "webview",
+          "id": "smile-ai.rulesView",
+          "name": "Kural Setleri",
+          "icon": "$(book)"
         }
       ]
     },
@@ -87,6 +93,21 @@
       {
         "command": "smile-ai.fixBug",
         "title": "Hata Düzelt",
+        "category": "Smile AI"
+      },
+      {
+        "command": "smile-ai.createRule",
+        "title": "Yeni Kural Seti Oluştur",
+        "category": "Smile AI"
+      },
+      {
+        "command": "smile-ai.editRule",
+        "title": "Kural Setini Düzenle",
+        "category": "Smile AI"
+      },
+      {
+        "command": "smile-ai.viewRules",
+        "title": "Kuralları Görüntüle",
         "category": "Smile AI"
       }
     ],
@@ -589,6 +610,183 @@
               "default": 50,
               "minimum": 1,
               "description": "Top-k örnekleme değeri"
+            }
+          }
+        },
+        "smile-ai.rules": {
+          "type": "object",
+          "title": "Smile Rules",
+          "properties": {
+            "rulesPath": {
+              "type": "string",
+              "default": ".smile",
+              "description": "Smile kurallarının bulunduğu klasör yolu"
+            },
+            "enabledRules": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "default": ["code-style", "naming", "testing", "documentation", "git", "architecture", "security", "performance"],
+              "description": "Aktif kural setleri"
+            },
+            "customRules": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "description": "Kural seti adı"
+                  },
+                  "path": {
+                    "type": "string",
+                    "description": "Kural dosyasının yolu"
+                  },
+                  "description": {
+                    "type": "string",
+                    "description": "Kural seti açıklaması"
+                  }
+                }
+              },
+              "default": [],
+              "description": "Özel kural setleri"
+            },
+            "overrides": {
+              "type": "object",
+              "default": {},
+              "description": "Kural geçersiz kılmaları"
+            }
+          }
+        },
+        "smile-ai.rules.codeStyle": {
+          "type": "object",
+          "title": "Kod Stili",
+          "properties": {
+            "indentSize": {
+              "type": "number",
+              "default": 4,
+              "description": "Girinti boyutu"
+            },
+            "useTabs": {
+              "type": "boolean",
+              "default": false,
+              "description": "Tab kullanımı"
+            },
+            "maxLineLength": {
+              "type": "number",
+              "default": 80,
+              "description": "Maksimum satır uzunluğu"
+            },
+            "quoteStyle": {
+              "type": "string",
+              "enum": ["single", "double"],
+              "default": "single",
+              "description": "Tırnak işareti stili"
+            },
+            "semicolons": {
+              "type": "boolean",
+              "default": true,
+              "description": "Noktalı virgül kullanımı"
+            }
+          }
+        },
+        "smile-ai.rules.naming": {
+          "type": "object",
+          "title": "İsimlendirme",
+          "properties": {
+            "variables": {
+              "type": "string",
+              "enum": ["camelCase", "snake_case", "PascalCase"],
+              "default": "camelCase",
+              "description": "Değişken isimlendirme stili"
+            },
+            "functions": {
+              "type": "string",
+              "enum": ["camelCase", "snake_case", "PascalCase"],
+              "default": "camelCase",
+              "description": "Fonksiyon isimlendirme stili"
+            },
+            "classes": {
+              "type": "string",
+              "enum": ["camelCase", "snake_case", "PascalCase"],
+              "default": "PascalCase",
+              "description": "Sınıf isimlendirme stili"
+            },
+            "interfaces": {
+              "type": "string",
+              "enum": ["camelCase", "snake_case", "PascalCase"],
+              "default": "PascalCase",
+              "description": "Interface isimlendirme stili"
+            },
+            "constants": {
+              "type": "string",
+              "enum": ["camelCase", "snake_case", "PascalCase", "UPPER_CASE"],
+              "default": "UPPER_CASE",
+              "description": "Sabit isimlendirme stili"
+            }
+          }
+        },
+        "smile-ai.rules.testing": {
+          "type": "object",
+          "title": "Test Kuralları",
+          "properties": {
+            "required": {
+              "type": "boolean",
+              "default": true,
+              "description": "Test zorunluluğu"
+            },
+            "coverage": {
+              "type": "object",
+              "properties": {
+                "statements": {
+                  "type": "number",
+                  "default": 80,
+                  "description": "Statement coverage yüzdesi"
+                },
+                "branches": {
+                  "type": "number",
+                  "default": 70,
+                  "description": "Branch coverage yüzdesi"
+                },
+                "functions": {
+                  "type": "number",
+                  "default": 80,
+                  "description": "Function coverage yüzdesi"
+                },
+                "lines": {
+                  "type": "number",
+                  "default": 80,
+                  "description": "Line coverage yüzdesi"
+                }
+              }
+            }
+          }
+        },
+        "smile-ai.rules.documentation": {
+          "type": "object",
+          "title": "Dokümantasyon",
+          "properties": {
+            "required": {
+              "type": "boolean",
+              "default": true,
+              "description": "Dokümantasyon zorunluluğu"
+            },
+            "style": {
+              "type": "string",
+              "enum": ["JSDoc", "TSDoc", "docstring", "custom"],
+              "default": "JSDoc",
+              "description": "Dokümantasyon stili"
+            },
+            "requireParams": {
+              "type": "boolean",
+              "default": true,
+              "description": "Parametre dokümantasyonu zorunluluğu"
+            },
+            "requireReturns": {
+              "type": "boolean",
+              "default": true,
+              "description": "Dönüş değeri dokümantasyonu zorunluluğu"
             }
           }
         }

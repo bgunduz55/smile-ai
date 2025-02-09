@@ -39,13 +39,14 @@ export class SemanticAnalysisService {
     }
 
     private registerEventHandlers(): void {
-        // Dosya değişikliklerini izle
+        // Watch file changes
         this.disposables.push(
             vscode.workspace.onDidChangeTextDocument(e => {
                 this.invalidateAnalysis(e.document.uri.fsPath);
             })
         );
     }
+
 
     private invalidateAnalysis(filePath: string): void {
         this.analyzers.forEach(analyzer => analyzer.dispose());
@@ -54,109 +55,128 @@ export class SemanticAnalysisService {
     }
 
     private initializeAnalyzers(): void {
-        // TypeScript/JavaScript için aynı analyzer'ı kullan
+        // Use the same analyzer for TypeScript/JavaScript
         const tsAnalyzer = new TypeScriptAnalyzer();
         this.analyzers.set('typescript', tsAnalyzer);
         this.analyzers.set('javascript', tsAnalyzer);
         
-        // Python analyzer'ı ekle
+
+        // Add Python analyzer
         const pythonAnalyzer = new PythonAnalyzer();
         this.analyzers.set('python', pythonAnalyzer);
         this.analyzers.set('django', pythonAnalyzer);
         this.analyzers.set('django-python', pythonAnalyzer);
 
-        // Java analyzer'ı ekle
+
+        // Add Java analyzer
         this.analyzers.set('java', new JavaAnalyzer());
 
-        // C# analyzer'ı ekle
+
+        // Add C# analyzer
         const csharpAnalyzer = new CSharpAnalyzer();
         this.analyzers.set('csharp', csharpAnalyzer);
         this.analyzers.set('cs', csharpAnalyzer);
 
-        // C/C++ analyzer'ı ekle
+
+        // Add C/C++ analyzer
         const cppAnalyzer = new CppAnalyzer();
         this.analyzers.set('cpp', cppAnalyzer);
         this.analyzers.set('c', cppAnalyzer);
 
-        // Go analyzer'ı ekle
+
+        // Add Go analyzer
         this.analyzers.set('go', new GoAnalyzer());
 
-        // Rust analyzer'ı ekle
+
+        // Add Rust analyzer
         this.analyzers.set('rust', new RustAnalyzer());
 
-        // PHP analyzer'ı ekle
+
+        // Add PHP analyzer
         const phpAnalyzer = new PHPAnalyzer();
         this.analyzers.set('php', phpAnalyzer);
 
-        // Ruby analyzer'ı ekle
+
+        // Add Ruby analyzer
         const rubyAnalyzer = new RubyAnalyzer();
         this.analyzers.set('ruby', rubyAnalyzer);
 
-        // Angular analyzer'ı ekle
+
+        // Add Angular analyzer
         const angularAnalyzer = new AngularAnalyzer();
         this.analyzers.set('angular-ts', angularAnalyzer);
         this.analyzers.set('angular-html', angularAnalyzer);
         this.analyzers.set('angular-css', angularAnalyzer);
 
-        // React analyzer'ı ekle
+
+        // Add React analyzer
         const reactAnalyzer = new ReactAnalyzer();
         this.analyzers.set('react-ts', reactAnalyzer);
         this.analyzers.set('react-jsx', reactAnalyzer);
         this.analyzers.set('react-tsx', reactAnalyzer);
 
-        // Vue.js analyzer'ı ekle
+
+        // Add Vue.js analyzer
         const vueAnalyzer = new VueAnalyzer();
         this.analyzers.set('vue', vueAnalyzer);
         this.analyzers.set('vue-html', vueAnalyzer);
         this.analyzers.set('vue-css', vueAnalyzer);
         this.analyzers.set('vue-ts', vueAnalyzer);
+
         this.analyzers.set('vue-js', vueAnalyzer);
 
-        // Svelte analyzer'ı ekle
+        // Add Svelte analyzer
         const svelteAnalyzer = new SvelteAnalyzer();
         this.analyzers.set('svelte', svelteAnalyzer);
         this.analyzers.set('svelte-ts', svelteAnalyzer);
         this.analyzers.set('svelte-js', svelteAnalyzer);
 
-        // Express.js analyzer'ı ekle
+
+        // Add Express.js analyzer
         const expressAnalyzer = new ExpressAnalyzer();
         this.analyzers.set('javascript', expressAnalyzer);
         this.analyzers.set('typescript', expressAnalyzer);
         this.analyzers.set('express', expressAnalyzer);
         this.analyzers.set('node', expressAnalyzer);
 
-        // NestJS analyzer'ı ekle
+
+        // Add NestJS analyzer
         const nestAnalyzer = new NestAnalyzer();
         this.analyzers.set('typescript', nestAnalyzer);
         this.analyzers.set('javascript', nestAnalyzer);
         this.analyzers.set('nest', nestAnalyzer);
         this.analyzers.set('nestjs', nestAnalyzer);
 
-        // Spring Boot analyzer'ı ekle
+
+        // Add Spring Boot analyzer
         const springAnalyzer = new SpringBootAnalyzer();
         this.analyzers.set('java', springAnalyzer);
         this.analyzers.set('spring', springAnalyzer);
         this.analyzers.set('spring-boot', springAnalyzer);
 
-        // Django analyzer'ı ekle
+
+        // Add Django analyzer
         const djangoAnalyzer = new DjangoAnalyzer();
         this.analyzers.set('python', djangoAnalyzer);
         this.analyzers.set('django', djangoAnalyzer);
         this.analyzers.set('django-python', djangoAnalyzer);
 
-        // Laravel analyzer'ı ekle
+
+        // Add Laravel analyzer
         const laravelAnalyzer = new LaravelAnalyzer();
         this.analyzers.set('php', laravelAnalyzer);
         this.analyzers.set('laravel', laravelAnalyzer);
         this.analyzers.set('blade', laravelAnalyzer);
 
-        // Ruby on Rails analyzer'ı ekle
+
+        // Add Ruby on Rails analyzer
         const railsAnalyzer = new RailsAnalyzer();
         this.analyzers.set('ruby', railsAnalyzer);
         this.analyzers.set('rails', railsAnalyzer);
         this.analyzers.set('erb', railsAnalyzer);
 
-        // ASP.NET Core analyzer'ı ekle
+
+        // Add ASP.NET Core analyzer
         const aspnetAnalyzer = new AspNetAnalyzer();
         this.analyzers.set('csharp', aspnetAnalyzer);
         this.analyzers.set('cs', aspnetAnalyzer);
@@ -168,9 +188,10 @@ export class SemanticAnalysisService {
     public async analyzeFile(document: vscode.TextDocument): Promise<AnalysisResult> {
         const analyzer = this.analyzers.get(document.languageId);
         if (!analyzer) {
-            throw new Error(`Desteklenmeyen dil: ${document.languageId}`);
+            throw new Error(`Unsupported language: ${document.languageId}`);
         }
         return await analyzer.analyzeFile(document);
+
     }
 
     public getSupportedLanguages(): string[] {

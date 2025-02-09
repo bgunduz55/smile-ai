@@ -96,10 +96,11 @@ export class OllamaService implements LLMService {
     private updateStatusBar(): void {
         if (!this.isInitialized) {
             this.statusBarItem.text = "$(sync~spin) Ollama";
-            this.statusBarItem.tooltip = "Ollama başlatılıyor...";
+            this.statusBarItem.tooltip = "Ollama starting...";
         } else if (this.lastError) {
             this.statusBarItem.text = "$(error) Ollama";
-            this.statusBarItem.tooltip = `Hata: ${this.lastError.message}`;
+            this.statusBarItem.tooltip = `Error: ${this.lastError.message}`;
+
         } else {
             this.statusBarItem.text = "$(check) Ollama";
             this.statusBarItem.tooltip = `Model: ${this.currentModel}\nTPS: ${this.performanceMetrics.tokensPerSecond.toFixed(2)}`;
@@ -114,10 +115,11 @@ export class OllamaService implements LLMService {
             this.isInitialized = true;
             this.updateStatusBar();
         } catch (error) {
-            this.lastError = error instanceof Error ? error : new Error('Bilinmeyen bir hata oluştu');
+            this.lastError = error instanceof Error ? error : new Error('Unknown error');
             this.updateStatusBar();
             throw error;
         }
+
     }
 
     private async checkGPUSupport(): Promise<void> {
@@ -131,9 +133,10 @@ export class OllamaService implements LLMService {
                 this.performanceMetrics.gpuUtilization = gpuLayers;
             }
         } catch (error) {
-            console.warn('GPU bilgisi alınamadı:', error);
+            console.warn('GPU information could not be retrieved:', error);
         }
     }
+
 
     private async loadModels(): Promise<void> {
         try {
@@ -145,10 +148,11 @@ export class OllamaService implements LLMService {
                 await this.updateModelMetadata(this.currentModel);
             }
         } catch (error) {
-            console.error('Ollama modelleri yüklenirken hata:', error);
-            throw new Error('Ollama model listesi yüklenemedi. Ollama servisinin çalıştığından emin olun.');
+            console.error('Error loading models:', error);
+            throw new Error('Could not load Ollama models. Ensure Ollama service is running.');
         }
     }
+
 
     private async updateModelMetadata(modelName: string): Promise<void> {
         try {
@@ -161,9 +165,10 @@ export class OllamaService implements LLMService {
                 Object.assign(model.details, response.data.details);
             }
         } catch (error) {
-            console.warn(`Model metadata güncellenemedi (${modelName}):`, error);
+            console.warn(`Could not update model metadata (${modelName}):`, error);
         }
     }
+
 
     public async listModels(): Promise<OllamaModel[]> {
         return this.models;
@@ -171,10 +176,11 @@ export class OllamaService implements LLMService {
 
     public async setModel(modelName: string): Promise<void> {
         if (!this.models.some(m => m.name === modelName)) {
-            throw new Error(`Model bulunamadı: ${modelName}`);
+            throw new Error(`Model not found: ${modelName}`);
         }
         this.currentModel = modelName;
         await this.updateModelMetadata(modelName);
+
         await vscode.workspace.getConfiguration('smile-ai.ollama').update('defaultModel', modelName, true);
         this.updateStatusBar();
     }
@@ -230,12 +236,13 @@ export class OllamaService implements LLMService {
             return {
                 success: false,
                 output: '',
-                error: error instanceof Error ? error.message : 'Bilinmeyen bir hata oluştu',
+                error: error instanceof Error ? error.message : 'Unknown error',
                 metadata: {
                     tokensUsed: 0,
                     executionTime: Date.now() - startTime,
                     modelName: this.currentModel
                 }
+
             };
         }
     }
@@ -254,12 +261,15 @@ export class OllamaService implements LLMService {
 
     private handleError(error: unknown): void {
         this.errorCount++;
-        this.lastError = error instanceof Error ? error : new Error('Bilinmeyen bir hata oluştu');
+        this.lastError = error instanceof Error ? error : new Error('Unknown error');
         
-        // Hata durumunu göster
+
+        // Show error status
         this.updateStatusBar();
         
-        // Belirli bir hata sayısına ulaşıldığında servisi yeniden başlat
+
+        // Restart the service after a certain number of errors
+
         if (this.errorCount >= 5) {
             this.errorCount = 0;
             this.initialize().catch(console.error);

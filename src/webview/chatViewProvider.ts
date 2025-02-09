@@ -62,10 +62,11 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
             this.messages.push(assistantMessage);
             await this._updateView();
         } catch (error: unknown) {
-            const errorMessage = error instanceof Error ? error.message : 'Bilinmeyen bir hata oluştu';
-            vscode.window.showErrorMessage(`Chat hatası: ${errorMessage}`);
+            const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+            vscode.window.showErrorMessage(`Chat error: ${errorMessage}`);
         }
     }
+
 
     private async _updateView() {
         if (this._view) {
@@ -157,8 +158,8 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
                     ${messageHtml}
                 </div>
                 <div class="input-container">
-                    <input type="text" id="messageInput" placeholder="Mesajınızı yazın...">
-                    <button onclick="sendMessage()">Gönder</button>
+                    <input type="text" id="messageInput" placeholder="Write your message...">
+                    <button onclick="sendMessage()">Send</button>
                 </div>
                 <script>
                     const vscode = acquireVsCodeApi();
@@ -182,9 +183,10 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
                         }
                     }
 
-                    // Mesajları en alta kaydır
+                    // Scroll messages to bottom
                     messages.scrollTop = messages.scrollHeight;
                 </script>
+
             </body>
             </html>
         `;

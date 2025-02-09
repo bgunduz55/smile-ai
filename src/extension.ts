@@ -15,6 +15,8 @@ import { composerService } from './services/composerService';
 import { workspaceIndexer } from './services/workspaceIndexer';
 import { suggestionService } from './services/suggestionService';
 import { SuggestionViewProvider } from './webview/suggestionViewProvider';
+import { RulesService } from './services/rulesService';
+import { RulesViewProvider } from './webview/rulesViewProvider';
 
 let completionServiceInstance: CompletionService;
 let agentService: AgentService;
@@ -27,13 +29,17 @@ export const COMMANDS = {
 	OPEN_SETTINGS: 'smile-ai.openSettings',
 	SWITCH_VIEW: 'smile-ai.switchView',
 	SELECT_PROVIDER: 'smile-ai.selectProvider',
-	SELECT_OLLAMA_MODEL: 'smile-ai.selectOllamaModel'
+	SELECT_OLLAMA_MODEL: 'smile-ai.selectOllamaModel',
+	CREATE_RULE: 'smile-ai.createRule',
+	EDIT_RULE: 'smile-ai.editRule',
+	VIEW_RULES: 'smile-ai.viewRules'
 };
 
 // This method is called when your extension is activated
 // Your extension is activated the very first time the command is executed
 export async function activate(context: vscode.ExtensionContext) {
-	console.log('Smile AI Extension aktivasyonu başladı');
+	console.log('Smile AI Extension activation started');
+
 
 	try {
 		// Model konfigürasyonunu yükle
@@ -82,7 +88,8 @@ export async function activate(context: vscode.ExtensionContext) {
 		context.subscriptions.push(
 			vscode.window.registerWebviewViewProvider('smile-ai.chatView', chatViewProvider),
 			vscode.window.registerWebviewViewProvider('smile-ai.composerView', composerViewProvider),
-			vscode.window.registerWebviewViewProvider(SuggestionViewProvider.viewType, new SuggestionViewProvider(context.extensionUri))
+			vscode.window.registerWebviewViewProvider(SuggestionViewProvider.viewType, new SuggestionViewProvider(context.extensionUri)),
+			vscode.window.registerWebviewViewProvider(RulesViewProvider.viewType, new RulesViewProvider(context.extensionUri))
 		);
 
 		// Register commands
@@ -113,43 +120,48 @@ export async function activate(context: vscode.ExtensionContext) {
 			}),
 
 			vscode.commands.registerCommand('smile-ai.codeCompletion', () => {
-				vscode.window.showInformationMessage('Kod tamamlama başlatılıyor...');
+				vscode.window.showInformationMessage('Code completion started...');
 			}),
+
 
 			vscode.commands.registerCommand('smile-ai.codeAnalysis', async () => {
 				try {
 					const editor = vscode.window.activeTextEditor;
 					if (!editor) {
-						vscode.window.showWarningMessage('Lütfen analiz edilecek bir dosya açın');
+						vscode.window.showWarningMessage('Please open a file to analyze');
 						return;
 					}
+
 
 					const document = editor.document;
 					const supportedLanguages = semanticAnalysisService.getSupportedLanguages();
 					
 					if (!supportedLanguages.includes(document.languageId)) {
 						vscode.window.showWarningMessage(
-							`Bu özellik şu anda sadece ${supportedLanguages.join(', ')} dilleri için desteklenmektedir`
+							`This feature is currently only supported for the following languages: ${supportedLanguages.join(', ')}`
 						);
 						return;
 					}
 
+
 					vscode.window.withProgress({
 						location: vscode.ProgressLocation.Notification,
-						title: "Kod analizi yapılıyor...",
+						title: "Code analysis in progress...",
 						cancellable: false
 					}, async () => {
+
 						const result = await semanticAnalysisService.analyzeFile(document);
 						
 						// Analiz sonuçlarını göster
 						const panel = vscode.window.createWebviewPanel(
 							'codeAnalysis',
-							'Kod Analizi Sonuçları',
+							'Code Analysis Results',
 							vscode.ViewColumn.Two,
 							{
 								enableScripts: true
 							}
 						);
+
 
 						panel.webview.html = `
 							<!DOCTYPE html>
@@ -227,49 +239,58 @@ export async function activate(context: vscode.ExtensionContext) {
 						`;
 					});
 				} catch (error) {
-					vscode.window.showErrorMessage('Kod analizi sırasında bir hata oluştu: ' + 
-						(error instanceof Error ? error.message : 'Bilinmeyen bir hata'));
+					vscode.window.showErrorMessage('An error occurred during code analysis: ' + 
+						(error instanceof Error ? error.message : 'Unknown error'));
 				}
+
 			}),
 
 			vscode.commands.registerCommand('smile-ai.generateCode', () => {
-				vscode.window.showInformationMessage('Kod üretimi başlatılıyor...');
+				vscode.window.showInformationMessage('Code generation started...');
 			}),
+
 
 			vscode.commands.registerCommand('smile-ai.generateDocs', () => {
-				vscode.window.showInformationMessage('Dokümantasyon üretimi başlatılıyor...');
+				vscode.window.showInformationMessage('Documentation generation started...');
 			}),
+
 
 			vscode.commands.registerCommand('smile-ai.generateTests', () => {
-				vscode.window.showInformationMessage('Test üretimi başlatılıyor...');
+				vscode.window.showInformationMessage('Test generation started...');
 			}),
+
 
 			vscode.commands.registerCommand('smile-ai.refactorCode', () => {
-				vscode.window.showInformationMessage('Kod yeniden düzenleme başlatılıyor...');
+				vscode.window.showInformationMessage('Code refactoring started...');
 			}),
 
+
 			vscode.commands.registerCommand('smile-ai.fixBug', () => {
-				vscode.window.showInformationMessage('Hata düzeltme başlatılıyor...');
+				vscode.window.showInformationMessage('Bug fixing started...');
 			}),
+
 
 			vscode.commands.registerCommand(COMMANDS.SELECT_PROVIDER, async () => {
 				const providers = ['openai', 'anthropic', 'ollama', 'lmstudio', 'localai', 'deepseek', 'qwen'];
 				const selected = await vscode.window.showQuickPick(providers, {
-					placeHolder: 'AI sağlayıcısını seçin'
+					placeHolder: 'Select AI provider'
 				});
+
 
 				if (selected) {
 					await vscode.workspace.getConfiguration('smile-ai').update('provider', selected, true);
-					vscode.window.showInformationMessage(`AI sağlayıcısı ${selected} olarak değiştirildi`);
+					vscode.window.showInformationMessage(`AI provider changed to ${selected}`);
 				}
+
 			}),
 
 			vscode.commands.registerCommand(COMMANDS.SELECT_OLLAMA_MODEL, async () => {
 				const config = vscode.workspace.getConfiguration('smile-ai');
 				if (config.get('provider') !== 'ollama') {
-					vscode.window.showErrorMessage('Bu komut yalnızca Ollama sağlayıcısı seçiliyken kullanılabilir');
+					vscode.window.showErrorMessage('This command is only available when the Ollama provider is selected');
 					return;
 				}
+
 
 				try {
 					const ollamaService = new OllamaService();
@@ -280,21 +301,75 @@ export async function activate(context: vscode.ExtensionContext) {
 						models.map(m => ({
 							label: m.name,
 							description: `${m.details.parameter_size} - ${m.details.format}`,
-							detail: `Son güncelleme: ${new Date(m.modified_at).toLocaleString()}`
+							detail: `Last update: ${new Date(m.modified_at).toLocaleString()}`
 						})),
-						{ placeHolder: 'Ollama modelini seçin' }
+						{ placeHolder: 'Select an Ollama model' }
+
 					);
 
 					if (selected) {
 						await ollamaService.setModel(selected.label);
-						vscode.window.showInformationMessage(`Ollama modeli ${selected.label} olarak değiştirildi`);
+						vscode.window.showInformationMessage(`Ollama model changed to ${selected.label}`);
 					}
+
 
 					ollamaService.dispose();
 				} catch (error) {
-					vscode.window.showErrorMessage('Ollama modelleri yüklenirken hata oluştu: ' + 
-						(error instanceof Error ? error.message : 'Bilinmeyen bir hata'));
+					vscode.window.showErrorMessage('An error occurred while loading Ollama models: ' + 
+						(error instanceof Error ? error.message : 'Unknown error'));
 				}
+
+			}),
+
+			vscode.commands.registerCommand(COMMANDS.CREATE_RULE, async () => {
+				const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+				if (!workspaceFolder) {
+					vscode.window.showErrorMessage('Please open a workspace');
+					return;
+				}
+
+
+				const ruleName = await vscode.window.showInputBox({
+					prompt: 'Enter a new rule set name',
+					placeHolder: 'Example: api-conventions'
+				});
+
+
+				if (ruleName) {
+					await RulesService.getInstance().createRule(workspaceFolder, ruleName);
+				}
+			}),
+
+			vscode.commands.registerCommand(COMMANDS.EDIT_RULE, async () => {
+				const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+				if (!workspaceFolder) {
+					vscode.window.showErrorMessage('Please open a workspace');
+					return;
+				}
+
+
+				const config = vscode.workspace.getConfiguration('smile-ai.rules');
+				const enabledRules = config.get<string[]>('enabledRules', []);
+
+				const ruleName = await vscode.window.showQuickPick(enabledRules, {
+					placeHolder: 'Select the rule set to edit'
+				});
+
+
+				if (ruleName) {
+					await RulesService.getInstance().editRule(workspaceFolder, ruleName);
+				}
+			}),
+
+			vscode.commands.registerCommand(COMMANDS.VIEW_RULES, async () => {
+				const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+				if (!workspaceFolder) {
+					vscode.window.showErrorMessage('Please open a workspace');
+					return;
+				}
+
+
+				await RulesService.getInstance().viewRules(workspaceFolder);
 			})
 		);
 
@@ -302,20 +377,24 @@ export async function activate(context: vscode.ExtensionContext) {
 		context.subscriptions.push(
 			vscode.workspace.onDidChangeConfiguration(e => {
 				if (e.affectsConfiguration('smile-ai')) {
-					vscode.window.showInformationMessage('Smile AI ayarları güncellendi. Servisler yeniden başlatılıyor...');
+					vscode.window.showInformationMessage('Smile AI settings updated. Services are being restarted...');
 				}
 			})
+
 		);
 
-		// Workspace açıldığında veya değiştiğinde indexlemeyi başlat
+		// Workspace açıldığında veya değiştiğinde indexlemeyi ve kuralları yükle
 		if (vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders.length > 0) {
-			indexService.startIndexing(vscode.workspace.workspaceFolders[0]);
+			const workspaceFolder = vscode.workspace.workspaceFolders[0];
+			await indexService.startIndexing(workspaceFolder);
+			await RulesService.getInstance().loadRules(workspaceFolder);
 		}
 
 		context.subscriptions.push(
-			vscode.workspace.onDidChangeWorkspaceFolders(e => {
+			vscode.workspace.onDidChangeWorkspaceFolders(async e => {
 				if (e.added.length > 0) {
-					indexService.startIndexing(e.added[0]);
+					await indexService.startIndexing(e.added[0]);
+					await RulesService.getInstance().loadRules(e.added[0]);
 				}
 			})
 		);
@@ -328,23 +407,26 @@ export async function activate(context: vscode.ExtensionContext) {
 		context.subscriptions.push(
 			chatService,
 			composerService,
-			completionService,
+			completionServiceInstance,
 			indexService,
 			workspaceIndexer,
 			suggestionService
 		);
 
-		// Workspace'i indexle
+		// Index the workspace
 		if (vscode.workspace.workspaceFolders?.length) {
 			await workspaceIndexer.startIndexing(vscode.workspace.workspaceFolders[0]);
 		}
 
-		vscode.window.showInformationMessage('Smile AI başarıyla aktive edildi!');
+		// Show success message
+		vscode.window.showInformationMessage('Smile AI successfully activated!');
+
 	} catch (error) {
-		console.error('Smile AI aktivasyon hatası:', error);
-		vscode.window.showErrorMessage('Smile AI aktivasyonu başarısız oldu: ' + 
-			(error instanceof Error ? error.message : 'Bilinmeyen bir hata oluştu'));
+		console.error('Smile AI activation error:', error);
+		vscode.window.showErrorMessage('Smile AI activation failed: ' + 
+			(error instanceof Error ? error.message : 'Unknown error'));
 	}
+
 }
 
 // This method is called when your extension is deactivated

@@ -25,9 +25,10 @@ export class ComposerService {
     public async startComposer() {
         const editor = vscode.window.activeTextEditor;
         if (!editor) {
-            vscode.window.showErrorMessage('Composer başlatmak için bir dosya açık olmalıdır.');
+            vscode.window.showErrorMessage('Composer must be started with an open file.');
             return;
         }
+
 
         const document = editor.document;
         const selection = editor.selection;
@@ -88,18 +89,20 @@ export class ComposerService {
 
     private async handleCodeGeneration(prompt: string) {
         if (!this.webviewPanel || !this.currentContext) {
-            vscode.window.showErrorMessage('Lütfen bir dosya açın ve metin seçin.');
+            vscode.window.showErrorMessage('Please open a file and select text.');
             return;
         }
+
 
         try {
             const fullPrompt = `${prompt}\n\nContext:\n${JSON.stringify(this.currentContext)}`;
             const response = await aiService.generateCode(fullPrompt);
             await this.webviewPanel.webview.postMessage({ type: 'updateResponse', value: response });
         } catch (error: unknown) {
-            const errorMessage = error instanceof Error ? error.message : 'Bilinmeyen bir hata oluştu';
-            vscode.window.showErrorMessage(`Kod üretme hatası: ${errorMessage}`);
+            const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+            vscode.window.showErrorMessage(`Code generation error: ${errorMessage}`);
         }
+
     }
 
     private async applyChanges(newCode: string) {
@@ -119,11 +122,13 @@ export class ComposerService {
             );
 
             await vscode.workspace.applyEdit(edit);
-            vscode.window.showInformationMessage('Değişiklikler başarıyla uygulandı.');
+            vscode.window.showInformationMessage('Changes applied successfully.');
+
         } catch (error: unknown) {
-            const errorMessage = error instanceof Error ? error.message : 'Bilinmeyen bir hata oluştu';
-            vscode.window.showErrorMessage(`Değişiklikleri uygularken hata: ${errorMessage}`);
+            const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+            vscode.window.showErrorMessage(`Error applying changes: ${errorMessage}`);
         }
+
     }
 
     private async updateWebview() {
@@ -255,6 +260,10 @@ export class ComposerService {
             </body>
             </html>
         `;
+    }
+
+    public dispose(): void {
+        // Clean up resources
     }
 }
 

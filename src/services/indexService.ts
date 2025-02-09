@@ -101,16 +101,18 @@ export class IndexService {
                 vscode.window.showInformationMessage('.smileignore dosyası yüklendi');
             } else {
                 // .smileignore yoksa varsayılan bir tane oluştur
-                const defaultContent = `# Smile AI tarafından indexlenmeyecek dosya ve klasörler
-# Her satır bir glob pattern içermelidir
-# ! ile başlayan satırlar dahil edilecek öğeleri belirtir
+                const defaultContent = `# Files and folders that will not be indexed by Smile AI
+# Each line should contain a glob pattern
+# Lines starting with ! will be included
 
-# Genel dışlamalar
+
+# General exclusions
 **/node_modules/**
 **/dist/**
 **/build/**
 **/.git/**
 **/out/**
+
 **/.DS_Store
 **/thumbs.db
 **/*.min.js
@@ -120,40 +122,47 @@ export class IndexService {
 **/tmp/**
 **/temp/**
 
-# Büyük dosyalar
+# Large files
 **/*.{png,jpg,jpeg,gif,ico,svg,woff,woff2,ttf,eot}
 **/*.{zip,tar,gz,rar,7z}
 **/*.{mp3,mp4,avi,mov,wmv}
 **/*.{pdf,doc,docx,xls,xlsx,ppt,pptx}
 
-# IDE ve editör dosyaları
+
+# IDE and editor files
 **/.idea/**
 **/.vscode/**
 **/.vs/**
 **/*.sublime-*
 **/*.swp
+
 **/*.swo
 
-# Log ve veritabanı dosyaları
+# Log and database files
 **/*.log
 **/*.sqlite
 **/*.db
 
-# Özel dışlamalar
+
+# Special exclusions
 # my-secret-folder/**
 
-# Özel dahil etmeler (dışlanan klasörlerdeki belirli dosyaları dahil et)
-# !**/node_modules/önemli-paket/önemli-dosya.js
+
+# Special inclusions (include specific files in excluded folders)
+# !**/node_modules/important-package/important-file.js
 # !**/dist/index.html`;
 
+
                 fs.writeFileSync(smileIgnorePath, defaultContent, 'utf-8');
-                vscode.window.showInformationMessage('Varsayılan .smileignore dosyası oluşturuldu');
+                vscode.window.showInformationMessage('Default .smileignore file created');
+
             }
         } catch (error) {
-            console.error('.smileignore yükleme hatası:', error);
-            vscode.window.showErrorMessage('.smileignore dosyası yüklenirken hata oluştu');
+            console.error('.smileignore loading error:', error);
+            vscode.window.showErrorMessage('.smileignore file loading error');
         }
     }
+
 
     public async startIndexing(workspaceFolder: vscode.WorkspaceFolder): Promise<void> {
         if (this.indexingPromise) {
@@ -182,29 +191,34 @@ export class IndexService {
                 }
             }
 
-            // Dosya değişikliklerini izle
+            // Watch file changes
             this.startWatching(workspaceFolder);
 
-            vscode.window.showInformationMessage('Dosya indeksleme tamamlandı.');
+
+            vscode.window.showInformationMessage('File indexing completed.');
+
         } catch (error: unknown) {
-            const errorMessage = error instanceof Error ? error.message : 'Bilinmeyen bir hata oluştu';
-            vscode.window.showErrorMessage(`İndeksleme hatası: ${errorMessage}`);
+            const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+            vscode.window.showErrorMessage(`Indexing error: ${errorMessage}`);
         } finally {
             this.indexingPromise = null;
         }
+
     }
 
     private shouldIndexFile(filePath: string): boolean {
         const relativePath = vscode.workspace.asRelativePath(filePath);
 
-        // Önce include pattern'leri kontrol et
+        // First check include patterns
+
         for (const pattern of this.ignoreConfig.includePatterns) {
             if (minimatch(relativePath, pattern)) {
                 return true;
             }
         }
 
-        // Sonra exclude pattern'leri kontrol et
+        // Then check exclude patterns
+
         for (const pattern of this.ignoreConfig.excludePatterns) {
             if (minimatch(relativePath, pattern)) {
                 return false;
@@ -223,20 +237,23 @@ export class IndexService {
             const stats = fs.statSync(filePath);
             const lastModified = stats.mtimeMs;
 
-            // Dosya içeriğini oku
+            // Read file content
             const content = fs.readFileSync(filePath, 'utf-8');
             const language = this.getFileLanguage(filePath);
 
-            // Veritabanını güncelle
+
+            // Update database
             await this.run(
                 `INSERT OR REPLACE INTO files (file_path, content, language, last_modified)
                  VALUES (?, ?, ?, ?)`,
                 [filePath, content, language, lastModified]
             );
+
         } catch (error) {
-            console.error(`Dosya indekslenirken hata: ${filePath}`, error);
+            console.error(`Error indexing file: ${filePath}`, error);
         }
     }
+
 
     private startWatching(workspaceFolder: vscode.WorkspaceFolder): void {
         if (this.watcher) {
@@ -260,14 +277,16 @@ export class IndexService {
             .on('change', (filePath) => this.indexFile(path.join(workspaceFolder.uri.fsPath, filePath)))
             .on('unlink', (filePath) => this.removeFile(path.join(workspaceFolder.uri.fsPath, filePath)));
 
-        // .smileignore değişikliklerini izle
+        // Watch .smileignore changes
         const smileIgnorePath = path.join(workspaceFolder.uri.fsPath, '.smileignore');
+
         fs.watch(smileIgnorePath, async (eventType) => {
             if (eventType === 'change') {
                 await this.loadSmileIgnore(workspaceFolder.uri.fsPath);
-                // Yeniden indexleme başlat
+                // Restart indexing
                 this.indexingPromise = null;
                 await this.startIndexing(workspaceFolder);
+
             }
         });
     }
@@ -351,9 +370,10 @@ export class IndexService {
     }
 
     public async getRelevantFiles(context: string): Promise<IndexedFile[]> {
-        // Basit bir benzerlik skoru hesapla
+        // Calculate a simple similarity score
         const words = context.toLowerCase().split(/\W+/).filter(w => w.length > 3);
         
+
         if (words.length === 0) {
             return [];
         }

@@ -71,26 +71,29 @@ export class ComposerViewProvider implements vscode.WebviewViewProvider {
 
     private async handleCodeGeneration(prompt: string) {
         if (!this._view || !this.currentContext) {
-            vscode.window.showErrorMessage('Lütfen bir dosya açın ve metin seçin.');
+            vscode.window.showErrorMessage('Please open a file and select text.');
             return;
         }
+
 
         try {
             const response = await aiService.generateCode(prompt, JSON.stringify(this.currentContext));
             this.currentResponse = response;
             await this._view.webview.postMessage({ type: 'updateResponse', value: response });
         } catch (error: unknown) {
-            const errorMessage = error instanceof Error ? error.message : 'Bilinmeyen bir hata oluştu';
-            vscode.window.showErrorMessage(`Kod üretme hatası: ${errorMessage}`);
+            const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+            vscode.window.showErrorMessage(`Code generation error: ${errorMessage}`);
         }
     }
+
 
     private async applyChanges(newCode: string) {
         const editor = vscode.window.activeTextEditor;
         if (!editor || !this.currentContext) {
-            vscode.window.showErrorMessage('Değişiklikleri uygulamak için bir dosya açık olmalıdır.');
+            vscode.window.showErrorMessage('Please open a file and select text.');
             return;
         }
+
 
         try {
             const edit = new vscode.WorkspaceEdit();
@@ -103,19 +106,22 @@ export class ComposerViewProvider implements vscode.WebviewViewProvider {
             );
 
             await vscode.workspace.applyEdit(edit);
-            vscode.window.showInformationMessage('Değişiklikler başarıyla uygulandı.');
+            vscode.window.showInformationMessage('Changes applied successfully.');
+
         } catch (error: unknown) {
-            const errorMessage = error instanceof Error ? error.message : 'Bilinmeyen bir hata oluştu';
-            vscode.window.showErrorMessage(`Değişiklikleri uygularken hata: ${errorMessage}`);
+            const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+            vscode.window.showErrorMessage(`Error applying changes: ${errorMessage}`);
         }
     }
 
+
     private _getHtmlForWebview(_webview: vscode.Webview) {
         const contextInfo = this.currentContext
-            ? `Aktif Dosya: ${this.currentContext.filePath}\nDil: ${this.currentContext.language}\n${
-                this.currentContext.selection ? 'Seçili metin var' : 'Seçili metin yok'
+            ? `Active File: ${this.currentContext.filePath}\nLanguage: ${this.currentContext.language}\n${
+                this.currentContext.selection ? 'Selected text exists' : 'No selected text'
             }`
-            : 'Lütfen bir dosya açın';
+            : 'Please open a file';
+
 
         return `
             <!DOCTYPE html>
@@ -188,19 +194,21 @@ export class ComposerViewProvider implements vscode.WebviewViewProvider {
                 <div class="context-info">${this._escapeHtml(contextInfo)}</div>
                 <div class="container">
                     <div class="section">
-                        <h3>İstek</h3>
-                        <textarea id="promptInput" placeholder="Ne yapmak istediğinizi açıklayın..."></textarea>
+                        <h3>Request</h3>
+                        <textarea id="promptInput" placeholder="Explain what you want to do..."></textarea>
                         <div class="button-container">
-                            <button onclick="generateCode()">Kod Üret</button>
+                            <button onclick="generateCode()">Generate Code</button>
                         </div>
+
                     </div>
                     <div class="section">
-                        <h3>Yanıt</h3>
+                        <h3>Response</h3>
                         <textarea id="responseOutput" readonly>${this._escapeHtml(this.currentResponse || '')}</textarea>
                         <div class="button-container">
-                            <button onclick="applyChanges()">Değişiklikleri Uygula</button>
+                            <button onclick="applyChanges()">Apply Changes</button>
                         </div>
                     </div>
+
                 </div>
                 <script>
                     const vscode = acquireVsCodeApi();

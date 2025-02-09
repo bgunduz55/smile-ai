@@ -65,10 +65,11 @@ export class SuggestionService {
                     const items = JSON.parse(content) as SuggestionItem[];
                     this.suggestions.set(folder.uri.fsPath, items);
                 } catch (error) {
-                    console.error('Öneriler yüklenirken hata:', error);
+                    console.error('Error loading suggestions:', error);
                 }
             }
         }
+
 
         this.updateStatusBar();
     }
@@ -85,9 +86,10 @@ export class SuggestionService {
             const items = this.suggestions.get(workspaceRoot) || [];
             await fs.promises.writeFile(suggestionsPath, JSON.stringify(items, null, 2));
         } catch (error) {
-            console.error('Öneriler kaydedilirken hata:', error);
+            console.error('Error saving suggestions:', error);
         }
     }
+
 
     public async addSuggestion(suggestion: Omit<SuggestionItem, 'id' | 'createdAt' | 'updatedAt'>): Promise<void> {
         const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
@@ -108,8 +110,9 @@ export class SuggestionService {
         await this.saveSuggestions(workspaceRoot);
         this.updateStatusBar();
 
-        // Kullanıcıya bildirim göster
-        vscode.window.showInformationMessage(`Yeni öneri eklendi: ${suggestion.title}`);
+        // Show notification to user
+        vscode.window.showInformationMessage(`New suggestion added: ${suggestion.title}`);
+
     }
 
     public async completeSuggestion(id: string): Promise<void> {
@@ -150,9 +153,10 @@ export class SuggestionService {
         const items = this.suggestions.get(workspaceFolder.uri.fsPath) || [];
         const pendingCount = items.filter(item => item.status === 'pending').length;
         
-        this.statusBarItem.text = `$(lightbulb) Öneriler (${pendingCount})`;
-        this.statusBarItem.tooltip = `${pendingCount} bekleyen öneri`;
+        this.statusBarItem.text = `$(lightbulb) Suggestions (${pendingCount})`;
+        this.statusBarItem.tooltip = `${pendingCount} pending suggestion`;
     }
+
 
     private async showSuggestionsPanel(): Promise<void> {
         const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
@@ -171,7 +175,8 @@ export class SuggestionService {
         const items = this.suggestions.get(workspaceFolder.uri.fsPath) || [];
         panel.webview.html = this.getSuggestionsHtml(items);
 
-        // Webview mesajlarını dinle
+        // Listen for webview messages
+
         panel.webview.onDidReceiveMessage(async message => {
             switch (message.command) {
                 case 'complete':
@@ -216,8 +221,9 @@ export class SuggestionService {
             <head>
                 <meta charset="UTF-8">
                 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-                <title>Smile AI - Öneriler</title>
+                <title>Smile AI - Suggestions</title>
                 <style>
+
                     body {
                         font-family: var(--vscode-font-family);
                         padding: 20px;
@@ -292,7 +298,8 @@ export class SuggestionService {
                 </style>
             </head>
             <body>
-                <h1>Geliştirme Önerileri</h1>
+                <h1>Development Suggestions</h1>
+
                 ${items.map(item => `
                     <div class="suggestion">
                         <div class="suggestion-header">
@@ -304,9 +311,10 @@ export class SuggestionService {
                             </span>
                         </div>
                         <div class="suggestion-meta">
-                            Oluşturulma: ${new Date(item.createdAt).toLocaleString()}
-                            | Son güncelleme: ${new Date(item.updatedAt).toLocaleString()}
+                            Created: ${new Date(item.createdAt).toLocaleString()}
+                            | Updated: ${new Date(item.updatedAt).toLocaleString()}
                         </div>
+
                         <div class="suggestion-description">
                             ${item.description}
                         </div>
@@ -325,13 +333,15 @@ export class SuggestionService {
                         <div class="actions">
                             ${item.status !== 'completed' ? `
                                 <button onclick="completeSuggestion('${item.id}')">
-                                    Tamamlandı
+                                    Completed
                                 </button>
                             ` : ''}
+
                             <button onclick="removeSuggestion('${item.id}')">
-                                Kaldır
+                                Remove
                             </button>
                         </div>
+
                     </div>
                 `).join('')}
                 <script>

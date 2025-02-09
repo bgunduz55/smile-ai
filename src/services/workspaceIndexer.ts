@@ -23,15 +23,16 @@ export class WorkspaceIndexer {
         try {
             await indexService.startIndexing(workspaceFolder);
         } catch (error: unknown) {
-            const errorMessage = error instanceof Error ? error.message : 'Bilinmeyen bir hata oluştu';
-            vscode.window.showErrorMessage(`İndeksleme hatası: ${errorMessage}`);
+            const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+            vscode.window.showErrorMessage(`Indexing error: ${errorMessage}`);
         } finally {
             this.isIndexing = false;
         }
+
     }
 
     public async searchFiles(_query: string): Promise<void> {
-        // TODO: İleride arama fonksiyonelliği eklenecek
+        // TODO: Later, search functionality will be added
     }
 }
 

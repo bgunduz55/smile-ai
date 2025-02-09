@@ -81,10 +81,11 @@ export class ChatService {
             this.messages.push(assistantMessage);
             await this.updateWebview();
         } catch (error: unknown) {
-            const errorMessage = error instanceof Error ? error.message : 'Bilinmeyen bir hata oluştu';
-            vscode.window.showErrorMessage(`Chat hatası: ${errorMessage}`);
+            const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+            vscode.window.showErrorMessage(`Chat error: ${errorMessage}`);
         }
     }
+
 
     private async updateWebview() {
         if (!this.webviewPanel) {
@@ -203,6 +204,10 @@ export class ChatService {
             </body>
             </html>
         `;
+    }
+
+    public dispose(): void {
+        // Clean up resources
     }
 }
 
