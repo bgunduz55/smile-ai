@@ -3,6 +3,11 @@
   "displayName": "Smile AI",
   "description": "A local AI developer assistant for VS Code",
   "version": "0.0.1",
+  "publisher": "bgund",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/bgund/smile-ai"
+  },
   "engines": {
     "vscode": "^1.85.0"
   },
@@ -10,50 +15,27 @@
     "Other"
   ],
   "activationEvents": [
-    "onStartupFinished"
+    "onStartupFinished",
+    "onView:smile-ai.mainView",
+    "*"
   ],
   "main": "./dist/extension.js",
   "dependencies": {
-    "@angular/compiler": "^17.1.0",
-    "@angular/compiler-cli": "^17.1.0",
     "@anthropic-ai/sdk": "^0.36.3",
-    "@babel/parser": "^7.23.0",
-    "@babel/traverse": "^7.23.0",
-    "@babel/types": "^7.23.0",
-    "@types/mocha": "^10.0.10",
-    "@vscode/test-electron": "^2.4.1",
-    "@vue/compiler-dom": "^3.4.0",
-    "@vue/compiler-sfc": "^3.4.0",
     "axios": "^1.7.9",
-    "chokidar": "^3.5.3",
-    "coffeescript": "^2.7.0",
-    "dustjs-linkedin": "^3.0.1",
-    "ejs": "^3.1.10",
-    "handlebars": "^4.7.8",
-    "lodash": "^4.17.21",
-    "mocha": "^10.2.0",
-    "mustache": "^4.2.0",
-    "node-llama-cpp": "^3.5.0",
-    "nunjucks": "^3.2.4",
-    "openai": "^4.83.0",
-    "pug": "^3.0.3",
-    "react": "^18.2.0",
-    "react-dom": "^18.2.0",
-    "sqlite3": "^5.1.0",
-    "svelte": "^4.2.0",
-    "twig": "^1.17.1",
-    "typescript": "^5.3.0",
-    "underscore": "^1.13.7",
-    "velocityjs": "^2.0.6",
-    "vscode-languageclient": "^8.1.0"
+    "openai": "^4.83.0"
   },
   "devDependencies": {
+    "@types/minimatch": "^5.1.2",
     "@types/node": "^18.0.0",
     "@types/vscode": "^1.85.0",
     "@typescript-eslint/eslint-plugin": "^6.21.0",
     "@typescript-eslint/parser": "^6.21.0",
+    "@vscode/codicons": "^0.0.36",
+    "copy-webpack-plugin": "^12.0.2",
     "eslint": "^8.56.0",
     "ts-loader": "^9.5.0",
+    "typescript": "^5.3.0",
     "webpack": "^5.97.0",
     "webpack-cli": "^5.1.0"
   },
@@ -71,89 +53,108 @@
       "smile-ai": [
         {
           "type": "webview",
-          "id": "smile-ai.chatView",
-          "name": "Chat"
-        },
-        {
-          "type": "webview",
-          "id": "smile-ai.composerView",
-          "name": "Composer"
-        },
-        {
-          "type": "webview",
-          "id": "smile-ai.suggestionView",
-          "name": "Geliştirme Önerileri",
-          "icon": "$(lightbulb)"
-        },
-        {
-          "type": "webview",
-          "id": "smile-ai.rulesView",
-          "name": "Kural Setleri",
-          "icon": "$(book)"
+          "id": "smile-ai.mainView",
+          "name": "Smile AI",
+          "icon": "$(hubot)",
+          "contextualTitle": "Smile AI",
+          "visibility": "visible"
         }
       ]
     },
     "commands": [
       {
-        "command": "smile-ai.chatView.focus",
-        "title": "Chat View'ı Göster",
-        "category": "Smile AI"
+        "command": "smile-ai.switchToChat",
+        "title": "Chat",
+        "category": "Smile AI",
+        "icon": "$(comment-discussion)"
       },
       {
-        "command": "smile-ai.composerView.focus",
-        "title": "Composer View'ı Göster",
-        "category": "Smile AI"
+        "command": "smile-ai.switchToComposer",
+        "title": "Composer",
+        "category": "Smile AI",
+        "icon": "$(edit)"
       },
+      {
+        "command": "smile-ai.switchToSuggestions",
+        "title": "Suggestions",
+        "category": "Smile AI",
+        "icon": "$(lightbulb)"
+
+      },
+      {
+        "command": "smile-ai.switchToRules",
+        "title": "Rules",
+        "category": "Smile AI",
+        "icon": "$(book)"
+      },
+
+      {
+        "command": "smile-ai.switchToSettings",
+        "title": "Settings",
+        "category": "Smile AI",
+        "icon": "$(gear)"
+      },
+
       {
         "command": "smile-ai.codeCompletion",
-        "title": "Kod Tamamlama",
+        "title": "Code Completion",
         "category": "Smile AI"
       },
+
       {
         "command": "smile-ai.codeAnalysis",
-        "title": "Kod Analizi",
+        "title": "Code Analysis",
         "category": "Smile AI"
       },
+
       {
         "command": "smile-ai.generateCode",
-        "title": "Kod Üret",
+        "title": "Generate Code",
         "category": "Smile AI"
       },
+
       {
         "command": "smile-ai.generateDocs",
-        "title": "Dokümantasyon Üret",
+        "title": "Generate Docs",
         "category": "Smile AI"
       },
+
       {
         "command": "smile-ai.generateTests",
-        "title": "Test Üret",
+        "title": "Generate Tests",
         "category": "Smile AI"
       },
+
       {
         "command": "smile-ai.refactorCode",
-        "title": "Kodu Yeniden Düzenle",
+        "title": "Refactor Code",
         "category": "Smile AI"
       },
+
       {
         "command": "smile-ai.fixBug",
-        "title": "Hata Düzelt",
+        "title": "Fix Bug",
         "category": "Smile AI"
       },
+
       {
         "command": "smile-ai.createRule",
-        "title": "Yeni Kural Seti Oluştur",
+        "title": "Create New Rule Set",
         "category": "Smile AI"
       },
+
       {
         "command": "smile-ai.editRule",
-        "title": "Kural Setini Düzenle",
+        "title": "Edit Rule Set",
         "category": "Smile AI"
       },
+
       {
         "command": "smile-ai.viewRules",
-        "title": "Kuralları Görüntüle",
+        "title": "View Rules",
         "category": "Smile AI"
       }
+
     ],
     "keybindings": [
       {
@@ -176,35 +177,133 @@
     "configuration": {
       "title": "Smile AI",
       "properties": {
-        "smile-ai.modelPath": {
+        "smile-ai.modelProvider": {
           "type": "string",
-          "default": "",
-          "description": "Llama model dosyasının yolu"
+          "enum": [
+            "ollama",
+            "llamacpp",
+            "openai",
+            "anthropic",
+            "local"
+          ],
+          "default": "ollama",
+          "description": "AI model provider"
+        },
+
+        "smile-ai.modelSettings": {
+          "type": "object",
+          "properties": {
+            "ollama": {
+              "type": "object",
+              "properties": {
+                "modelPath": {
+                  "type": "string",
+                  "description": "Ollama model file path"
+                },
+
+                "apiEndpoint": {
+                  "type": "string",
+                  "default": "http://localhost:11434",
+                  "description": "Ollama API endpoint"
+                }
+              }
+            },
+            "llamacpp": {
+              "type": "object",
+              "properties": {
+                "modelPath": {
+                  "type": "string",
+                  "description": "LlamaCpp model file path"
+                }
+              }
+            },
+
+            "openai": {
+              "type": "object",
+              "properties": {
+                "apiKey": {
+                  "type": "string",
+                  "description": "OpenAI API key"
+                },
+
+                "model": {
+                  "type": "string",
+                  "default": "gpt-4",
+                  "description": "OpenAI model"
+
+                }
+              }
+            },
+            "anthropic": {
+              "type": "object",
+              "properties": {
+                "apiKey": {
+                  "type": "string",
+                  "description": "Anthropic API key"
+                },
+
+                "model": {
+                  "type": "string",
+                  "default": "claude-3-opus-20240229",
+                  "description": "Anthropic model"
+
+                }
+              }
+            }
+          }
+        },
+        "smile-ai.modelParameters": {
+          "type": "object",
+          "properties": {
+            "temperature": {
+              "type": "number",
+              "default": 0.7,
+              "description": "Model temperature value (0-1)"
+
+            },
+            "maxTokens": {
+              "type": "number",
+              "default": 2048,
+              "description": "Maximum token count"
+
+            },
+            "contextSize": {
+              "type": "number",
+              "default": 4096,
+              "description": "Model context size"
+
+            }
+          }
         },
         "smile-ai.contextSize": {
           "type": "number",
           "default": 4096,
-          "description": "Model bağlam boyutu"
+          "description": "Model context size"
+
         },
         "smile-ai.temperature": {
           "type": "number",
           "default": 0.7,
-          "description": "Model sıcaklık değeri (0-1 arası)"
+          "description": "Model temperature value (0-1)"
+
         },
         "smile-ai.maxTokens": {
           "type": "number",
           "default": 2048,
-          "description": "Maksimum token sayısı"
+          "description": "Maximum token count"
+
         },
         "smile-ai.gpu.enabled": {
           "type": "boolean",
           "default": true,
-          "description": "GPU kullanımını etkinleştir"
+          "description": "Enable GPU usage"
+
         },
         "smile-ai.gpu.layers": {
           "type": "number",
           "default": 32,
-          "description": "GPU'da çalıştırılacak katman sayısı"
+          "description": "Number of layers to run on GPU"
+
         },
         "smile-ai.gpu.device": {
           "type": "string",
@@ -214,90 +313,107 @@
             "metal",
             "directml"
           ],
-          "description": "Kullanılacak GPU cihazı"
+          "description": "GPU device to use"
         },
+
         "smile-ai.performance.batchSize": {
           "type": "number",
           "default": 512,
-          "description": "Model batch size değeri"
+          "description": "Model batch size"
+
         },
         "smile-ai.performance.threads": {
           "type": "number",
           "default": 4,
-          "description": "Kullanılacak CPU thread sayısı"
+          "description": "Number of CPU threads to use"
+
         },
         "smile-ai.performance.useMlock": {
           "type": "boolean",
           "default": true,
-          "description": "Model belleğini kilitleyerek performansı artır"
+          "description": "Lock the model memory to improve performance"
+
         },
         "smile-ai.performance.useMemorymap": {
           "type": "boolean",
           "default": true,
-          "description": "Memory mapping kullanarak bellek kullanımını optimize et"
+          "description": "Use memory mapping to optimize memory usage"
+
         },
         "smile-ai.caching.enabled": {
           "type": "boolean",
           "default": true,
-          "description": "Model çıktılarını önbelleklemeyi etkinleştir"
+          "description": "Enable caching of model outputs"
+
         },
         "smile-ai.caching.maxSize": {
           "type": "number",
           "default": 1073741824,
-          "description": "Maksimum önbellek boyutu (byte)"
+          "description": "Maximum cache size (bytes)"
+
         },
         "smile-ai.caching.ttl": {
           "type": "number",
           "default": 3600000,
-          "description": "Önbellek girişlerinin yaşam süresi (ms)"
+          "description": "Cache entry lifetime (ms)"
+
         },
         "smile-ai.ollama": {
           "type": "object",
-          "title": "Ollama Yapılandırması",
+          "title": "Ollama Configuration",
           "properties": {
             "endpoint": {
+
               "type": "string",
               "default": "http://localhost:11434",
-              "description": "Ollama API endpoint adresi"
+              "description": "Ollama API endpoint"
+
             },
             "defaultModel": {
               "type": "string",
               "default": "llama2",
-              "description": "Varsayılan Ollama modeli"
+              "description": "Default Ollama model"
+
             },
             "temperature": {
               "type": "number",
               "default": 0.7,
               "minimum": 0,
               "maximum": 1,
-              "description": "Model sıcaklık değeri"
+              "description": "Model temperature value"
+
             },
             "topP": {
               "type": "number",
               "default": 0.9,
               "minimum": 0,
               "maximum": 1,
-              "description": "Top-p örnekleme değeri"
+              "description": "Top-p sampling value"
+
             },
             "maxTokens": {
               "type": "number",
               "default": 4096,
-              "description": "Maksimum token sayısı"
+              "description": "Maximum token count"
+
             },
             "contextSize": {
               "type": "number",
               "default": 4096,
-              "description": "Bağlam penceresi boyutu"
+              "description": "Context window size"
+
             },
             "gpuLayers": {
               "type": "number",
               "default": 0,
-              "description": "GPU'da çalıştırılacak katman sayısı"
+              "description": "Number of layers to run on GPU"
+
             },
             "threads": {
               "type": "number",
               "default": 4,
-              "description": "Kullanılacak CPU thread sayısı"
+              "description": "Number of CPU threads to use"
+
             }
           }
         },
@@ -308,31 +424,36 @@
             "endpoint": {
               "type": "string",
               "default": "http://localhost:1234/v1",
-              "description": "LM Studio API endpoint adresi"
+              "description": "LM Studio API endpoint address"
             },
+
             "defaultModel": {
               "type": "string",
               "default": "default",
-              "description": "Varsayılan LM Studio modeli"
+              "description": "Default LM Studio model"
+
             },
             "temperature": {
               "type": "number",
               "default": 0.7,
               "minimum": 0,
               "maximum": 1,
-              "description": "Model sıcaklık değeri"
+              "description": "Model temperature value"
+
             },
             "topP": {
               "type": "number",
               "default": 0.9,
               "minimum": 0,
               "maximum": 1,
-              "description": "Top-p örnekleme değeri"
+              "description": "Top-p sampling value"
+
             },
             "maxTokens": {
               "type": "number",
               "default": 2048,
-              "description": "Maksimum token sayısı"
+              "description": "Maximum token count"
+
             },
             "stopTokens": {
               "type": "array",
@@ -343,77 +464,91 @@
                 "</s>",
                 "<s>"
               ],
-              "description": "Yanıt üretimini durduracak token'lar"
+              "description": "Tokens to stop response generation"
             },
+
             "systemPrompt": {
               "type": "string",
               "default": "You are a helpful AI assistant specialized in software development.",
-              "description": "Sistem prompt'u"
+              "description": "System prompt"
+
             },
             "requestTimeout": {
               "type": "number",
               "default": 60000,
-              "description": "İstek zaman aşımı süresi (ms)"
+              "description": "Request timeout (ms)"
+
             },
             "retryAttempts": {
               "type": "number",
               "default": 3,
-              "description": "Başarısız istekler için yeniden deneme sayısı"
+              "description": "Number of retry attempts for failed requests"
+
             },
             "retryDelay": {
               "type": "number",
               "default": 1000,
-              "description": "Yeniden denemeler arasındaki bekleme süresi (ms)"
+              "description": "Retry delay (ms)"
+
             }
           }
         },
         "smile-ai.localai": {
           "type": "object",
-          "title": "LocalAI Yapılandırması",
+          "title": "LocalAI Configuration",
           "properties": {
             "endpoint": {
               "type": "string",
+
               "default": "http://localhost:8080/v1",
-              "description": "LocalAI API endpoint adresi"
+              "description": "LocalAI API endpoint address"
+
             },
             "defaultModel": {
               "type": "string",
               "default": "default",
-              "description": "Varsayılan LocalAI modeli"
+              "description": "Default LocalAI model"
+
             },
             "modelsPath": {
               "type": "string",
-              "description": "LocalAI modellerinin bulunduğu dizin"
+              "description": "Directory containing LocalAI models"
             },
+
             "gpuEnabled": {
               "type": "boolean",
               "default": false,
-              "description": "GPU desteğini etkinleştir"
+              "description": "Enable GPU support"
+
             },
             "debug": {
               "type": "boolean",
               "default": false,
-              "description": "Debug modunu etkinleştir"
+              "description": "Enable debug mode"
+
             },
             "temperature": {
               "type": "number",
               "default": 0.7,
               "minimum": 0,
               "maximum": 1,
-              "description": "Model sıcaklık değeri"
+              "description": "Model temperature value"
+
             },
             "topP": {
               "type": "number",
               "default": 0.9,
               "minimum": 0,
               "maximum": 1,
-              "description": "Top-p örnekleme değeri"
+              "description": "Top-p sampling value"
+
             },
             "maxTokens": {
               "type": "number",
               "default": 2048,
-              "description": "Maksimum token sayısı"
+              "description": "Maximum token count"
             },
+
             "stopTokens": {
               "type": "array",
               "items": {
@@ -423,12 +558,14 @@
                 "</s>",
                 "<s>"
               ],
-              "description": "Yanıt üretimini durduracak token'lar"
+              "description": "Tokens to stop response generation"
             },
+
             "systemPrompt": {
               "type": "string",
               "default": "You are a helpful AI assistant specialized in software development.",
-              "description": "Sistem prompt'u"
+              "description": "System prompt"
+
             },
             "docker": {
               "type": "object",
@@ -436,22 +573,26 @@
                 "image": {
                   "type": "string",
                   "default": "localai/localai:latest",
-                  "description": "Kullanılacak Docker image"
+                  "description": "Docker image to use"
+
                 },
                 "containerName": {
                   "type": "string",
                   "default": "smile-ai-localai",
-                  "description": "Container adı"
+                  "description": "Container name"
+
                 },
                 "port": {
                   "type": "number",
                   "default": 8080,
-                  "description": "LocalAI servisinin çalışacağı port"
+                  "description": "Port on which LocalAI service will run"
+
                 },
                 "autoRestart": {
                   "type": "boolean",
                   "default": true,
-                  "description": "Container'ı otomatik yeniden başlat"
+                  "description": "Container will be automatically restarted"
+
                 },
                 "resources": {
                   "type": "object",
@@ -459,12 +600,14 @@
                     "cpuLimit": {
                       "type": "string",
                       "default": "2",
-                      "description": "CPU limiti"
+                      "description": "CPU limit"
+
                     },
                     "memoryLimit": {
                       "type": "string",
                       "default": "4g",
-                      "description": "Bellek limiti"
+                      "description": "Memory limit"
+
                     }
                   }
                 }
@@ -479,12 +622,13 @@
             "endpoint": {
               "type": "string",
               "default": "https://api.deepseek.com/v1",
-              "description": "Deepseek API endpoint adresi"
+              "description": "Deepseek API endpoint address"
             },
             "apiKey": {
               "type": "string",
-              "description": "Deepseek API anahtarı"
+              "description": "Deepseek API key"
             },
+
             "model": {
               "type": "string",
               "default": "deepseek-coder-33b-instruct",
@@ -493,26 +637,30 @@
                 "deepseek-coder-6.7b-instruct",
                 "deepseek-coder-1.3b-instruct"
               ],
-              "description": "Kullanılacak model"
+              "description": "Model to use"
             },
+
             "temperature": {
               "type": "number",
               "default": 0.7,
               "minimum": 0,
               "maximum": 1,
-              "description": "Model sıcaklık değeri"
+              "description": "Model temperature value"
+
             },
             "topP": {
               "type": "number",
               "default": 0.9,
               "minimum": 0,
               "maximum": 1,
-              "description": "Top-p örnekleme değeri"
+              "description": "Top-p sampling value"
+
             },
             "maxTokens": {
               "type": "number",
               "default": 2048,
-              "description": "Maksimum token sayısı"
+              "description": "Maximum token count"
+
             },
             "stopTokens": {
               "type": "array",
@@ -523,26 +671,30 @@
                 "</s>",
                 "<s>"
               ],
-              "description": "Yanıt üretimini durduracak token'lar"
+              "description": "Tokens to stop response generation"
             },
+
             "systemPrompt": {
               "type": "string",
               "default": "You are a helpful AI assistant specialized in software development.",
-              "description": "Sistem prompt'u"
+              "description": "System prompt"
+
             },
             "frequencyPenalty": {
               "type": "number",
               "default": 0,
               "minimum": -2,
               "maximum": 2,
-              "description": "Kelime tekrarı cezası"
+              "description": "Word repetition penalty"
+
             },
             "presencePenalty": {
               "type": "number",
               "default": 0,
               "minimum": -2,
               "maximum": 2,
-              "description": "Konu tekrarı cezası"
+              "description": "Word repetition penalty"
+
             }
           }
         },
@@ -553,12 +705,14 @@
             "endpoint": {
               "type": "string",
               "default": "https://dashscope.aliyuncs.com/api/v1",
-              "description": "Qwen API endpoint adresi"
+              "description": "Qwen API endpoint address"
+
             },
             "apiKey": {
               "type": "string",
-              "description": "Qwen API anahtarı"
+              "description": "Qwen API key"
             },
+
             "model": {
               "type": "string",
               "default": "qwen2.5-turbo",
@@ -568,26 +722,30 @@
                 "qwen1.5-72b",
                 "qwen1.5-14b"
               ],
-              "description": "Kullanılacak model"
+              "description": "Model to use"
             },
+
             "temperature": {
               "type": "number",
               "default": 0.7,
               "minimum": 0,
               "maximum": 1,
-              "description": "Model sıcaklık değeri"
+              "description": "Model temperature value"
+
             },
             "topP": {
               "type": "number",
               "default": 0.9,
               "minimum": 0,
               "maximum": 1,
-              "description": "Top-p örnekleme değeri"
+              "description": "Top-p sampling value"
+
             },
             "maxTokens": {
               "type": "number",
               "default": 2048,
-              "description": "Maksimum token sayısı"
+              "description": "Maximum token count"
+
             },
             "stopTokens": {
               "type": "array",
@@ -598,34 +756,40 @@
                 "</s>",
                 "<s>"
               ],
-              "description": "Yanıt üretimini durduracak token'lar"
+              "description": "Tokens to stop response generation"
             },
+
             "systemPrompt": {
               "type": "string",
               "default": "You are a helpful AI assistant specialized in software development.",
-              "description": "Sistem prompt'u"
+              "description": "System prompt"
+
             },
             "enableSearch": {
               "type": "boolean",
               "default": true,
-              "description": "Web araması özelliğini etkinleştir"
+              "description": "Enable web search feature"
+
             },
             "seed": {
               "type": "number",
-              "description": "Rastgele sayı üreteci için başlangıç değeri"
+              "description": "Seed value for random number generator"
             },
+
             "repetitionPenalty": {
               "type": "number",
               "default": 1.1,
               "minimum": 1,
               "maximum": 2,
-              "description": "Tekrar cezası katsayısı"
+              "description": "Repetition penalty factor"
+
             },
             "topK": {
               "type": "number",
               "default": 50,
               "minimum": 1,
-              "description": "Top-k örnekleme değeri"
+              "description": "Top-k sampling value"
+
             }
           }
         },
@@ -636,7 +800,8 @@
             "rulesPath": {
               "type": "string",
               "default": ".smile",
-              "description": "Smile kurallarının bulunduğu klasör yolu"
+              "description": "Path to Smile rules folder"
+
             },
             "enabledRules": {
               "type": "array",
@@ -653,8 +818,9 @@
                 "security",
                 "performance"
               ],
-              "description": "Aktif kural setleri"
+              "description": "Active rule sets"
             },
+
             "customRules": {
               "type": "array",
               "items": {
@@ -662,46 +828,55 @@
                 "properties": {
                   "name": {
                     "type": "string",
-                    "description": "Kural seti adı"
+                    "description": "Rule set name"
                   },
+
                   "path": {
                     "type": "string",
-                    "description": "Kural dosyasının yolu"
+                    "description": "Path to rule file"
                   },
+
                   "description": {
                     "type": "string",
-                    "description": "Kural seti açıklaması"
+                    "description": "Rule set description"
                   }
+
                 }
               },
               "default": [],
-              "description": "Özel kural setleri"
+              "description": "Custom rule sets"
             },
+
             "overrides": {
               "type": "object",
               "default": {},
-              "description": "Kural geçersiz kılmaları"
+              "description": "Rule overrides"
+
             }
           }
         },
         "smile-ai.rules.codeStyle": {
           "type": "object",
-          "title": "Kod Stili",
+          "title": "Code Style",
           "properties": {
             "indentSize": {
+
               "type": "number",
               "default": 4,
-              "description": "Girinti boyutu"
+              "description": "Indent size"
+
             },
             "useTabs": {
               "type": "boolean",
               "default": false,
-              "description": "Tab kullanımı"
+              "description": "Use tabs"
+
             },
             "maxLineLength": {
               "type": "number",
               "default": 80,
-              "description": "Maksimum satır uzunluğu"
+              "description": "Maximum line length"
+
             },
             "quoteStyle": {
               "type": "string",
@@ -710,20 +885,23 @@
                 "double"
               ],
               "default": "single",
-              "description": "Tırnak işareti stili"
+              "description": "Quote style"
             },
+
             "semicolons": {
               "type": "boolean",
               "default": true,
-              "description": "Noktalı virgül kullanımı"
+              "description": "Use semicolons"
+
             }
           }
         },
         "smile-ai.rules.naming": {
           "type": "object",
-          "title": "İsimlendirme",
+          "title": "Naming",
           "properties": {
             "variables": {
+
               "type": "string",
               "enum": [
                 "camelCase",
@@ -731,8 +909,9 @@
                 "PascalCase"
               ],
               "default": "camelCase",
-              "description": "Değişken isimlendirme stili"
+              "description": "Variable naming style"
             },
+
             "functions": {
               "type": "string",
               "enum": [
@@ -741,8 +920,9 @@
                 "PascalCase"
               ],
               "default": "camelCase",
-              "description": "Fonksiyon isimlendirme stili"
+              "description": "Function naming style"
             },
+
             "classes": {
               "type": "string",
               "enum": [
@@ -751,8 +931,9 @@
                 "PascalCase"
               ],
               "default": "PascalCase",
-              "description": "Sınıf isimlendirme stili"
+              "description": "Class naming style"
             },
+
             "interfaces": {
               "type": "string",
               "enum": [
@@ -761,8 +942,9 @@
                 "PascalCase"
               ],
               "default": "PascalCase",
-              "description": "Interface isimlendirme stili"
+              "description": "Interface naming style"
             },
+
             "constants": {
               "type": "string",
               "enum": [
@@ -772,18 +954,21 @@
                 "UPPER_CASE"
               ],
               "default": "UPPER_CASE",
-              "description": "Sabit isimlendirme stili"
+              "description": "Constant naming style"
             }
           }
+
         },
         "smile-ai.rules.testing": {
           "type": "object",
-          "title": "Test Kuralları",
+          "title": "Test Rules",
           "properties": {
             "required": {
+
               "type": "boolean",
               "default": true,
-              "description": "Test zorunluluğu"
+              "description": "Test requirement"
+
             },
             "coverage": {
               "type": "object",
@@ -791,22 +976,26 @@
                 "statements": {
                   "type": "number",
                   "default": 80,
-                  "description": "Statement coverage yüzdesi"
+                  "description": "Statement coverage percentage"
+
                 },
                 "branches": {
                   "type": "number",
                   "default": 70,
-                  "description": "Branch coverage yüzdesi"
+                  "description": "Branch coverage percentage"
+
                 },
                 "functions": {
                   "type": "number",
                   "default": 80,
-                  "description": "Function coverage yüzdesi"
+                  "description": "Function coverage percentage"
+
                 },
                 "lines": {
                   "type": "number",
                   "default": 80,
-                  "description": "Line coverage yüzdesi"
+                  "description": "Line coverage percentage"
+
                 }
               }
             }
@@ -814,12 +1003,14 @@
         },
         "smile-ai.rules.documentation": {
           "type": "object",
-          "title": "Dokümantasyon",
+          "title": "Documentation",
           "properties": {
             "required": {
+
               "type": "boolean",
               "default": true,
-              "description": "Dokümantasyon zorunluluğu"
+              "description": "Documentation requirement"
+
             },
             "style": {
               "type": "string",
@@ -830,17 +1021,19 @@
                 "custom"
               ],
               "default": "JSDoc",
-              "description": "Dokümantasyon stili"
+              "description": "Documentation style"
             },
+
             "requireParams": {
               "type": "boolean",
               "default": true,
-              "description": "Parametre dokümantasyonu zorunluluğu"
+              "description": "Parameter documentation requirement"
+
             },
             "requireReturns": {
               "type": "boolean",
               "default": true,
-              "description": "Dönüş değeri dokümantasyonu zorunluluğu"
+              "description": "Return value documentation requirement"
             }
           }
         }
@@ -848,15 +1041,15 @@
     }
   },
   "scripts": {
-    "vscode:prepublish": "pnpm run package",
+    "vscode:prepublish": "npm run compile",
     "compile": "webpack",
     "watch": "webpack --watch",
     "package": "webpack --mode production --devtool hidden-source-map",
     "compile-tests": "tsc -p . --outDir out",
     "watch-tests": "tsc -p . -w --outDir out",
-    "pretest": "pnpm run compile-tests && pnpm run compile && pnpm run lint",
+    "pretest": "npm run compile-tests && npm run compile && npm run lint",
     "lint": "eslint src --ext ts",
-    "test": "vscode-test"
+    "test": "node ./out/test/runTest.js"
   },
   "pnpm": {
     "ignoredBuiltDependencies": [

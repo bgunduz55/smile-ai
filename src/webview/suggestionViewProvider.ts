@@ -214,4 +214,103 @@ export class SuggestionViewProvider implements vscode.WebviewViewProvider {
             </html>
         `;
     }
+
+    public async handleMessage(message: any) {
+        switch (message.type) {
+            case 'refreshSuggestions':
+                // Handle refresh
+                break;
+            case 'applyAllSuggestions':
+                // Handle apply all
+                break;
+            case 'filterSuggestions':
+                // Handle filter
+                break;
+        }
+    }
+
+    public async getContent(): Promise<string> {
+        return `
+            <div class="suggestions-container">
+                <div class="suggestions-header">
+                    <h3>Smart Code Suggestions</h3>
+                    <div class="filter-options">
+                        <select id="suggestionType">
+                            <option value="all">All Suggestions</option>
+                            <option value="improvement">Improvements</option>
+                            <option value="security">Security</option>
+                            <option value="performance">Performance</option>
+                            <option value="quality">Code Quality</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="suggestions-list" id="suggestionsList">
+                    ${this.getSuggestionItems()}
+                </div>
+                <div class="suggestions-footer">
+                    <button id="refreshSuggestions">
+                        <i class="codicon codicon-refresh"></i>
+                        Refresh
+                    </button>
+                    <button id="applyAllSuggestions">
+                        <i class="codicon codicon-check-all"></i>
+                        Apply All
+                    </button>
+                </div>
+            </div>
+        `;
+    }
+
+    private getSuggestionItems(): string {
+        // TODO: Replace with actual suggestions
+        const suggestions: SuggestionItem[] = [];
+        
+        if (suggestions.length === 0) {
+            return `
+                <div class="no-suggestions">
+                    <i class="codicon codicon-lightbulb"></i>
+                    <p>Suggestions for the active file will appear here.</p>
+                </div>
+            `;
+        }
+
+        return suggestions.map(suggestion => `
+            <div class="suggestion-item">
+                <div class="suggestion-title">
+                    <span class="priority priority-${suggestion.priority}"></span>
+                    ${suggestion.title}
+                </div>
+                <div class="suggestion-description">${suggestion.description}</div>
+                <div class="suggestion-meta">
+                    Created: ${new Date(suggestion.createdAt).toLocaleString()}
+                </div>
+                <div class="suggestion-tags">
+                    ${suggestion.tags?.map(tag => `
+                        <span class="tag">${tag}</span>
+                    `).join('') || ''}
+                </div>
+                ${suggestion.context?.codeSnippet ? `
+                    <pre><code>${suggestion.context.codeSnippet}</code></pre>
+                ` : ''}
+                <div class="button-container">
+                    <button onclick="openChat('${suggestion.id}')">
+                        Develop with Chat
+                    </button>
+                    <button onclick="openComposer('${suggestion.id}')">
+                        Develop with Composer
+                    </button>
+                    <button onclick="completeSuggestion('${suggestion.id}')">
+                        Completed
+                    </button>
+                    <button onclick="deleteSuggestion('${suggestion.id}')">
+                        Delete
+                    </button>
+                </div>
+            </div>
+        `).join('');
+    }
+
+    public setWebview(webview: vscode.WebviewView) {
+        this._view = webview;
+    }
 } 

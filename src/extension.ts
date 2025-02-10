@@ -17,6 +17,7 @@ import { suggestionService } from './services/suggestionService';
 import { SuggestionViewProvider } from './webview/suggestionViewProvider';
 import { RulesService } from './services/rulesService';
 import { RulesViewProvider } from './webview/rulesViewProvider';
+import { MainViewProvider } from './webview/mainViewProvider';
 
 let completionServiceInstance: CompletionService;
 let agentServiceInstance: AgentService;
@@ -38,18 +39,33 @@ export const COMMANDS = {
 // This method is called when your extension is activated
 // Your extension is activated the very first time the command is executed
 export async function activate(context: vscode.ExtensionContext) {
-	console.log('Smile AI Extension activation started');
+	// Create output channel
+	const outputChannel = vscode.window.createOutputChannel('Smile AI');
+	outputChannel.show(true);
+	
+	// Configure logging
+	function log(message: string) {
+		console.log(message);
+		outputChannel.appendLine(`[${new Date().toLocaleTimeString()}] ${message}`);
+	}
+
+	log('Smile AI extension is now active!');
 
 	try {
 		// Initialize services
+		log('Initializing services...');
 		agentServiceInstance = AgentService.getInstance();
 		await agentServiceInstance.initialize();
+		log('Services initialized successfully');
 
 		// Register views
+		log('Creating view providers...');
 		const chatViewProvider = new ChatViewProvider(context.extensionUri);
 		const composerViewProvider = new ComposerViewProvider(context.extensionUri);
 		const suggestionViewProvider = new SuggestionViewProvider(context.extensionUri);
 		const rulesViewProvider = new RulesViewProvider(context.extensionUri);
+		const mainViewProvider = new MainViewProvider(context.extensionUri);
+		log('View providers created successfully');
 
 		// Model konfigürasyonunu yükle
 		const config: ModelConfig = {
@@ -85,13 +101,46 @@ export async function activate(context: vscode.ExtensionContext) {
 			completionServiceInstance.registerCompletionProvider()
 		);
 
-		// Register views
-		context.subscriptions.push(
-			vscode.window.registerWebviewViewProvider('smile-ai.chatView', chatViewProvider),
-			vscode.window.registerWebviewViewProvider('smile-ai.composerView', composerViewProvider),
-			vscode.window.registerWebviewViewProvider(SuggestionViewProvider.viewType, suggestionViewProvider),
-			vscode.window.registerWebviewViewProvider(RulesViewProvider.viewType, rulesViewProvider)
-		);
+		// Register the webview view provider
+		try {
+			log('Registering MainViewProvider...');
+			log(`View Type: ${MainViewProvider.viewType}`);
+			log(`Extension URI: ${context.extensionUri.toString()}`);
+			
+			const provider = vscode.window.registerWebviewViewProvider(
+				MainViewProvider.viewType,
+				mainViewProvider,
+				{
+					webviewOptions: {
+						retainContextWhenHidden: true
+					}
+				}
+			);
+			
+			log('MainViewProvider registered successfully');
+			context.subscriptions.push(provider);
+
+			// Focus komutu çalıştırılmadan önce kısa bir gecikme ekleyelim
+			setTimeout(() => {
+				vscode.commands.executeCommand('workbench.view.extension.smile-ai').then(
+					() => {
+						outputChannel.appendLine('Sidebar view container focused');
+						return vscode.commands.executeCommand('smile-ai.mainView.focus');
+					}
+				).then(
+					() => outputChannel.appendLine('View focus command executed successfully'),
+					error => {
+						outputChannel.appendLine(`Error focusing view: ${error}`);
+						outputChannel.appendLine(`Error details: ${JSON.stringify(error, null, 2)}`);
+					}
+				);
+			}, 1000);
+
+		} catch (error) {
+			log(`Failed to register MainViewProvider: ${error}`);
+			outputChannel.appendLine(`Error details: ${JSON.stringify(error, null, 2)}`);
+			vscode.window.showErrorMessage('Failed to initialize Smile AI view');
+		}
 
 		// Register commands
 		context.subscriptions.push(
@@ -371,6 +420,26 @@ export async function activate(context: vscode.ExtensionContext) {
 
 
 				await RulesService.getInstance().viewRules(workspaceFolder);
+			}),
+
+			vscode.commands.registerCommand('smile-ai.switchToChat', () => {
+				mainViewProvider.switchTab('chat');
+			}),
+
+			vscode.commands.registerCommand('smile-ai.switchToComposer', () => {
+				mainViewProvider.switchTab('composer');
+			}),
+
+			vscode.commands.registerCommand('smile-ai.switchToSuggestions', () => {
+				mainViewProvider.switchTab('suggestions');
+			}),
+
+			vscode.commands.registerCommand('smile-ai.switchToRules', () => {
+				mainViewProvider.switchTab('rules');
+			}),
+
+			vscode.commands.registerCommand('smile-ai.switchToSettings', () => {
+				mainViewProvider.switchTab('settings');
 			})
 		);
 
@@ -430,15 +499,19 @@ export async function activate(context: vscode.ExtensionContext) {
 		});
 
 	} catch (error) {
-		console.error('Smile AI activation error:', error);
+		log(`Smile AI activation error: ${error}`);
+		outputChannel.appendLine(`Error details: ${JSON.stringify(error, null, 2)}`);
 		vscode.window.showErrorMessage('Smile AI activation failed: ' + 
 			(error instanceof Error ? error.message : 'Unknown error'));
 	}
 
+	// Add output channel to disposables
+	context.subscriptions.push(outputChannel);
 }
 
 // This method is called when your extension is deactivated
 export function deactivate() {
+	log('Smile AI extension is being deactivated...');
 	aiService.dispose();
 	indexService.dispose();
 	if (completionServiceInstance) {
@@ -447,4 +520,5 @@ export function deactivate() {
 	if (agentServiceInstance) {
 		agentServiceInstance.dispose();
 	}
+	log('Smile AI extension deactivated successfully');
 }
