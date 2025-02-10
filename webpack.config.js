@@ -3,6 +3,7 @@
 'use strict';
 
 const path = require('path');
+const CopyWebpackPlugin = require('copy-webpack-plugin');
 
 //@type {import('webpack').Configuration}
 module.exports = {
@@ -20,8 +21,7 @@ module.exports = {
         '@vscode/codicons': 'commonjs @vscode/codicons'
     },
     resolve: {
-        extensions: ['.ts', '.js'],
-        mainFields: ['main', 'module']
+        extensions: ['.ts', '.js']
     },
     module: {
         rules: [
@@ -40,7 +40,21 @@ module.exports = {
             }
         ]
     },
-    optimization: {
-        minimize: false
-    }
+    plugins: [
+        new CopyWebpackPlugin({
+            patterns: [
+                {
+                    from: 'node_modules/@vscode/codicons/dist',
+                    to: 'media'
+                },
+                {
+                    from: 'media',
+                    to: 'media',
+                    globOptions: {
+                        ignore: ['**/*.js']
+                    }
+                }
+            ]
+        })
+    ]
 }; 
