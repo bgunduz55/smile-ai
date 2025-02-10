@@ -1,11 +1,8 @@
 import * as vscode from 'vscode';
-import * as chokidar from 'chokidar';
 import * as path from 'path';
 import * as fs from 'fs';
-import { glob } from 'glob';
+import initSqlJs from 'sql.js';
 import { minimatch } from 'minimatch';
-import sqlite3 from 'sqlite3';
-import { promisify } from 'util';
 
 interface IndexedFile {
     filePath: string;
@@ -19,11 +16,20 @@ interface SmileIgnoreConfig {
     includePatterns: string[];
 }
 
+interface FileRow {
+    file_path: string;
+    content: string;
+    language: string;
+    last_modified: number;
+}
+
+interface RelevantFileRow extends FileRow {
+    relevance: number;
+}
+
 export class IndexService {
     private static instance: IndexService;
-    private db: sqlite3.Database;
-    private watcher: chokidar.FSWatcher | null = null;
-    private indexingPromise: Promise<void> | null = null;
+    private db: any;
     private defaultExcludePatterns: string[] = [
         '**/node_modules/**',
         '**/dist/**',
@@ -43,15 +49,8 @@ export class IndexService {
         excludePatterns: [...this.defaultExcludePatterns],
         includePatterns: []
     };
-    private run: (sql: string, params?: any) => Promise<void>;
-    private get: (sql: string, params?: any) => Promise<any>;
-    private all: (sql: string, params?: any) => Promise<any[]>;
 
     private constructor() {
-        this.db = new sqlite3.Database(':memory:');
-        this.run = promisify(this.db.run.bind(this.db));
-        this.get = promisify(this.db.get.bind(this.db));
-        this.all = promisify(this.db.all.bind(this.db));
         this.initDatabase();
     }
 
@@ -63,7 +62,10 @@ export class IndexService {
     }
 
     private async initDatabase(): Promise<void> {
-        await this.run(`
+        const SQL = await initSqlJs();
+        this.db = new SQL.Database();
+        
+        this.db.run(`
             CREATE TABLE IF NOT EXISTS files (
                 file_path TEXT PRIMARY KEY,
                 content TEXT,
@@ -99,63 +101,6 @@ export class IndexService {
                 });
 
                 vscode.window.showInformationMessage('.smileignore dosyası yüklendi');
-            } else {
-                // .smileignore yoksa varsayılan bir tane oluştur
-                const defaultContent = `# Files and folders that will not be indexed by Smile AI
-# Each line should contain a glob pattern
-# Lines starting with ! will be included
-
-
-# General exclusions
-**/node_modules/**
-**/dist/**
-**/build/**
-**/.git/**
-**/out/**
-
-**/.DS_Store
-**/thumbs.db
-**/*.min.js
-**/*.min.css
-**/vendor/**
-**/coverage/**
-**/tmp/**
-**/temp/**
-
-# Large files
-**/*.{png,jpg,jpeg,gif,ico,svg,woff,woff2,ttf,eot}
-**/*.{zip,tar,gz,rar,7z}
-**/*.{mp3,mp4,avi,mov,wmv}
-**/*.{pdf,doc,docx,xls,xlsx,ppt,pptx}
-
-
-# IDE and editor files
-**/.idea/**
-**/.vscode/**
-**/.vs/**
-**/*.sublime-*
-**/*.swp
-
-**/*.swo
-
-# Log and database files
-**/*.log
-**/*.sqlite
-**/*.db
-
-
-# Special exclusions
-# my-secret-folder/**
-
-
-# Special inclusions (include specific files in excluded folders)
-# !**/node_modules/important-package/important-file.js
-# !**/dist/index.html`;
-
-
-                fs.writeFileSync(smileIgnorePath, defaultContent, 'utf-8');
-                vscode.window.showInformationMessage('Default .smileignore file created');
-
             }
         } catch (error) {
             console.error('.smileignore loading error:', error);
@@ -163,54 +108,57 @@ export class IndexService {
         }
     }
 
-
     public async startIndexing(workspaceFolder: vscode.WorkspaceFolder): Promise<void> {
-        if (this.indexingPromise) {
-            return this.indexingPromise;
-        }
-
-        await this.loadSmileIgnore(workspaceFolder.uri.fsPath);
-        this.indexingPromise = this.doIndexing(workspaceFolder);
-        return this.indexingPromise;
-    }
-
-    private async doIndexing(workspaceFolder: vscode.WorkspaceFolder): Promise<void> {
         try {
-            // Mevcut dosyaları indexle
-            const files = await glob('**/*', {
-                cwd: workspaceFolder.uri.fsPath,
-                ignore: this.ignoreConfig.excludePatterns,
-                nodir: true,
-                dot: true
-            });
+            await this.loadSmileIgnore(workspaceFolder.uri.fsPath);
+
+            // Get all files
+            const files = await vscode.workspace.findFiles(
+                new vscode.RelativePattern(workspaceFolder, '**/*'),
+                '{' + this.ignoreConfig.excludePatterns.join(',') + '}'
+            );
+
+            // Begin transaction
+            this.db.run('BEGIN TRANSACTION');
 
             for (const file of files) {
-                const filePath = path.join(workspaceFolder.uri.fsPath, file);
-                if (this.shouldIndexFile(filePath)) {
-                    await this.indexFile(filePath);
+                try {
+                    if (this.shouldIndexFile(file.fsPath)) {
+                        const content = fs.readFileSync(file.fsPath, 'utf-8');
+                        const stats = fs.statSync(file.fsPath);
+                        const language = this.getFileLanguage(file.fsPath);
+
+                        this.db.run(
+                            'INSERT OR REPLACE INTO files (file_path, content, language, last_modified) VALUES (?, ?, ?, ?)',
+                            [file.fsPath, content, language, stats.mtimeMs]
+                        );
+                        console.log(`Indexed: ${file.fsPath}`);
+                    }
+                } catch (error) {
+                    console.error(`Error indexing file ${file.fsPath}:`, error);
                 }
             }
 
-            // Watch file changes
-            this.startWatching(workspaceFolder);
+            // Commit transaction
+            this.db.run('COMMIT');
 
-
+            console.log('Indexing completed');
             vscode.window.showInformationMessage('File indexing completed.');
 
-        } catch (error: unknown) {
-            const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-            vscode.window.showErrorMessage(`Indexing error: ${errorMessage}`);
-        } finally {
-            this.indexingPromise = null;
+        } catch (error) {
+            // Rollback on error
+            this.db.run('ROLLBACK');
+            console.error('Error during indexing:', error);
+            vscode.window.showErrorMessage('Indexing error: ' + 
+                (error instanceof Error ? error.message : 'Unknown error'));
+            throw error;
         }
-
     }
 
     private shouldIndexFile(filePath: string): boolean {
         const relativePath = vscode.workspace.asRelativePath(filePath);
 
         // First check include patterns
-
         for (const pattern of this.ignoreConfig.includePatterns) {
             if (minimatch(relativePath, pattern)) {
                 return true;
@@ -218,7 +166,6 @@ export class IndexService {
         }
 
         // Then check exclude patterns
-
         for (const pattern of this.ignoreConfig.excludePatterns) {
             if (minimatch(relativePath, pattern)) {
                 return false;
@@ -226,74 +173,6 @@ export class IndexService {
         }
 
         return true;
-    }
-
-    public async indexFile(filePath: string): Promise<void> {
-        try {
-            if (!this.shouldIndexFile(filePath)) {
-                return;
-            }
-
-            const stats = fs.statSync(filePath);
-            const lastModified = stats.mtimeMs;
-
-            // Read file content
-            const content = fs.readFileSync(filePath, 'utf-8');
-            const language = this.getFileLanguage(filePath);
-
-
-            // Update database
-            await this.run(
-                `INSERT OR REPLACE INTO files (file_path, content, language, last_modified)
-                 VALUES (?, ?, ?, ?)`,
-                [filePath, content, language, lastModified]
-            );
-
-        } catch (error) {
-            console.error(`Error indexing file: ${filePath}`, error);
-        }
-    }
-
-
-    private startWatching(workspaceFolder: vscode.WorkspaceFolder): void {
-        if (this.watcher) {
-            this.watcher.close();
-        }
-
-        this.watcher = chokidar.watch('**/*', {
-            cwd: workspaceFolder.uri.fsPath,
-            ignored: this.ignoreConfig.excludePatterns,
-            ignoreInitial: true,
-            persistent: true,
-            ignorePermissionErrors: true,
-            awaitWriteFinish: {
-                stabilityThreshold: 300,
-                pollInterval: 100
-            }
-        });
-
-        this.watcher
-            .on('add', (filePath) => this.indexFile(path.join(workspaceFolder.uri.fsPath, filePath)))
-            .on('change', (filePath) => this.indexFile(path.join(workspaceFolder.uri.fsPath, filePath)))
-            .on('unlink', (filePath) => this.removeFile(path.join(workspaceFolder.uri.fsPath, filePath)));
-
-        // Watch .smileignore changes
-        const smileIgnorePath = path.join(workspaceFolder.uri.fsPath, '.smileignore');
-
-        fs.watch(smileIgnorePath, async (eventType) => {
-            if (eventType === 'change') {
-                await this.loadSmileIgnore(workspaceFolder.uri.fsPath);
-                // Restart indexing
-                this.indexingPromise = null;
-                await this.startIndexing(workspaceFolder);
-
-            }
-        });
-    }
-
-    public async removeFile(filePath: string): Promise<void> {
-        const sql = 'DELETE FROM files WHERE file_path = ?';
-        await this.run(sql, [filePath]);
     }
 
     private getFileLanguage(filePath: string): string {
@@ -325,13 +204,12 @@ export class IndexService {
         return languageMap[extension] || 'plaintext';
     }
 
-    public async searchFiles(query: string): Promise<IndexedFile[]> {
-        const sql = `
-            SELECT * FROM files 
-            WHERE content LIKE ?
-        `;
-        const results = await this.all(sql, [`%${query}%`]);
-        return results.map(row => ({
+    public searchFiles(query: string): IndexedFile[] {
+        const stmt = this.db.prepare('SELECT * FROM files WHERE content LIKE ?');
+        const results = stmt.all(['%' + query + '%']);
+        stmt.free();
+
+        return results.map((row: FileRow) => ({
             filePath: row.file_path,
             content: row.content,
             language: row.language,
@@ -339,14 +217,16 @@ export class IndexService {
         }));
     }
 
-    public async getFile(filePath: string): Promise<IndexedFile | null> {
-        const sql = 'SELECT * FROM files WHERE file_path = ?';
-        const row = await this.get(sql, [filePath]);
-        
-        if (!row) {
+    public getFile(filePath: string): IndexedFile | null {
+        const stmt = this.db.prepare('SELECT * FROM files WHERE file_path = ?');
+        const results = stmt.get([filePath]);
+        stmt.free();
+
+        if (!results) {
             return null;
         }
 
+        const row = results as FileRow;
         return {
             filePath: row.file_path,
             content: row.content,
@@ -355,13 +235,15 @@ export class IndexService {
         };
     }
 
-    public async searchByWords(words: string[]): Promise<IndexedFile[]> {
+    public searchByWords(words: string[]): IndexedFile[] {
         const placeholders = words.map(() => 'content LIKE ?').join(' OR ');
-        const sql = `SELECT * FROM files WHERE ${placeholders}`;
-        const params = words.map(word => `%${word}%`);
+        const params = words.map(word => '%' + word + '%');
         
-        const results = await this.all(sql, params);
-        return results.map(row => ({
+        const stmt = this.db.prepare(`SELECT * FROM files WHERE ${placeholders}`);
+        const results = stmt.all(params);
+        stmt.free();
+
+        return results.map((row: FileRow) => ({
             filePath: row.file_path,
             content: row.content,
             language: row.language,
@@ -369,27 +251,29 @@ export class IndexService {
         }));
     }
 
-    public async getRelevantFiles(context: string): Promise<IndexedFile[]> {
-        // Calculate a simple similarity score
+    public getRelevantFiles(context: string): IndexedFile[] {
         const words = context.toLowerCase().split(/\W+/).filter(w => w.length > 3);
         
-
         if (words.length === 0) {
             return [];
         }
 
-        const query = words.map(word => `content LIKE '%${word}%'`).join(' OR ');
-        const results = await this.all(
+        const query = words.map(() => 'content LIKE ?').join(' OR ');
+        const relevanceCalc = words.map(() => 'CASE WHEN content LIKE ? THEN 1 ELSE 0 END').join(' + ');
+        const params = words.map(word => '%' + word + '%');
+        
+        const stmt = this.db.prepare(
             `SELECT file_path, content, language, last_modified,
-             (${words.map(() => 'CASE WHEN content LIKE ? THEN 1 ELSE 0 END').join(' + ')}) as relevance
+             (${relevanceCalc}) as relevance
              FROM files
              WHERE ${query}
              ORDER BY relevance DESC
-             LIMIT 10`,
-            words.map(word => `%${word}%`)
+             LIMIT 10`
         );
+        const results = stmt.all(params);
+        stmt.free();
 
-        return results.map(row => ({
+        return results.map((row: RelevantFileRow) => ({
             filePath: row.file_path,
             content: row.content,
             language: row.language,
@@ -398,11 +282,9 @@ export class IndexService {
     }
 
     public dispose(): void {
-        if (this.watcher) {
-            this.watcher.close();
-            this.watcher = null;
+        if (this.db) {
+            this.db.close();
         }
-        this.db.close();
     }
 }
 

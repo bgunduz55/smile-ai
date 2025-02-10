@@ -3,6 +3,11 @@
   "displayName": "Smile AI",
   "description": "A local AI developer assistant for VS Code",
   "version": "0.0.1",
+  "publisher": "bgund",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/bgund/smile-ai"
+  },
   "engines": {
     "vscode": "^1.85.0"
   },
@@ -14,46 +19,22 @@
   ],
   "main": "./dist/extension.js",
   "dependencies": {
-    "@angular/compiler": "^17.1.0",
-    "@angular/compiler-cli": "^17.1.0",
     "@anthropic-ai/sdk": "^0.36.3",
-    "@babel/parser": "^7.23.0",
-    "@babel/traverse": "^7.23.0",
-    "@babel/types": "^7.23.0",
-    "@types/mocha": "^10.0.10",
-    "@vscode/test-electron": "^2.4.1",
-    "@vue/compiler-dom": "^3.4.0",
-    "@vue/compiler-sfc": "^3.4.0",
     "axios": "^1.7.9",
-    "chokidar": "^3.5.3",
-    "coffeescript": "^2.7.0",
-    "dustjs-linkedin": "^3.0.1",
-    "ejs": "^3.1.10",
-    "handlebars": "^4.7.8",
-    "lodash": "^4.17.21",
-    "mocha": "^10.2.0",
-    "mustache": "^4.2.0",
-    "node-llama-cpp": "^3.5.0",
-    "nunjucks": "^3.2.4",
     "openai": "^4.83.0",
-    "pug": "^3.0.3",
-    "react": "^18.2.0",
-    "react-dom": "^18.2.0",
-    "sqlite3": "^5.1.0",
-    "svelte": "^4.2.0",
-    "twig": "^1.17.1",
-    "typescript": "^5.3.0",
-    "underscore": "^1.13.7",
-    "velocityjs": "^2.0.6",
-    "vscode-languageclient": "^8.1.0"
+    "sql.js": "^1.12.0"
   },
   "devDependencies": {
+    "@types/minimatch": "^5.1.2",
     "@types/node": "^18.0.0",
+    "@types/sql.js": "^1.4.9",
     "@types/vscode": "^1.85.0",
     "@typescript-eslint/eslint-plugin": "^6.21.0",
     "@typescript-eslint/parser": "^6.21.0",
+    "@vscode/codicons": "^0.0.36",
     "eslint": "^8.56.0",
     "ts-loader": "^9.5.0",
+    "typescript": "^5.3.0",
     "webpack": "^5.97.0",
     "webpack-cli": "^5.1.0"
   },
@@ -71,38 +52,42 @@
       "smile-ai": [
         {
           "type": "webview",
-          "id": "smile-ai.chatView",
-          "name": "Chat"
-        },
-        {
-          "type": "webview",
-          "id": "smile-ai.composerView",
-          "name": "Composer"
-        },
-        {
-          "type": "webview",
-          "id": "smile-ai.suggestionView",
-          "name": "Geliştirme Önerileri",
-          "icon": "$(lightbulb)"
-        },
-        {
-          "type": "webview",
-          "id": "smile-ai.rulesView",
-          "name": "Kural Setleri",
-          "icon": "$(book)"
+          "id": "smile-ai.mainView",
+          "name": "Smile AI",
+          "visibility": "visible"
         }
       ]
     },
     "commands": [
       {
-        "command": "smile-ai.chatView.focus",
-        "title": "Chat View'ı Göster",
-        "category": "Smile AI"
+        "command": "smile-ai.switchToChat",
+        "title": "Chat",
+        "category": "Smile AI",
+        "icon": "$(comment-discussion)"
       },
       {
-        "command": "smile-ai.composerView.focus",
-        "title": "Composer View'ı Göster",
-        "category": "Smile AI"
+        "command": "smile-ai.switchToComposer",
+        "title": "Composer",
+        "category": "Smile AI",
+        "icon": "$(edit)"
+      },
+      {
+        "command": "smile-ai.switchToSuggestions",
+        "title": "Öneriler",
+        "category": "Smile AI",
+        "icon": "$(lightbulb)"
+      },
+      {
+        "command": "smile-ai.switchToRules",
+        "title": "Kurallar",
+        "category": "Smile AI",
+        "icon": "$(book)"
+      },
+      {
+        "command": "smile-ai.switchToSettings",
+        "title": "Ayarlar",
+        "category": "Smile AI",
+        "icon": "$(gear)"
       },
       {
         "command": "smile-ai.codeCompletion",
@@ -176,10 +161,93 @@
     "configuration": {
       "title": "Smile AI",
       "properties": {
-        "smile-ai.modelPath": {
+        "smile-ai.modelProvider": {
           "type": "string",
-          "default": "",
-          "description": "Llama model dosyasının yolu"
+          "enum": [
+            "ollama",
+            "llamacpp",
+            "openai",
+            "anthropic",
+            "local"
+          ],
+          "default": "ollama",
+          "description": "AI model sağlayıcısı"
+        },
+        "smile-ai.modelSettings": {
+          "type": "object",
+          "properties": {
+            "ollama": {
+              "type": "object",
+              "properties": {
+                "modelPath": {
+                  "type": "string",
+                  "description": "Ollama model dosyasının yolu"
+                },
+                "apiEndpoint": {
+                  "type": "string",
+                  "default": "http://localhost:11434",
+                  "description": "Ollama API endpoint"
+                }
+              }
+            },
+            "llamacpp": {
+              "type": "object",
+              "properties": {
+                "modelPath": {
+                  "type": "string",
+                  "description": "LlamaCpp model dosyasının yolu"
+                }
+              }
+            },
+            "openai": {
+              "type": "object",
+              "properties": {
+                "apiKey": {
+                  "type": "string",
+                  "description": "OpenAI API anahtarı"
+                },
+                "model": {
+                  "type": "string",
+                  "default": "gpt-4",
+                  "description": "Kullanılacak OpenAI modeli"
+                }
+              }
+            },
+            "anthropic": {
+              "type": "object",
+              "properties": {
+                "apiKey": {
+                  "type": "string",
+                  "description": "Anthropic API anahtarı"
+                },
+                "model": {
+                  "type": "string",
+                  "default": "claude-3-opus-20240229",
+                  "description": "Kullanılacak Anthropic modeli"
+                }
+              }
+            }
+          }
+        },
+        "smile-ai.modelParameters": {
+          "type": "object",
+          "properties": {
+            "temperature": {
+              "type": "number",
+              "default": 0.7,
+              "description": "Model sıcaklık değeri (0-1 arası)"
+            },
+            "maxTokens": {
+              "type": "number",
+              "default": 2048,
+              "description": "Maksimum token sayısı"
+            },
+            "contextSize": {
+              "type": "number",
+              "default": 4096,
+              "description": "Model bağlam boyutu"
+            }
+          }
         },
         "smile-ai.contextSize": {
           "type": "number",
@@ -848,15 +916,15 @@
     }
   },
   "scripts": {
-    "vscode:prepublish": "pnpm run package",
+    "vscode:prepublish": "npm run compile",
     "compile": "webpack",
     "watch": "webpack --watch",
     "package": "webpack --mode production --devtool hidden-source-map",
     "compile-tests": "tsc -p . --outDir out",
     "watch-tests": "tsc -p . -w --outDir out",
-    "pretest": "pnpm run compile-tests && pnpm run compile && pnpm run lint",
+    "pretest": "npm run compile-tests && npm run compile && npm run lint",
     "lint": "eslint src --ext ts",
-    "test": "vscode-test"
+    "test": "node ./out/test/runTest.js"
   },
   "pnpm": {
     "ignoredBuiltDependencies": [

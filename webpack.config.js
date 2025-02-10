@@ -5,23 +5,23 @@
 const path = require('path');
 
 //@type {import('webpack').Configuration}
-const config = {
-    mode: 'production',
+module.exports = {
+    mode: 'none', // development modunda deneyelim
     target: 'node',
     entry: './src/extension.ts',
     output: {
         path: path.resolve(__dirname, 'dist'),
         filename: 'extension.js',
-        libraryTarget: 'commonjs2',
-        devtoolModuleFilenameTemplate: '../[resource-path]'
+        libraryTarget: 'commonjs2'
     },
-    devtool: 'source-map',
+    devtool: 'nosources-source-map',
     externals: {
         vscode: 'commonjs vscode',
-        'node-llama-cpp': 'commonjs node-llama-cpp'
+        '@vscode/codicons': 'commonjs @vscode/codicons'
     },
     resolve: {
-        extensions: ['.ts', '.js']
+        extensions: ['.ts', '.js'],
+        mainFields: ['main', 'module']
     },
     module: {
         rules: [
@@ -30,12 +30,17 @@ const config = {
                 exclude: /node_modules/,
                 use: [
                     {
-                        loader: 'ts-loader'
+                        loader: 'ts-loader',
+                        options: {
+                            configFile: 'tsconfig.json',
+                            transpileOnly: true
+                        }
                     }
                 ]
             }
         ]
+    },
+    optimization: {
+        minimize: false
     }
-};
-
-module.exports = config; 
+}; 

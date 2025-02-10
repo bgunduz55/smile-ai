@@ -17,6 +17,7 @@ import { suggestionService } from './services/suggestionService';
 import { SuggestionViewProvider } from './webview/suggestionViewProvider';
 import { RulesService } from './services/rulesService';
 import { RulesViewProvider } from './webview/rulesViewProvider';
+import { MainViewProvider } from './webview/mainViewProvider';
 
 let completionServiceInstance: CompletionService;
 let agentServiceInstance: AgentService;
@@ -50,6 +51,7 @@ export async function activate(context: vscode.ExtensionContext) {
 		const composerViewProvider = new ComposerViewProvider(context.extensionUri);
 		const suggestionViewProvider = new SuggestionViewProvider(context.extensionUri);
 		const rulesViewProvider = new RulesViewProvider(context.extensionUri);
+		const mainViewProvider = new MainViewProvider(context.extensionUri);
 
 		// Model konfigürasyonunu yükle
 		const config: ModelConfig = {
@@ -90,7 +92,8 @@ export async function activate(context: vscode.ExtensionContext) {
 			vscode.window.registerWebviewViewProvider('smile-ai.chatView', chatViewProvider),
 			vscode.window.registerWebviewViewProvider('smile-ai.composerView', composerViewProvider),
 			vscode.window.registerWebviewViewProvider(SuggestionViewProvider.viewType, suggestionViewProvider),
-			vscode.window.registerWebviewViewProvider(RulesViewProvider.viewType, rulesViewProvider)
+			vscode.window.registerWebviewViewProvider(RulesViewProvider.viewType, rulesViewProvider),
+			vscode.window.registerWebviewViewProvider(MainViewProvider.viewType, mainViewProvider)
 		);
 
 		// Register commands
@@ -371,6 +374,26 @@ export async function activate(context: vscode.ExtensionContext) {
 
 
 				await RulesService.getInstance().viewRules(workspaceFolder);
+			}),
+
+			vscode.commands.registerCommand('smile-ai.switchToChat', () => {
+				mainViewProvider.switchTab('chat');
+			}),
+
+			vscode.commands.registerCommand('smile-ai.switchToComposer', () => {
+				mainViewProvider.switchTab('composer');
+			}),
+
+			vscode.commands.registerCommand('smile-ai.switchToSuggestions', () => {
+				mainViewProvider.switchTab('suggestions');
+			}),
+
+			vscode.commands.registerCommand('smile-ai.switchToRules', () => {
+				mainViewProvider.switchTab('rules');
+			}),
+
+			vscode.commands.registerCommand('smile-ai.switchToSettings', () => {
+				mainViewProvider.switchTab('settings');
 			})
 		);
 
