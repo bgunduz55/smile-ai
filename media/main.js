@@ -15,6 +15,7 @@
         if (vscode) {
             initializeTabs();
             initializeEventHandlers();
+            initializeSettings();
         } else {
             console.error('VS Code API not available');
         }
@@ -89,6 +90,38 @@
                 case 'showError':
                     console.error('Main.js: Error:', message.error);
                     break;
+
+                case 'updateProviderSettings':
+                    console.log('Main.js: Updating provider settings');
+                    const providerSettings = document.getElementById('providerSettings');
+                    if (providerSettings) {
+                        providerSettings.innerHTML = message.content;
+                    }
+                    break;
+
+                case 'ollamaModelsLoaded':
+                    console.log('Main.js: Ollama models loaded:', message.models);
+                    const ollamaModelList = document.getElementById('ollamaModelList');
+                    if (ollamaModelList) {
+                        if (message.error) {
+                            ollamaModelList.innerHTML = `<div class="error-message">${message.error}</div>`;
+                        } else if (message.models.length === 0) {
+                            ollamaModelList.innerHTML = '<div class="no-models">Yüklü model bulunamadı</div>';
+                        } else {
+                            ollamaModelList.innerHTML = message.models.map(model => `
+                                <div class="model-item">
+                                    <input type="radio" name="ollamaModel" id="${model.name}" 
+                                        value="${model.name}"
+                                        ${model.selected ? 'checked' : ''}
+                                        onchange="updateSetting('ollama.model', this.value)">
+                                    <label for="${model.name}">
+                                        ${model.name}
+                                    </label>
+                                </div>
+                            `).join('');
+                        }
+                    }
+                    break;
             }
         });
     }
@@ -116,7 +149,7 @@
 
     function initializeChat() {
         console.log('Main.js: Initializing chat...');
-        const chatInput = document.getElementById('chatInput');
+        const chatInput = /** @type {HTMLTextAreaElement} */ (document.getElementById('chatInput'));
         const sendButton = document.getElementById('sendMessage');
 
         if (chatInput && sendButton) {
@@ -132,7 +165,7 @@
     }
 
     function sendChatMessage() {
-        const chatInput = document.getElementById('chatInput');
+        const chatInput = /** @type {HTMLTextAreaElement} */ (document.getElementById('chatInput'));
         if (!chatInput) return;
 
         const message = chatInput.value.trim();
@@ -148,7 +181,7 @@
 
     function initializeComposer() {
         console.log('Main.js: Initializing composer...');
-        const composerInput = document.getElementById('composerInput');
+        const composerInput = /** @type {HTMLTextAreaElement} */ (document.getElementById('composerInput'));
         const sendButton = document.getElementById('sendComposerMessage');
 
         if (composerInput && sendButton) {
@@ -164,7 +197,7 @@
     }
 
     function sendComposerMessage() {
-        const composerInput = document.getElementById('composerInput');
+        const composerInput = /** @type {HTMLTextAreaElement} */ (document.getElementById('composerInput'));
         if (!composerInput) return;
 
         const message = composerInput.value.trim();
@@ -187,42 +220,69 @@
     }
 
     function initializeSettings() {
-        console.log('Main.js: Initializing settings...');
+        // Provider seçimi için event listener'lar
+        document.querySelectorAll('.provider-item').forEach(item => {
+            item.addEventListener('click', function(e) {
+                const target = /** @type {HTMLElement} */ (e.target);
+                if (target && target.tagName === 'INPUT') return;
+                
+                const provider = item.getAttribute('data-provider');
+                if (!provider) return;
+
+                document.querySelectorAll('.provider-item').forEach(p => {
+                    p.classList.remove('active');
+                    const settings = p.querySelector('.provider-settings');
+                    if (settings) settings.classList.remove('show');
+                });
+                
+                item.classList.add('active');
+                const settings = item.querySelector('.provider-settings');
+                if (settings) settings.classList.add('show');
+
+                vscode.postMessage({
+                    type: 'updateSetting',
+                    key: 'modelProvider',
+                    value: provider
+                });
+            });
+        });
     }
 
-    // Global functions
-    window.updateSetting = function(key, value) {
-        console.log('Main.js: Updating setting:', key, value);
-        vscode.postMessage({
-            type: 'updateSetting',
-            key: key,
-            value: value
-        });
-    };
+    // Global functions - attach to window object
+    Object.assign(window, {
+        updateSetting(key, value) {
+            console.log('Main.js: Updating setting:', key, value);
+            vscode.postMessage({
+                type: 'updateSetting',
+                key: key,
+                value: value
+            });
+        },
 
-    window.refreshOllamaModels = function() {
-        console.log('Main.js: Refreshing Ollama models...');
-        vscode.postMessage({
-            type: 'refreshOllamaModels'
-        });
-    };
+        refreshOllamaModels() {
+            console.log('Main.js: Refreshing Ollama models...');
+            vscode.postMessage({
+                type: 'refreshOllamaModels'
+            });
+        },
 
-    window.pullOllamaModel = function(modelName) {
-        if (!modelName) return;
-        console.log('Main.js: Pulling Ollama model:', modelName);
-        vscode.postMessage({
-            type: 'pullOllamaModel',
-            model: modelName
-        });
-    };
+        pullOllamaModel(modelName) {
+            if (!modelName) return;
+            console.log('Main.js: Pulling Ollama model:', modelName);
+            vscode.postMessage({
+                type: 'pullOllamaModel',
+                model: modelName
+            });
+        },
 
-    window.addCustomModel = function(provider, modelName) {
-        if (!modelName) return;
-        console.log('Main.js: Adding custom model:', provider, modelName);
-        vscode.postMessage({
-            type: 'addCustomModel',
-            provider: provider,
-            model: modelName
-        });
-    };
+        addCustomModel(provider, modelName) {
+            if (!modelName) return;
+            console.log('Main.js: Adding custom model:', provider, modelName);
+            vscode.postMessage({
+                type: 'addCustomModel',
+                provider: provider,
+                model: modelName
+            });
+        }
+    });
 })(); 

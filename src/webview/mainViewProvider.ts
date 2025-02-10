@@ -3,6 +3,7 @@ import { ChatViewProvider } from './chatViewProvider';
 import { ComposerViewProvider } from './composerViewProvider';
 import { SuggestionViewProvider } from './suggestionViewProvider';
 import { RulesViewProvider } from './rulesViewProvider';
+import { SettingsViewProvider } from './settingsViewProvider';
 
 type ModelProvider = 'ollama' | 'llamacpp' | 'openai' | 'anthropic';
 type OpenAIModel = 'gpt-4' | 'gpt-3.5-turbo';
@@ -15,6 +16,7 @@ export class MainViewProvider implements vscode.WebviewViewProvider {
     private composerViewProvider: ComposerViewProvider;
     private suggestionViewProvider: SuggestionViewProvider;
     private rulesViewProvider: RulesViewProvider;
+    private settingsViewProvider: SettingsViewProvider;
     private currentTab: string = 'chat';
 
     constructor(
@@ -25,6 +27,7 @@ export class MainViewProvider implements vscode.WebviewViewProvider {
         this.composerViewProvider = new ComposerViewProvider(_extensionUri);
         this.suggestionViewProvider = new SuggestionViewProvider(_extensionUri);
         this.rulesViewProvider = new RulesViewProvider(_extensionUri);
+        this.settingsViewProvider = new SettingsViewProvider();
     }
 
     public resolveWebviewView(
@@ -53,6 +56,7 @@ export class MainViewProvider implements vscode.WebviewViewProvider {
         this.composerViewProvider.setWebview(webviewView);
         this.suggestionViewProvider.setWebview(webviewView);
         this.rulesViewProvider.setWebview(webviewView);
+        this.settingsViewProvider.setWebview(webviewView);
 
         // Load initial HTML
         console.log('MainViewProvider: Loading initial HTML');
@@ -76,6 +80,14 @@ export class MainViewProvider implements vscode.WebviewViewProvider {
                     case 'refreshOllamaModels':
                         console.log('MainViewProvider: Refreshing Ollama models');
                         await this.refreshOllamaModels();
+                        break;
+                    case 'pullOllamaModel':
+                        console.log('MainViewProvider: Pulling Ollama model:', message.model);
+                        await this.pullOllamaModel(message.model);
+                        break;
+                    case 'addCustomModel':
+                        console.log('MainViewProvider: Adding custom model:', message.provider, message.model);
+                        await this.addCustomModel(message.provider, message.model);
                         break;
                     case 'sendMessage':
                         console.log('MainViewProvider: Sending message:', message.message);
@@ -103,8 +115,24 @@ export class MainViewProvider implements vscode.WebviewViewProvider {
                 return;
             }
 
+            // Get current model settings
+            const config = vscode.workspace.getConfiguration('smile-ai');
+            const currentProvider = config.get<ModelProvider>('modelProvider', 'ollama');
+            const currentModel = config.get(`${currentProvider}.model`, '');
+
             console.log('MainViewProvider: Loading chat content');
-            const chatContent = await this.chatViewProvider.getContent();
+            const chatContent = `
+                <div class="chat-container">
+                    <div class="model-selector">
+                        <label>Aktif Model:</label>
+                        <div class="active-model">
+                            <span class="provider-badge">${currentProvider}</span>
+                            <span class="model-name">${currentModel || 'Model seçilmedi'}</span>
+                        </div>
+                    </div>
+                    ${await this.chatViewProvider.getContent()}
+                </div>
+            `;
             await this._view.webview.postMessage({
                 type: 'updateTabContent',
                 tabId: 'chat',
@@ -112,13 +140,25 @@ export class MainViewProvider implements vscode.WebviewViewProvider {
             });
 
             console.log('MainViewProvider: Loading composer content');
-            const composerContent = await this.composerViewProvider.getContent();
+            const composerContent = `
+                <div class="composer-container">
+                    <div class="model-selector">
+                        <label>Aktif Model:</label>
+                        <div class="active-model">
+                            <span class="provider-badge">${currentProvider}</span>
+                            <span class="model-name">${currentModel || 'Model seçilmedi'}</span>
+                        </div>
+                    </div>
+                    ${await this.composerViewProvider.getContent()}
+                </div>
+            `;
             await this._view.webview.postMessage({
                 type: 'updateTabContent',
                 tabId: 'composer',
                 content: composerContent
             });
 
+            // Load other content as before
             console.log('MainViewProvider: Loading suggestions content');
             const suggestionsContent = await this.suggestionViewProvider.getContent();
             await this._view.webview.postMessage({
@@ -136,7 +176,7 @@ export class MainViewProvider implements vscode.WebviewViewProvider {
             });
 
             console.log('MainViewProvider: Loading settings content');
-            const settingsContent = this._getSettingsContent();
+            const settingsContent = await this.settingsViewProvider.getContent();
             await this._view.webview.postMessage({
                 type: 'updateTabContent',
                 tabId: 'settings',
@@ -150,6 +190,58 @@ export class MainViewProvider implements vscode.WebviewViewProvider {
             console.error('MainViewProvider: Error loading initial content:', error);
             vscode.window.showErrorMessage('Failed to load initial content: ' + (error instanceof Error ? error.message : 'Unknown error'));
         }
+    }
+
+    private async getModelOptionsHtml(provider: ModelProvider, currentModel: string): Promise<string> {
+        const config = vscode.workspace.getConfiguration('smile-ai');
+        let options = '';
+
+        switch (provider) {
+            case 'ollama':
+                const ollamaModels = config.get<string[]>('ollama.models', []);
+                if (ollamaModels.length === 0) {
+                    // Eğer yapılandırmada model yoksa, API'den getir
+                    try {
+                        const endpoint = config.get('ollama.endpoint', 'http://localhost:11434');
+                        const response = await fetch(`${endpoint}/api/tags`);
+                        if (response.ok) {
+                            const data = await response.json() as { models: Array<{ name: string }> };
+                            const models = data.models.map(m => m.name);
+                            await config.update('ollama.models', models, vscode.ConfigurationTarget.Global);
+                            options = models.map(model => `
+                                <option value="${model}" ${model === currentModel ? 'selected' : ''}>
+                                    ${model}
+                                </option>
+                            `).join('\\n');
+                        }
+                    } catch (error) {
+                        console.error('Error fetching Ollama models:', error);
+                    }
+                } else {
+                    options = ollamaModels.map(model => `
+                        <option value="${model}" ${model === currentModel ? 'selected' : ''}>
+                            ${model}
+                        </option>
+                    `).join('\\n');
+                }
+                break;
+
+            case 'openai':
+                options = `
+                    <option value="gpt-4" ${currentModel === 'gpt-4' ? 'selected' : ''}>GPT-4</option>
+                    <option value="gpt-3.5-turbo" ${currentModel === 'gpt-3.5-turbo' ? 'selected' : ''}>GPT-3.5 Turbo</option>
+                `;
+                break;
+
+            case 'anthropic':
+                options = `
+                    <option value="claude-3-opus-20240229" ${currentModel === 'claude-3-opus-20240229' ? 'selected' : ''}>Claude 3 Opus</option>
+                    <option value="claude-3-sonnet-20240229" ${currentModel === 'claude-3-sonnet-20240229' ? 'selected' : ''}>Claude 3 Sonnet</option>
+                `;
+                break;
+        }
+
+        return options || '<option value="">Model bulunamadı</option>';
     }
 
     public async switchTab(tabId: string) {
@@ -178,7 +270,7 @@ export class MainViewProvider implements vscode.WebviewViewProvider {
                     content = await this.rulesViewProvider.getContent();
                     break;
                 case 'settings':
-                    content = this._getSettingsContent();
+                    content = await this.settingsViewProvider.getContent();
                     break;
                 default:
                     console.error('MainViewProvider: Unknown tab:', tabId);
@@ -719,8 +811,8 @@ export class MainViewProvider implements vscode.WebviewViewProvider {
     }
 
     private async updateSetting(key: string, value: any) {
-        try {   
-            console.log(`Updating setting: ${key} = ${value}`);
+        try {
+            console.log(`MainViewProvider: Updating setting: ${key} = ${value}`);
             const config = vscode.workspace.getConfiguration('smile-ai');
             await config.update(key, value, vscode.ConfigurationTarget.Global);
             
@@ -738,7 +830,7 @@ export class MainViewProvider implements vscode.WebviewViewProvider {
             }
             
         } catch (error) {
-            console.error('Error updating setting:', error);
+            console.error('MainViewProvider: Error updating setting:', error);
             vscode.window.showErrorMessage(`Failed to update setting: ${key}`);
         }
     }
@@ -747,7 +839,7 @@ export class MainViewProvider implements vscode.WebviewViewProvider {
         if (this._view) {
             const chatContent = await this.chatViewProvider.getContent();
             const composerContent = await this.composerViewProvider.getContent();
-            const settingsContent = this._getSettingsContent();
+            const settingsContent = await this.settingsViewProvider.getContent();
 
             await this._view.webview.postMessage({
                 type: 'updateTabContent',
@@ -773,192 +865,109 @@ export class MainViewProvider implements vscode.WebviewViewProvider {
         try {
             const config = vscode.workspace.getConfiguration('smile-ai');
             const endpoint = config.get('ollama.endpoint', 'http://localhost:11434');
+            const currentModel = config.get('ollama.model', '');
             
-            console.log('Fetching Ollama models from:', endpoint);
+            console.log('MainViewProvider: Fetching Ollama models from:', endpoint);
             
             const response = await fetch(`${endpoint}/api/tags`);
             if (!response.ok) {
                 throw new Error(`HTTP error! status: ${response.status}`);
             }
             
-            const data = await response.json() as { models: Array<{ name: string, details: any }> };
-            const models = data.models || [];
+            const data = await response.json() as { models: Array<{ name: string }> };
+            const models = data.models.map(m => m.name);
             
-            console.log('Fetched models:', models);
+            console.log('MainViewProvider: Fetched models:', models);
+
+            // Modelleri yapılandırmaya kaydet
+            await config.update('ollama.models', models, vscode.ConfigurationTarget.Global);
             
             if (this._view) {
+                // Modelleri webview'a gönder
                 await this._view.webview.postMessage({
                     type: 'ollamaModelsLoaded',
                     models: models.map(model => ({
-                        name: model.name,
-                        details: model.details || {}
+                        name: model,
+                        selected: model === currentModel
                     }))
                 });
 
-                // Mevcut seçili modeli güncelle
-                const currentModel = config.get('ollama.model');
+                // Eğer aktif model seçili değilse ve modeller varsa ilk modeli seç
                 if (!currentModel && models.length > 0) {
-                    await this.updateSetting('ollama.model', models[0].name);
+                    await this.updateSetting('ollama.model', models[0]);
                 }
 
-                // Settings içeriğini yeniden yükle
-                const settingsContent = this._getSettingsContent();
-                await this._view.webview.postMessage({
-                    type: 'updateTabContent',
-                    tabId: 'settings',
-                    content: settingsContent
-                });
+                // Tüm görünümleri güncelle
+                await this.updateAllViews();
             }
         } catch (error) {
-            console.error('Error fetching Ollama models:', error);
+            console.error('MainViewProvider: Error fetching Ollama models:', error);
+            if (this._view) {
+                await this._view.webview.postMessage({
+                    type: 'ollamaModelsLoaded',
+                    models: [],
+                    error: 'Ollama modellerini getirirken hata oluştu. Endpoint\'i kontrol edin.'
+                });
+            }
             vscode.window.showErrorMessage('Ollama modellerini getirirken hata oluştu. Endpoint\'i kontrol edin.');
         }
     }
 
-    private async _handleMessage(message: any) {
-        console.log('MainViewProvider: Received message:', message);
+    private async pullOllamaModel(modelName: string) {
+        try {
+            const config = vscode.workspace.getConfiguration('smile-ai');
+            const endpoint = config.get('ollama.endpoint', 'http://localhost:11434');
+            
+            console.log('MainViewProvider: Pulling Ollama model:', modelName);
+            
+            const response = await fetch(`${endpoint}/api/pull`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ name: modelName })
+            });
 
-        switch (message.type) {
-            case 'switchTab':
-                console.log('MainViewProvider: Switching to tab:', message.tab);
-                await this._loadTabContent(message.tab);
-                break;
-            case 'updateSetting':
-                console.log('MainViewProvider: Setting update request:', message.key, message.value);
-                await this.updateSetting(message.key, message.value);
-                break;
-            case 'getProviderSettings':
-                console.log('MainViewProvider: Provider settings request:', message.provider);
-                const settingsHtml = this._getProviderSpecificSettings(message.provider);
-                await this._view?.webview.postMessage({
-                    type: 'updateProviderSettings',
-                    content: settingsHtml
-                });
-                break;
-            default:
-                // Forward messages to appropriate provider
-                console.log('MainViewProvider: Forwarding message to appropriate provider:', this.currentTab);
-                switch (this.currentTab) {
-                    case 'chat':
-                        await this.chatViewProvider.handleMessage(message);
-                        break;
-                    case 'composer':
-                        await this.composerViewProvider.handleMessage(message);
-                        break;
-                    case 'suggestions':
-                        await this.suggestionViewProvider.handleMessage(message);
-                        break;
-                    case 'rules':
-                        await this.rulesViewProvider.handleMessage(message);
-                        break;
-                }
-                break;
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+            
+            vscode.window.showInformationMessage(`Model çekiliyor: ${modelName}`);
+            
+            // Modeller listesini yenile
+            await this.refreshOllamaModels();
+            
+        } catch (error) {
+            console.error('MainViewProvider: Error pulling Ollama model:', error);
+            vscode.window.showErrorMessage(`Model çekilirken hata oluştu: ${modelName}`);
         }
     }
 
-    private async _loadTabContent(tabId: string) {
-        console.log('MainViewProvider: Loading content for tab:', tabId);
-        
+    private async addCustomModel(provider: string, modelName: string) {
         try {
-            let content = '';
+            console.log('MainViewProvider: Adding custom model:', provider, modelName);
+            const config = vscode.workspace.getConfiguration('smile-ai');
+            const customModels = config.get(`${provider}.customModels`, []) as string[];
             
-            switch (tabId) {
-                case 'chat':
-                    content = await this._getChatContent();
-                    break;
-                case 'composer':
-                    content = await this._getComposerContent();
-                    break;
-                case 'suggestions':
-                    content = await this._getSuggestionsContent();
-                    break;
-                case 'rules':
-                    content = await this._getRulesContent();
-                    break;
-                case 'settings':
-                    content = await this._getSettingsContent();
-                    break;
-                default:
-                    console.error('MainViewProvider: Unknown tab:', tabId);
-                    return;
-            }
-
-            if (this._view) {
-                console.log('MainViewProvider: Sending tab content update');
-                this._view.webview.postMessage({
-                    type: 'updateTabContent',
-                    tabId,
-                    content
-                });
+            if (!customModels.includes(modelName)) {
+                customModels.push(modelName);
+                await config.update(`${provider}.customModels`, customModels, vscode.ConfigurationTarget.Global);
+                
+                // Settings içeriğini yenile
+                if (this._view) {
+                    const settingsContent = await this.settingsViewProvider.getContent();
+                    await this._view.webview.postMessage({
+                        type: 'updateTabContent',
+                        tabId: 'settings',
+                        content: settingsContent
+                    });
+                }
+                
+                vscode.window.showInformationMessage(`Özel model eklendi: ${modelName}`);
             }
         } catch (error) {
-            console.error('MainViewProvider: Error loading tab content:', error);
-            if (this._view) {
-                this._view.webview.postMessage({
-                    type: 'showError',
-                    error: 'Failed to load tab content. Please try again.'
-                });
-            }
+            console.error('MainViewProvider: Error adding custom model:', error);
+            vscode.window.showErrorMessage(`Özel model eklenirken hata oluştu: ${modelName}`);
         }
-    }
-
-    private async _getChatContent(): Promise<string> {
-        return `
-            <div id="chatMessages" class="chat-messages"></div>
-            <div class="chat-input-container">
-                <textarea id="chatInput" placeholder="Type your message..."></textarea>
-                <button id="sendMessage">
-                    <i class="codicon codicon-send"></i>
-                </button>
-            </div>
-            <div id="loading" class="loading" style="display: none;">
-                Processing your request...
-            </div>
-        `;
-    }
-
-    private async _getComposerContent(): Promise<string> {
-        return `
-            <div id="composerContent" class="composer-content"></div>
-            <div class="composer-input-container">
-                <textarea id="composerInput" placeholder="Type your message..."></textarea>
-                <button id="sendComposerMessage">
-                    <i class="codicon codicon-send"></i>
-                </button>
-            </div>
-            <div id="loading" class="loading" style="display: none;">
-                Processing your request...
-            </div>
-        `;
-    }
-
-    private async _getSuggestionsContent(): Promise<string> {
-        return `
-            <div id="suggestionsContent" class="suggestions-content"></div>
-            <div class="suggestions-input-container">
-                <textarea id="suggestionsInput" placeholder="Type your message..."></textarea>
-                <button id="sendSuggestionsMessage">
-                    <i class="codicon codicon-send"></i>
-                </button>
-            </div>
-            <div id="loading" class="loading" style="display: none;">
-                Processing your request...
-            </div>
-        `;
-    }
-
-    private async _getRulesContent(): Promise<string> {
-        return `
-            <div id="rulesContent" class="rules-content"></div>
-            <div class="rules-input-container">
-                <textarea id="rulesInput" placeholder="Type your message..."></textarea>
-                <button id="sendRulesMessage">
-                    <i class="codicon codicon-send"></i>
-                </button>
-            </div>
-            <div id="loading" class="loading" style="display: none;">
-                Processing your request...
-            </div>
-        `;
     }
 }
