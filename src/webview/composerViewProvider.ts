@@ -255,6 +255,85 @@ export class ComposerViewProvider implements vscode.WebviewViewProvider {
         `;
     }
 
+    public async handleMessage(message: any) {
+        switch (message.type) {
+            case 'generateCode':
+                await this.handleCodeGeneration(message.value);
+                break;
+            case 'applyChanges':
+                await this.applyChanges(message.value);
+                break;
+        }
+    }
+
+    public async getContent(): Promise<string> {
+        const currentContext = this.currentContext ? `
+            <div class="context-info">
+                <p>Active File: ${this._escapeHtml(this.currentContext.filePath)}</p>
+                <p>Language: ${this._escapeHtml(this.currentContext.language)}</p>
+                ${this.currentContext.selection ? '<p>Selection: Active</p>' : '<p>No selection</p>'}
+            </div>
+        ` : '<div class="context-info">Please open a file to start.</div>';
+
+        return `
+            <div class="composer-container">
+                ${currentContext}
+                <div class="composer-header">
+                    <select id="composerAction">
+                        <option value="generate">Generate Code</option>
+                        <option value="refactor">Refactor Code</option>
+                        <option value="test">Generate Tests</option>
+                        <option value="docs">Generate Documentation</option>
+                        <option value="fix">Fix Issues</option>
+                    </select>
+                </div>
+                <div class="composer-content">
+                    <div class="input-section">
+                        <textarea 
+                            id="composerInput" 
+                            placeholder="Explain what you want to do..."
+                            rows="5"
+                        ></textarea>
+                    </div>
+                    <div class="options-section">
+                        <div class="option-item">
+                            <label for="language">Programming Language:</label>
+                            <select id="language">
+                                <option value="typescript">TypeScript</option>
+                                <option value="javascript">JavaScript</option>
+                                <option value="python">Python</option>
+                                <option value="java">Java</option>
+                                <option value="csharp">C#</option>
+                            </select>
+                        </div>
+                        <div class="option-item">
+                            <label for="style">Code Style:</label>
+                            <select id="style">
+                                <option value="clean">Clean Code</option>
+                                <option value="documented">Documented</option>
+                                <option value="optimized">Optimized</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="action-buttons">
+                        <button id="generateCode">
+                            <i class="codicon codicon-play"></i>
+                            Start
+                        </button>
+                    </div>
+                </div>
+                <div class="composer-output" id="composerOutput">
+                    ${this.currentResponse ? `
+                        <div class="output-content">
+                            <pre><code>${this._escapeHtml(this.currentResponse)}</code></pre>
+                            <button onclick="applyChanges()">Apply Changes</button>
+                        </div>
+                    ` : ''}
+                </div>
+            </div>
+        `;
+    }
+
     private _escapeHtml(unsafe: string): string {
         return unsafe
             .replace(/&/g, "&amp;")
@@ -262,5 +341,9 @@ export class ComposerViewProvider implements vscode.WebviewViewProvider {
             .replace(/>/g, "&gt;")
             .replace(/"/g, "&quot;")
             .replace(/'/g, "&#039;");
+    }
+
+    public setWebview(webview: vscode.WebviewView) {
+        this._view = webview;
     }
 } 

@@ -6,7 +6,7 @@ const path = require('path');
 
 //@type {import('webpack').Configuration}
 module.exports = {
-    mode: 'none', // development modunda deneyelim
+    mode: 'none',
     target: 'node',
     entry: './src/extension.ts',
     output: {

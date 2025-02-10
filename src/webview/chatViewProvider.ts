@@ -39,7 +39,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         });
     }
 
-    private async handleMessage(content: string) {
+    public async handleMessage(content: string) {
         if (!this._view) return;
 
         const userMessage: ChatMessage = {
@@ -66,7 +66,6 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
             vscode.window.showErrorMessage(`Chat error: ${errorMessage}`);
         }
     }
-
 
     private async _updateView() {
         if (this._view) {
@@ -199,5 +198,35 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
             .replace(/>/g, "&gt;")
             .replace(/"/g, "&quot;")
             .replace(/'/g, "&#039;");
+    }
+
+    public async getContent(): Promise<string> {
+        return `
+            <div class="chat-container">
+                <div class="chat-messages" id="chatMessages">
+                    ${this.messages.map(msg => `
+                        <div class="chat-message ${msg.role}">
+                            <div class="message-content">${this._escapeHtml(msg.content)}</div>
+                            <div class="message-timestamp">${msg.timestamp.toLocaleTimeString()}</div>
+                        </div>
+                    `).join('')}
+                </div>
+                <div class="chat-input-container">
+                    <textarea 
+                        id="chatInput" 
+                        placeholder="Type your message..."
+                        rows="3"
+                    ></textarea>
+                    <button id="sendMessage">
+                        <i class="codicon codicon-send"></i>
+                        Send
+                    </button>
+                </div>
+            </div>
+        `;
+    }
+
+    public setWebview(webview: vscode.WebviewView) {
+        this._view = webview;
     }
 } 

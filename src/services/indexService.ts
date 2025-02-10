@@ -1,7 +1,6 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
-import initSqlJs from 'sql.js';
 import { minimatch } from 'minimatch';
 
 interface IndexedFile {
@@ -16,20 +15,9 @@ interface SmileIgnoreConfig {
     includePatterns: string[];
 }
 
-interface FileRow {
-    file_path: string;
-    content: string;
-    language: string;
-    last_modified: number;
-}
-
-interface RelevantFileRow extends FileRow {
-    relevance: number;
-}
-
 export class IndexService {
     private static instance: IndexService;
-    private db: any;
+    private files: Map<string, IndexedFile>;
     private defaultExcludePatterns: string[] = [
         '**/node_modules/**',
         '**/dist/**',
@@ -51,7 +39,7 @@ export class IndexService {
     };
 
     private constructor() {
-        this.initDatabase();
+        this.files = new Map();
     }
 
     public static getInstance(): IndexService {
@@ -59,20 +47,6 @@ export class IndexService {
             IndexService.instance = new IndexService();
         }
         return IndexService.instance;
-    }
-
-    private async initDatabase(): Promise<void> {
-        const SQL = await initSqlJs();
-        this.db = new SQL.Database();
-        
-        this.db.run(`
-            CREATE TABLE IF NOT EXISTS files (
-                file_path TEXT PRIMARY KEY,
-                content TEXT,
-                language TEXT,
-                last_modified INTEGER
-            )
-        `);
     }
 
     private async loadSmileIgnore(workspaceRoot: string): Promise<void> {
@@ -118,8 +92,8 @@ export class IndexService {
                 '{' + this.ignoreConfig.excludePatterns.join(',') + '}'
             );
 
-            // Begin transaction
-            this.db.run('BEGIN TRANSACTION');
+            // Clear existing files
+            this.files.clear();
 
             for (const file of files) {
                 try {
@@ -128,10 +102,12 @@ export class IndexService {
                         const stats = fs.statSync(file.fsPath);
                         const language = this.getFileLanguage(file.fsPath);
 
-                        this.db.run(
-                            'INSERT OR REPLACE INTO files (file_path, content, language, last_modified) VALUES (?, ?, ?, ?)',
-                            [file.fsPath, content, language, stats.mtimeMs]
-                        );
+                        this.files.set(file.fsPath, {
+                            filePath: file.fsPath,
+                            content,
+                            language,
+                            lastModified: stats.mtimeMs
+                        });
                         console.log(`Indexed: ${file.fsPath}`);
                     }
                 } catch (error) {
@@ -139,15 +115,10 @@ export class IndexService {
                 }
             }
 
-            // Commit transaction
-            this.db.run('COMMIT');
-
             console.log('Indexing completed');
             vscode.window.showInformationMessage('File indexing completed.');
 
         } catch (error) {
-            // Rollback on error
-            this.db.run('ROLLBACK');
             console.error('Error during indexing:', error);
             vscode.window.showErrorMessage('Indexing error: ' + 
                 (error instanceof Error ? error.message : 'Unknown error'));
@@ -205,50 +176,34 @@ export class IndexService {
     }
 
     public searchFiles(query: string): IndexedFile[] {
-        const stmt = this.db.prepare('SELECT * FROM files WHERE content LIKE ?');
-        const results = stmt.all(['%' + query + '%']);
-        stmt.free();
+        const results: IndexedFile[] = [];
+        const queryLower = query.toLowerCase();
 
-        return results.map((row: FileRow) => ({
-            filePath: row.file_path,
-            content: row.content,
-            language: row.language,
-            lastModified: row.last_modified
-        }));
+        for (const file of this.files.values()) {
+            if (file.content.toLowerCase().includes(queryLower)) {
+                results.push(file);
+            }
+        }
+
+        return results;
     }
 
     public getFile(filePath: string): IndexedFile | null {
-        const stmt = this.db.prepare('SELECT * FROM files WHERE file_path = ?');
-        const results = stmt.get([filePath]);
-        stmt.free();
-
-        if (!results) {
-            return null;
-        }
-
-        const row = results as FileRow;
-        return {
-            filePath: row.file_path,
-            content: row.content,
-            language: row.language,
-            lastModified: row.last_modified
-        };
+        return this.files.get(filePath) || null;
     }
 
     public searchByWords(words: string[]): IndexedFile[] {
-        const placeholders = words.map(() => 'content LIKE ?').join(' OR ');
-        const params = words.map(word => '%' + word + '%');
-        
-        const stmt = this.db.prepare(`SELECT * FROM files WHERE ${placeholders}`);
-        const results = stmt.all(params);
-        stmt.free();
+        const results: IndexedFile[] = [];
+        const wordsLower = words.map(w => w.toLowerCase());
 
-        return results.map((row: FileRow) => ({
-            filePath: row.file_path,
-            content: row.content,
-            language: row.language,
-            lastModified: row.last_modified
-        }));
+        for (const file of this.files.values()) {
+            const contentLower = file.content.toLowerCase();
+            if (wordsLower.some(word => contentLower.includes(word))) {
+                results.push(file);
+            }
+        }
+
+        return results;
     }
 
     public getRelevantFiles(context: string): IndexedFile[] {
@@ -258,33 +213,19 @@ export class IndexService {
             return [];
         }
 
-        const query = words.map(() => 'content LIKE ?').join(' OR ');
-        const relevanceCalc = words.map(() => 'CASE WHEN content LIKE ? THEN 1 ELSE 0 END').join(' + ');
-        const params = words.map(word => '%' + word + '%');
-        
-        const stmt = this.db.prepare(
-            `SELECT file_path, content, language, last_modified,
-             (${relevanceCalc}) as relevance
-             FROM files
-             WHERE ${query}
-             ORDER BY relevance DESC
-             LIMIT 10`
-        );
-        const results = stmt.all(params);
-        stmt.free();
+        const results = Array.from(this.files.values()).map(file => {
+            const contentLower = file.content.toLowerCase();
+            const relevance = words.reduce((score, word) => 
+                score + (contentLower.includes(word) ? 1 : 0), 0);
+            return { file, relevance };
+        });
 
-        return results.map((row: RelevantFileRow) => ({
-            filePath: row.file_path,
-            content: row.content,
-            language: row.language,
-            lastModified: row.last_modified
-        }));
+        results.sort((a, b) => b.relevance - a.relevance);
+        return results.slice(0, 10).map(r => r.file);
     }
 
     public dispose(): void {
-        if (this.db) {
-            this.db.close();
-        }
+        this.files.clear();
     }
 }
 
