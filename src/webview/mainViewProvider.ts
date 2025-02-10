@@ -99,12 +99,58 @@ export class MainViewProvider implements vscode.WebviewViewProvider {
             }
         });
 
-        // Wait for HTML to load then switch to initial tab
-        console.log('MainViewProvider: Setting up initial tab switch');
+        // Load initial content for each tab
+        console.log('MainViewProvider: Loading initial content for all tabs');
         setTimeout(async () => {
-            console.log('MainViewProvider: Switching to initial tab');
-            await this.switchTab('chat');
-            console.log('MainViewProvider: Initial tab switch completed');
+            try {
+                // Load chat content
+                const chatContent = await this.chatViewProvider.getContent();
+                await webviewView.webview.postMessage({
+                    type: 'updateTabContent',
+                    tabId: 'chat',
+                    content: chatContent
+                });
+
+                // Load composer content
+                const composerContent = await this.composerViewProvider.getContent();
+                await webviewView.webview.postMessage({
+                    type: 'updateTabContent',
+                    tabId: 'composer',
+                    content: composerContent
+                });
+
+                // Load suggestions content
+                const suggestionsContent = await this.suggestionViewProvider.getContent();
+                await webviewView.webview.postMessage({
+                    type: 'updateTabContent',
+                    tabId: 'suggestions',
+                    content: suggestionsContent
+                });
+
+                // Load rules content
+                const rulesContent = await this.rulesViewProvider.getContent();
+                await webviewView.webview.postMessage({
+                    type: 'updateTabContent',
+                    tabId: 'rules',
+                    content: rulesContent
+                });
+
+                // Load settings content
+                const settingsContent = this._getSettingsContent();
+                await webviewView.webview.postMessage({
+                    type: 'updateTabContent',
+                    tabId: 'settings',
+                    content: settingsContent
+                });
+
+                // Switch to initial tab
+                console.log('MainViewProvider: Switching to initial tab');
+                await this.switchTab('chat');
+                console.log('MainViewProvider: Initial tab switch completed');
+            } catch (error) {
+                console.error('MainViewProvider: Error loading initial content:', error);
+                vscode.window.showErrorMessage('Failed to load initial content');
+            }
         }, 1000);
 
         console.log('MainViewProvider: resolveWebviewView completed');
@@ -358,11 +404,25 @@ export class MainViewProvider implements vscode.WebviewViewProvider {
                         </div>
                         <div class="setting-item">
                             <label for="ollamaModel">Model</label>
-                            <input type="text" id="ollamaModel" 
-                                value="${ollamaModel}"
+                            <select id="ollamaModel" 
                                 onchange="updateSetting('ollama.model', this.value)">
+                                <option value="">Loading models...</option>
+                            </select>
+                            <button onclick="refreshOllamaModels()" style="margin-top: 8px;">
+                                <i class="codicon codicon-refresh"></i>
+                                Refresh Models
+                            </button>
                         </div>
                     </div>
+                    <script>
+                        function refreshOllamaModels() {
+                            vscode.postMessage({
+                                type: 'refreshOllamaModels'
+                            });
+                        }
+                        // Sayfa yüklendiğinde modelleri getir
+                        refreshOllamaModels();
+                    </script>
                 `;
             default:
                 return '';
@@ -374,12 +434,10 @@ export class MainViewProvider implements vscode.WebviewViewProvider {
             const config = vscode.workspace.getConfiguration('smile-ai');
             await config.update(key, value, vscode.ConfigurationTarget.Global);
             
-            // If the AI provider changed, restart the relevant service
-            if (key === 'aiProvider') {
-                // TODO: Restart the AI service
-                vscode.window.showInformationMessage(`AI Provider changed to ${value}`);
+            // Eğer Ollama endpoint'i değiştiyse modelleri yeniden getir
+            if (key === 'ollama.endpoint') {
+                await this.refreshOllamaModels();
             }
-
             
             console.log(`Setting updated successfully: ${key} = ${value}`);
         } catch (error) {
@@ -387,4 +445,32 @@ export class MainViewProvider implements vscode.WebviewViewProvider {
             vscode.window.showErrorMessage(`Failed to update setting: ${key}`);
         }
     }
-} 
+
+    private async refreshOllamaModels() {
+        try {
+            const config = vscode.workspace.getConfiguration('smile-ai');
+            const endpoint = config.get('ollama.endpoint', 'http://localhost:11434');
+            
+            const response = await fetch(`${endpoint}/api/tags`);
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+            
+            const data = await response.json() as { models: Array<{ name: string, details: any }> };
+            const models = data.models || [];
+            
+            if (this._view) {
+                await this._view.webview.postMessage({
+                    type: 'ollamaModelsLoaded',
+                    models: models.map(model => ({
+                        name: model.name,
+                        details: model.details || {}
+                    }))
+                });
+            }
+        } catch (error) {
+            console.error('Error fetching Ollama models:', error);
+            vscode.window.showErrorMessage('Ollama modellerini getirirken hata oluştu. Endpoint\'i kontrol edin.');
+        }
+    }
+}

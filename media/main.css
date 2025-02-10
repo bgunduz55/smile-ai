@@ -17,6 +17,8 @@ body {
     background-color: var(--vscode-editor-background);
     border-bottom: 1px solid var(--vscode-panel-border);
     padding: 5px 5px 0;
+    position: relative;
+    z-index: 2;
 }
 
 .tab-button {
@@ -48,18 +50,28 @@ body {
 
 .tab-content {
     flex: 1;
-    overflow: auto;
-    padding: 20px;
+    overflow: hidden;
     background-color: var(--vscode-editor-background);
+    position: relative;
 }
 
 .tab-pane {
     display: none;
     height: 100%;
+    width: 100%;
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    overflow-y: auto;
+    padding: 20px;
+    z-index: 0;
 }
 
 .tab-pane.active {
     display: block;
+    z-index: 1;
 }
 
 /* Chat styles */
@@ -116,12 +128,9 @@ body {
     height: 100%;
     display: flex;
     flex-direction: column;
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
+    position: relative;
     overflow-y: auto;
+    z-index: 0;
 }
 
 .composer-header {
@@ -175,12 +184,9 @@ body {
     height: 100%;
     display: flex;
     flex-direction: column;
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
+    position: relative;
     overflow-y: auto;
+    z-index: 0;
 }
 
 .suggestions-header {
@@ -223,12 +229,9 @@ body {
     height: 100%;
     display: flex;
     flex-direction: column;
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
+    position: relative;
     overflow-y: auto;
+    z-index: 0;
 }
 
 .rules-header {

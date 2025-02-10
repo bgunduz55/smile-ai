@@ -2,8 +2,20 @@
 
 (function() {
     // Get VS Code API
-    /** @type {any} */
-    const vscode = acquireVsCodeApi();
+    const vscode = (function() {
+        try {
+            // @ts-ignore
+            return acquireVsCodeApi();
+        } catch (e) {
+            console.error('VS Code API is not available');
+            return undefined;
+        }
+    })();
+    
+    if (!vscode) {
+        console.error('VS Code API is not available');
+        return;
+    }
     
     // Store messages history
     let messagesHistory = [];
@@ -52,7 +64,7 @@
     // Chat functionality
     function initializeChat() {
         /** @type {HTMLTextAreaElement | null} */
-        const chatInput = document.getElementById('chatInput');
+        const chatInput = /** @type {HTMLTextAreaElement} */ (document.getElementById('chatInput'));
         const sendButton = document.getElementById('sendMessage');
         const chatMessages = document.getElementById('chatMessages');
         
@@ -98,14 +110,24 @@
     
     // Composer functionality
     function initializeComposer() {
-        const composerInput = document.getElementById('composerInput');
+        /** @type {HTMLTextAreaElement | null} */
+        const composerInput = /** @type {HTMLTextAreaElement} */ (document.getElementById('composerInput'));
         const generateButton = document.getElementById('generateCode');
         
-        if (generateButton) {
+        if (generateButton && composerInput) {
             generateButton.addEventListener('click', () => {
-                const action = document.getElementById('composerAction').value;
-                const language = document.getElementById('language').value;
-                const style = document.getElementById('style').value;
+                /** @type {HTMLSelectElement | null} */
+                const actionSelect = /** @type {HTMLSelectElement} */ (document.getElementById('composerAction'));
+                /** @type {HTMLSelectElement | null} */
+                const languageSelect = /** @type {HTMLSelectElement} */ (document.getElementById('language'));
+                /** @type {HTMLSelectElement | null} */
+                const styleSelect = /** @type {HTMLSelectElement} */ (document.getElementById('style'));
+                
+                if (!actionSelect || !languageSelect || !styleSelect) return;
+                
+                const action = actionSelect.value;
+                const language = languageSelect.value;
+                const style = styleSelect.value;
                 const prompt = composerInput.value.trim();
                 
                 if (prompt) {
@@ -125,7 +147,8 @@
     function initializeSuggestions() {
         const refreshButton = document.getElementById('refreshSuggestions');
         const applyAllButton = document.getElementById('applyAllSuggestions');
-        const suggestionType = document.getElementById('suggestionType');
+        /** @type {HTMLSelectElement | null} */
+        const suggestionType = /** @type {HTMLSelectElement} */ (document.getElementById('suggestionType'));
         
         if (refreshButton) {
             refreshButton.addEventListener('click', () => {
@@ -168,7 +191,10 @@
         // Add event listeners for edit and delete buttons
         document.querySelectorAll('.edit-rule-set').forEach(button => {
             button.addEventListener('click', (e) => {
-                const ruleSet = e.target.closest('.rule-set');
+                const target = /** @type {HTMLElement} */ (e.target);
+                const ruleSet = target.closest('.rule-set');
+                if (!ruleSet) return;
+                
                 const ruleSetId = ruleSet.getAttribute('data-id');
                 vscode.postMessage({
                     type: 'editRuleSet',
@@ -179,7 +205,10 @@
 
         document.querySelectorAll('.delete-rule-set').forEach(button => {
             button.addEventListener('click', (e) => {
-                const ruleSet = e.target.closest('.rule-set');
+                const target = /** @type {HTMLElement} */ (e.target);
+                const ruleSet = target.closest('.rule-set');
+                if (!ruleSet) return;
+                
                 const ruleSetId = ruleSet.getAttribute('data-id');
                 vscode.postMessage({
                     type: 'deleteRuleSet',
@@ -191,10 +220,13 @@
     
     // Settings functionality
     function initializeSettings() {
-        const modelProvider = document.getElementById('modelProvider');
-        const temperature = document.getElementById('temperature');
+        /** @type {HTMLSelectElement | null} */
+        const modelProvider = /** @type {HTMLSelectElement} */ (document.getElementById('modelProvider'));
+        /** @type {HTMLInputElement | null} */
+        const temperature = /** @type {HTMLInputElement} */ (document.getElementById('temperature'));
         const temperatureValue = document.getElementById('temperatureValue');
-        const maxTokens = document.getElementById('maxTokens');
+        /** @type {HTMLInputElement | null} */
+        const maxTokens = /** @type {HTMLInputElement} */ (document.getElementById('maxTokens'));
         
         if (modelProvider) {
             modelProvider.addEventListener('change', () => {
@@ -229,6 +261,7 @@
     }
     
     // Model provider selection
+    /** @type {HTMLElement | null} */
     const modelSettings = document.getElementById('modelSettings');
     
     const providerSettings = {
@@ -279,18 +312,22 @@
         `
     };
     
-    modelSettings.addEventListener('change', async () => {
-        const provider = modelSettings.value;
-        modelSettings.innerHTML = providerSettings[provider];
-        
-        if (provider === 'ollama') {
-            // Get available Ollama models
-            vscode.postMessage({
-                type: 'getModels',
-                provider: 'ollama'
-            });
-        }
-    });
+    if (modelSettings) {
+        modelSettings.addEventListener('change', async () => {
+            /** @type {HTMLSelectElement} */
+            const select = /** @type {HTMLSelectElement} */ (modelSettings);
+            const provider = select.value;
+            modelSettings.innerHTML = providerSettings[provider];
+            
+            if (provider === 'ollama') {
+                // Get available Ollama models
+                vscode.postMessage({
+                    type: 'getModels',
+                    provider: 'ollama'
+                });
+            }
+        });
+    }
     
     // Handle messages from extension
     window.addEventListener('message', event => {
@@ -301,40 +338,64 @@
             case 'modelsLoaded':
                 if (message.provider === 'ollama') {
                     const select = document.getElementById('ollamaModel');
-                    select.innerHTML = message.models.map(model => 
-                        `<option value="${model.name}">${model.name}</option>`
-                    ).join('');
+                    if (select) {
+                        select.innerHTML = message.models.map(model => 
+                            `<option value="${model.name || ''}">${model.name || ''}</option>`
+                        ).join('');
+                    }
                 }
                 break;
                 
             case 'loadSettings':
                 // Load saved settings
                 const settings = message.settings;
-                modelSettings.value = settings.provider;
-                modelSettings.dispatchEvent(new Event('change'));
+                if (modelSettings) {
+                    /** @type {HTMLSelectElement} */
+                    const select = /** @type {HTMLSelectElement} */ (modelSettings);
+                    select.value = settings.provider;
+                    select.dispatchEvent(new Event('change'));
+                }
                 
                 // Load provider-specific settings
                 switch (settings.provider) {
                     case 'ollama':
-                        document.getElementById('ollamaEndpoint').value = settings.endpoint;
-                        document.getElementById('ollamaModel').value = settings.model;
+                        /** @type {HTMLInputElement | null} */
+                        const ollamaEndpoint = /** @type {HTMLInputElement} */ (document.getElementById('ollamaEndpoint'));
+                        /** @type {HTMLSelectElement | null} */
+                        const ollamaModel = /** @type {HTMLSelectElement} */ (document.getElementById('ollamaModel'));
+                        if (ollamaEndpoint) ollamaEndpoint.value = settings.endpoint;
+                        if (ollamaModel) ollamaModel.value = settings.model;
                         break;
                     case 'llamacpp':
-                        document.getElementById('llamaPath').value = settings.modelPath;
+                        /** @type {HTMLInputElement | null} */
+                        const llamaPath = /** @type {HTMLInputElement} */ (document.getElementById('llamaPath'));
+                        if (llamaPath) llamaPath.value = settings.modelPath;
                         break;
                     case 'openai':
-                        document.getElementById('openaiKey').value = settings.apiKey;
-                        document.getElementById('openaiModel').value = settings.model;
+                        /** @type {HTMLInputElement | null} */
+                        const openaiKey = /** @type {HTMLInputElement} */ (document.getElementById('openaiKey'));
+                        /** @type {HTMLSelectElement | null} */
+                        const openaiModel = /** @type {HTMLSelectElement} */ (document.getElementById('openaiModel'));
+                        if (openaiKey) openaiKey.value = settings.apiKey;
+                        if (openaiModel) openaiModel.value = settings.model;
                         break;
                     case 'anthropic':
-                        document.getElementById('anthropicKey').value = settings.apiKey;
-                        document.getElementById('anthropicModel').value = settings.model;
+                        /** @type {HTMLInputElement | null} */
+                        const anthropicKey = /** @type {HTMLInputElement} */ (document.getElementById('anthropicKey'));
+                        /** @type {HTMLSelectElement | null} */
+                        const anthropicModel = /** @type {HTMLSelectElement} */ (document.getElementById('anthropicModel'));
+                        if (anthropicKey) anthropicKey.value = settings.apiKey;
+                        if (anthropicModel) anthropicModel.value = settings.model;
                         break;
                 }
                 
                 // Load general parameters
-                document.getElementById('temperature').value = settings.temperature;
-                document.getElementById('maxTokens').value = settings.maxTokens;
+                /** @type {HTMLInputElement | null} */
+                const temperature = /** @type {HTMLInputElement} */ (document.getElementById('temperature'));
+                /** @type {HTMLInputElement | null} */
+                const maxTokens = /** @type {HTMLInputElement} */ (document.getElementById('maxTokens'));
+                if (temperature) temperature.value = settings.temperature;
+                if (maxTokens) maxTokens.value = settings.maxTokens;
                 break;
 
             case 'updateTabContent':
@@ -389,34 +450,96 @@
                 // TODO: Implement error display
                 console.error(message.error);
                 break;
+
+            case 'ollamaModelsLoaded':
+                /** @type {HTMLSelectElement | null} */
+                const select = /** @type {HTMLSelectElement} */ (document.getElementById('ollamaModel'));
+                if (select) {
+                    // Mevcut seçili modeli sakla
+                    const currentValue = select.value;
+                    
+                    // Modelleri listele
+                    select.innerHTML = message.models.map(model => 
+                        `<option value="${model.name}" ${currentValue === model.name ? 'selected' : ''}>
+                            ${model.name}
+                        </option>`
+                    ).join('');
+                    
+                    // Eğer önceki seçili model listede yoksa ilk modeli seç
+                    if (!select.value && select.options.length > 0) {
+                        select.selectedIndex = 0;
+                        // Seçili modeli güncelle
+                        vscode.postMessage({
+                            type: 'updateSetting',
+                            key: 'ollama.model',
+                            value: select.value
+                        });
+                    }
+                }
+                break;
         }
     });
     
     // Save settings
     function saveSettings() {
-        const provider = modelSettings.value;
+        /** @type {HTMLSelectElement | null} */
+        const modelProvider = /** @type {HTMLSelectElement} */ (document.getElementById('modelProvider'));
+        /** @type {HTMLInputElement | null} */
+        const temperature = /** @type {HTMLInputElement} */ (document.getElementById('temperature'));
+        /** @type {HTMLInputElement | null} */
+        const maxTokens = /** @type {HTMLInputElement} */ (document.getElementById('maxTokens'));
+        
+        if (!modelProvider || !temperature || !maxTokens) return;
+        
+        const provider = modelProvider.value;
         const settings = {
             provider,
-            temperature: document.getElementById('temperature').value,
-            maxTokens: document.getElementById('maxTokens').value
+            temperature: temperature.value,
+            maxTokens: maxTokens.value
         };
         
         switch (provider) {
-            case 'ollama':
-                settings.endpoint = document.getElementById('ollamaEndpoint').value;
-                settings.model = document.getElementById('ollamaModel').value;
+            case 'ollama': {
+                /** @type {HTMLInputElement | null} */
+                const endpoint = /** @type {HTMLInputElement} */ (document.getElementById('ollamaEndpoint'));
+                /** @type {HTMLSelectElement | null} */
+                const model = /** @type {HTMLSelectElement} */ (document.getElementById('ollamaModel'));
+                if (endpoint && model) {
+                    settings.endpoint = endpoint.value;
+                    settings.model = model.value;
+                }
                 break;
-            case 'llamacpp':
-                settings.modelPath = document.getElementById('llamaPath').value;
+            }
+            case 'llamacpp': {
+                /** @type {HTMLInputElement | null} */
+                const modelPath = /** @type {HTMLInputElement} */ (document.getElementById('llamaPath'));
+                if (modelPath) {
+                    settings.modelPath = modelPath.value;
+                }
                 break;
-            case 'openai':
-                settings.apiKey = document.getElementById('openaiKey').value;
-                settings.model = document.getElementById('openaiModel').value;
+            }
+            case 'openai': {
+                /** @type {HTMLInputElement | null} */
+                const apiKey = /** @type {HTMLInputElement} */ (document.getElementById('openaiKey'));
+                /** @type {HTMLSelectElement | null} */
+                const model = /** @type {HTMLSelectElement} */ (document.getElementById('openaiModel'));
+                if (apiKey && model) {
+                    settings.apiKey = apiKey.value;
+                    settings.model = model.value;
+                }
                 break;
-            case 'anthropic':
-                settings.apiKey = document.getElementById('anthropicKey').value;
-                settings.model = document.getElementById('anthropicModel').value;
+            }
+            case 'anthropic': {
+                /** @type {HTMLInputElement | null} */
+                const apiKey = /** @type {HTMLInputElement} */ (document.getElementById('anthropicKey'));
+                /** @type {HTMLSelectElement | null} */
+                const model = /** @type {HTMLSelectElement} */ (document.getElementById('anthropicModel'));
+                if (apiKey && model) {
+                    settings.apiKey = apiKey.value;
+                    settings.model = model.value;
+                }
                 break;
+            }
         }
         
         vscode.postMessage({
