@@ -1,16 +1,56 @@
 import * as vscode from 'vscode';
 import { SettingsService, ModelProvider } from '../services/settingsService';
 
-export class SettingsViewProvider {
-    private _view?: vscode.WebviewView;
+export class SettingsViewProvider implements vscode.WebviewViewProvider {
+    public static readonly viewType = 'smile-ai.settingsView';
+
     private settingsService: SettingsService;
 
-    constructor() {
+    constructor(
+        private readonly _extensionUri: vscode.Uri,
+    ) {
         this.settingsService = SettingsService.getInstance();
     }
 
+    public resolveWebviewView(
+        webviewView: vscode.WebviewView,
+        _context: vscode.WebviewViewResolveContext,
+        _token: vscode.CancellationToken,
+    ) {
+        webviewView.webview.options = {
+            enableScripts: true,
+            localResourceRoots: [this._extensionUri]
+        };
+
+        webviewView.webview.html = this._getHtmlForWebview(webviewView.webview);
+    }
+
+    private _getHtmlForWebview(webview: vscode.Webview) {
+        const scriptUri = webview.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'media', 'main.js'));
+        const styleUri = webview.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'media', 'style.css'));
+
+        return `<!DOCTYPE html>
+            <html lang="en">
+            <head>
+                <meta charset="UTF-8">
+                <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                <link href="${styleUri}" rel="stylesheet">
+                <title>Settings</title>
+            </head>
+            <body>
+                <div id="settings-container">
+                    <h2>Settings</h2>
+                    <div class="settings-group">
+                        <!-- Settings content will be dynamically populated -->
+                    </div>
+                </div>
+                <script src="${scriptUri}"></script>
+            </body>
+            </html>`;
+    }
+
     setWebview(webviewView: vscode.WebviewView) {
-        this._view = webviewView;
+        // Store webview reference if needed in the future
     }
 
     public async getContent(): Promise<string> {
@@ -20,13 +60,13 @@ export class SettingsViewProvider {
         let providerContent = '';
         switch (currentProvider) {
             case 'ollama':
-                providerContent = await this.getOllamaSettingsHtml(settings.ollama || {});
+                providerContent = await this.getOllamaSettingsHtml(settings.ollama || {}, settings.ollama?.activeModels || []);
                 break;
             case 'openai':
-                providerContent = this.getOpenAISettingsHtml(settings.openai || {});
+                providerContent = this.getOpenAISettingsHtml(settings.openai || {}, settings.openai?.activeModels || []);
                 break;
             case 'anthropic':
-                providerContent = this.getAnthropicSettingsHtml(settings.anthropic || {});
+                providerContent = this.getAnthropicSettingsHtml(settings.anthropic || {}, settings.anthropic?.activeModels || []);
                 break;
         }
 
@@ -144,31 +184,31 @@ export class SettingsViewProvider {
 
     private async getProviderSettingsHtml(provider: ModelProvider): Promise<string> {
         const settings = this.settingsService.getProviderSettings(provider);
+        const activeModels = settings.activeModels || [];
         
         switch (provider) {
             case 'ollama':
-                return this.getOllamaSettingsHtml(settings);
+                return this.getOllamaSettingsHtml(settings, activeModels);
             case 'openai':
-                return this.getOpenAISettingsHtml(settings);
+                return this.getOpenAISettingsHtml(settings, activeModels);
             case 'anthropic':
-                return this.getAnthropicSettingsHtml(settings);
+                return this.getAnthropicSettingsHtml(settings, activeModels);
             case 'lmstudio':
-                return this.getLMStudioSettingsHtml(settings);
+                return this.getLMStudioSettingsHtml(settings, activeModels);
             case 'localai':
-                return this.getLocalAISettingsHtml(settings);
+                return this.getLocalAISettingsHtml(settings, activeModels);
             case 'deepseek':
-                return this.getDeepseekSettingsHtml(settings);
+                return this.getDeepseekSettingsHtml(settings, activeModels);
             case 'qwen':
-                return this.getQwenSettingsHtml(settings);
+                return this.getQwenSettingsHtml(settings, activeModels);
             default:
                 return '';
         }
     }
 
-    private async getOllamaSettingsHtml(settings: any): Promise<string> {
-        const currentModel = settings.model || '';
+    private async getOllamaSettingsHtml(settings: any, activeModels: string[]): Promise<string> {
         const endpoint = settings.endpoint || 'http://localhost:11434';
-        let models: string[] = [];
+        let models: string[] = settings.models || [];
 
         try {
             const response = await fetch(`${endpoint}/api/tags`);
@@ -186,132 +226,91 @@ export class SettingsViewProvider {
                 <label for="ollamaEndpoint">Endpoint</label>
                 <input type="text" id="ollamaEndpoint" 
                     value="${endpoint}"
-                    onchange="updateSetting('ollama.endpoint', this.value)">
+                    data-setting="ollama.endpoint">
             </div>
             <div class="setting-item">
-                <label>Yüklü Modeller</label>
+                <label>Kullanılabilir Modeller</label>
                 <div class="model-list" id="ollamaModelList">
                     ${models.length ? models.map((model: string) => `
                         <div class="model-item">
-                            <input type="radio" name="ollamaModel" id="${model}" 
+                            <input type="checkbox" name="ollamaModel" id="${model}" 
                                 value="${model}"
-                                ${model === currentModel ? 'checked' : ''}
-                                onchange="updateSetting('ollama.model', this.value)">
+                                ${activeModels.includes(model) ? 'checked' : ''}
+                                data-setting="ollama.activeModels"
+                                onchange="updateActiveModels('ollama', '${model}', this.checked)">
                             <label for="${model}">
                                 ${model}
                             </label>
                         </div>
                     `).join('\n') : '<div class="loading-models">Modeller yükleniyor...</div>'}
                 </div>
-                <div class="setting-item">
-                    <label for="ollamaCustomModel">Yeni Model Çek</label>
-                    <div class="custom-model-input">
-                        <input type="text" id="ollamaCustomModel" 
-                            placeholder="Model adı (örn. llama2:latest)">
-                        <button onclick="pullOllamaModel(document.getElementById('ollamaCustomModel').value)">
-                            Model Çek
-                        </button>
-                    </div>
-                </div>
-                <button onclick="refreshOllamaModels()" class="refresh-button">
-                    <i class="codicon codicon-refresh"></i>
-                    Modelleri Yenile
-                </button>
             </div>
         `;
     }
 
-    private getOpenAISettingsHtml(settings: any): string {
+    private getOpenAISettingsHtml(settings: any, activeModels: string[]): string {
+        const apiKey = settings.apiKey || '';
+        const models = ['gpt-4', 'gpt-3.5-turbo'];
+
         return `
             <div class="setting-item">
                 <label for="openaiApiKey">API Key</label>
                 <input type="password" id="openaiApiKey" 
-                    value="${settings.apiKey || ''}"
-                    onchange="updateSetting('openai.apiKey', this.value)">
+                    value="${apiKey}"
+                    data-setting="openai.apiKey">
             </div>
             <div class="setting-item">
-                <label>Modeller</label>
+                <label>Kullanılabilir Modeller</label>
                 <div class="model-list">
-                    <div class="model-item">
-                        <input type="radio" name="openaiModel" id="gpt4" 
-                            value="gpt-4"
-                            ${settings.model === 'gpt-4' ? 'checked' : ''}
-                            onchange="updateSetting('openai.model', this.value)">
-                        <label for="gpt4">
-                            GPT-4
-                            <span class="model-details">En son GPT-4 modeli</span>
-                        </label>
-                    </div>
-                    <div class="model-item">
-                        <input type="radio" name="openaiModel" id="gpt35" 
-                            value="gpt-3.5-turbo"
-                            ${settings.model === 'gpt-3.5-turbo' ? 'checked' : ''}
-                            onchange="updateSetting('openai.model', this.value)">
-                        <label for="gpt35">
-                            GPT-3.5 Turbo
-                            <span class="model-details">En son GPT-3.5 modeli</span>
-                        </label>
-                    </div>
-                </div>
-                <div class="setting-item">
-                    <label for="openaiCustomModel">Özel Model</label>
-                    <div class="custom-model-input">
-                        <input type="text" id="openaiCustomModel" 
-                            placeholder="Özel model adı (örn. gpt-4-0125-preview)"
-                            value="${settings.customModel || ''}"
-                            onchange="updateSetting('openai.model', this.value)">
-                    </div>
+                    ${models.map(model => `
+                        <div class="model-item">
+                            <input type="checkbox" name="openaiModel" id="${model}" 
+                                value="${model}"
+                                ${activeModels.includes(model) ? 'checked' : ''}
+                                data-setting="openai.activeModels"
+                                onchange="updateActiveModels('openai', '${model}', this.checked)">
+                            <label for="${model}">
+                                ${model}
+                            </label>
+                        </div>
+                    `).join('\n')}
                 </div>
             </div>
         `;
     }
 
-    private getAnthropicSettingsHtml(settings: any): string {
+    private getAnthropicSettingsHtml(settings: any, activeModels: string[]): string {
+        const apiKey = settings.apiKey || '';
+        const models = ['claude-3-opus-20240229', 'claude-3-sonnet-20240229', 'claude-2.1'];
+
         return `
             <div class="setting-item">
                 <label for="anthropicApiKey">API Key</label>
                 <input type="password" id="anthropicApiKey" 
-                    value="${settings.apiKey || ''}"
-                    onchange="updateSetting('anthropic.apiKey', this.value)">
+                    value="${apiKey}"
+                    data-setting="anthropic.apiKey">
             </div>
             <div class="setting-item">
-                <label>Modeller</label>
+                <label>Kullanılabilir Modeller</label>
                 <div class="model-list">
-                    <div class="model-item">
-                        <input type="radio" name="anthropicModel" id="claude3opus" 
-                            value="claude-3-opus-20240229"
-                            ${settings.model === 'claude-3-opus-20240229' ? 'checked' : ''}
-                            onchange="updateSetting('anthropic.model', this.value)">
-                        <label for="claude3opus">
-                            Claude 3 Opus
-                            <span class="model-details">En yetenekli Claude modeli</span>
-                        </label>
-                    </div>
-                    <div class="model-item">
-                        <input type="radio" name="anthropicModel" id="claude3sonnet" 
-                            value="claude-3-sonnet-20240229"
-                            ${settings.model === 'claude-3-sonnet-20240229' ? 'checked' : ''}
-                            onchange="updateSetting('anthropic.model', this.value)">
-                        <label for="claude3sonnet">
-                            Claude 3 Sonnet
-                            <span class="model-details">Dengeli performans ve hız</span>
-                        </label>
-                    </div>
-                </div>
-                <div class="setting-item">
-                    <label for="anthropicCustomModel">Özel Model</label>
-                    <div class="custom-model-input">
-                        <input type="text" id="anthropicCustomModel" 
-                            placeholder="Özel model adı (örn. claude-3-haiku-20240229)"
-                            value="${settings.customModel || ''}"
-                            onchange="updateSetting('anthropic.model', this.value)">
-                    </div>
+                    ${models.map(model => `
+                        <div class="model-item">
+                            <input type="checkbox" name="anthropicModel" id="${model}" 
+                                value="${model}"
+                                ${activeModels.includes(model) ? 'checked' : ''}
+                                data-setting="anthropic.activeModels"
+                                onchange="updateActiveModels('anthropic', '${model}', this.checked)">
+                            <label for="${model}">
+                                ${model}
+                            </label>
+                        </div>
+                    `).join('\n')}
                 </div>
             </div>
         `;
     }
 
-    private getLMStudioSettingsHtml(settings: any): string {
+    private getLMStudioSettingsHtml(settings: any, activeModels: string[]): string {
         return `
             <div class="setting-item">
                 <label for="lmstudioEndpoint">Endpoint</label>
@@ -322,7 +321,7 @@ export class SettingsViewProvider {
             <div class="setting-item">
                 <label>Yüklü Modeller</label>
                 <div class="model-list" id="lmstudioModelList">
-                    ${this.getModelListHtml(settings.models || [], settings.model)}
+                    ${this.getModelListHtml(settings.models || [], settings.model, activeModels)}
                 </div>
                 <button onclick="refreshLMStudioModels()" class="refresh-button">
                     <i class="codicon codicon-refresh"></i>
@@ -332,7 +331,7 @@ export class SettingsViewProvider {
         `;
     }
 
-    private getLocalAISettingsHtml(settings: any): string {
+    private getLocalAISettingsHtml(settings: any, activeModels: string[]): string {
         return `
             <div class="setting-item">
                 <label for="localaiEndpoint">Endpoint</label>
@@ -343,7 +342,7 @@ export class SettingsViewProvider {
             <div class="setting-item">
                 <label>Yüklü Modeller</label>
                 <div class="model-list" id="localaiModelList">
-                    ${this.getModelListHtml(settings.models || [], settings.model)}
+                    ${this.getModelListHtml(settings.models || [], settings.model, activeModels)}
                 </div>
                 <button onclick="refreshLocalAIModels()" class="refresh-button">
                     <i class="codicon codicon-refresh"></i>
@@ -353,7 +352,7 @@ export class SettingsViewProvider {
         `;
     }
 
-    private getDeepseekSettingsHtml(settings: any): string {
+    private getDeepseekSettingsHtml(settings: any, activeModels: string[]): string {
         return `
             <div class="setting-item">
                 <label for="deepseekApiKey">API Key</label>
@@ -389,7 +388,7 @@ export class SettingsViewProvider {
         `;
     }
 
-    private getQwenSettingsHtml(settings: any): string {
+    private getQwenSettingsHtml(settings: any, activeModels: string[]): string {
         return `
             <div class="setting-item">
                 <label for="qwenApiKey">API Key</label>
@@ -425,17 +424,18 @@ export class SettingsViewProvider {
         `;
     }
 
-    private getModelListHtml(models: string[], selectedModel: string): string {
+    private getModelListHtml(models: string[], selectedModel: string, activeModels: string[]): string {
         if (!models.length) {
             return '<div class="loading-models">Modeller yükleniyor...</div>';
         }
 
         return models.map(model => `
             <div class="model-item">
-                <input type="radio" name="model" id="${model}" 
+                <input type="checkbox" name="model" id="${model}" 
                     value="${model}"
                     ${model === selectedModel ? 'checked' : ''}
-                    onchange="updateSetting('model', this.value)">
+                    ${activeModels.includes(model) ? 'checked' : ''}
+                    onchange="updateSetting('model', this.value); updateActiveModels('${model}', '${model}', this.checked)">
                 <label for="${model}">
                     ${model}
                 </label>

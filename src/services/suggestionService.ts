@@ -1,7 +1,6 @@
 import * as vscode from 'vscode';
-import * as fs from 'fs';
 import * as path from 'path';
-import * as crypto from 'crypto';
+import { randomUUID } from 'crypto';
 
 export interface SuggestionItem {
     id: string;
@@ -26,6 +25,7 @@ export class SuggestionService {
     private suggestions: Map<string, SuggestionItem[]> = new Map();
     private statusBarItem: vscode.StatusBarItem;
     private disposables: vscode.Disposable[] = [];
+    private readonly suggestionsFile: string;
 
     private constructor() {
         this.statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right);
@@ -33,6 +33,7 @@ export class SuggestionService {
         this.statusBarItem.command = 'smile-ai.showSuggestions';
         this.statusBarItem.show();
 
+        this.suggestionsFile = path.join(__dirname, '..', '..', 'suggestions.json');
         this.registerCommands();
         this.loadSuggestions();
     }
@@ -54,43 +55,35 @@ export class SuggestionService {
     }
 
     private async loadSuggestions(): Promise<void> {
-        const workspaceFolders = vscode.workspace.workspaceFolders;
-        if (!workspaceFolders) return;
-
-        for (const folder of workspaceFolders) {
-            const suggestionsPath = path.join(folder.uri.fsPath, '.smile-ai', 'suggestions.json');
+        try {
+            const uri = vscode.Uri.file(this.suggestionsFile);
+            const fileExists = await vscode.workspace.fs.stat(uri).then(() => true, () => false);
             
-            if (fs.existsSync(suggestionsPath)) {
-                try {
-                    const content = await fs.promises.readFile(suggestionsPath, 'utf-8');
-                    const items = JSON.parse(content) as SuggestionItem[];
-                    this.suggestions.set(folder.uri.fsPath, items);
-                } catch (error) {
-                    console.error('Error loading suggestions:', error);
-                }
+            if (fileExists) {
+                const fileContent = await vscode.workspace.fs.readFile(uri);
+                const items = JSON.parse(fileContent.toString()) as SuggestionItem[];
+                this.suggestions.set(path.dirname(this.suggestionsFile), items);
+            } else {
+                this.suggestions.set(path.dirname(this.suggestionsFile), []);
+                await this.saveSuggestions();
             }
+        } catch (error) {
+            console.error('Error loading suggestions:', error);
+            this.suggestions.set(path.dirname(this.suggestionsFile), []);
         }
-
 
         this.updateStatusBar();
     }
 
-    private async saveSuggestions(workspaceRoot: string): Promise<void> {
-        const suggestionsDir = path.join(workspaceRoot, '.smile-ai');
-        const suggestionsPath = path.join(suggestionsDir, 'suggestions.json');
-
+    private async saveSuggestions(): Promise<void> {
         try {
-            if (!fs.existsSync(suggestionsDir)) {
-                await fs.promises.mkdir(suggestionsDir, { recursive: true });
-            }
-
-            const items = this.suggestions.get(workspaceRoot) || [];
-            await fs.promises.writeFile(suggestionsPath, JSON.stringify(items, null, 2));
+            const uri = vscode.Uri.file(this.suggestionsFile);
+            const content = Buffer.from(JSON.stringify(this.suggestions.get(path.dirname(this.suggestionsFile)) || [], null, 2), 'utf8');
+            await vscode.workspace.fs.writeFile(uri, content);
         } catch (error) {
             console.error('Error saving suggestions:', error);
         }
     }
-
 
     public async addSuggestion(suggestion?: Omit<SuggestionItem, 'id' | 'createdAt' | 'updatedAt'>): Promise<void> {
         const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
@@ -107,7 +100,7 @@ export class SuggestionService {
             status: 'pending'
         };
 
-        const id = crypto.randomUUID();
+        const id = randomUUID();
         const now = new Date().toISOString();
         const newSuggestion: SuggestionItem = {
             ...defaultSuggestion,
@@ -116,11 +109,11 @@ export class SuggestionService {
             updatedAt: now
         };
 
-        const suggestions = this.suggestions.get(workspaceRoot) || [];
-        suggestions.push(newSuggestion);
-        this.suggestions.set(workspaceRoot, suggestions);
+        const items = this.suggestions.get(workspaceRoot) || [];
+        items.push(newSuggestion);
+        this.suggestions.set(workspaceRoot, items);
 
-        await this.saveSuggestions(workspaceRoot);
+        await this.saveSuggestions();
         this.updateStatusBar();
     }
 
@@ -135,7 +128,7 @@ export class SuggestionService {
         if (suggestion) {
             suggestion.status = 'completed';
             suggestion.updatedAt = new Date().toISOString();
-            await this.saveSuggestions(workspaceRoot);
+            await this.saveSuggestions();
             this.updateStatusBar();
         }
     }
@@ -150,7 +143,7 @@ export class SuggestionService {
         const index = items.findIndex(item => item.id === id);
         if (index !== -1) {
             items.splice(index, 1);
-            await this.saveSuggestions(workspaceRoot);
+            await this.saveSuggestions();
             this.updateStatusBar();
         }
     }
@@ -165,7 +158,6 @@ export class SuggestionService {
         this.statusBarItem.text = `$(lightbulb) Suggestions (${pendingCount})`;
         this.statusBarItem.tooltip = `${pendingCount} pending suggestion`;
     }
-
 
     private async showSuggestionsPanel(): Promise<void> {
         const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
@@ -183,8 +175,6 @@ export class SuggestionService {
 
         const items = this.suggestions.get(workspaceFolder.uri.fsPath) || [];
         panel.webview.html = this.getSuggestionsHtml(items);
-
-        // Listen for webview messages
 
         panel.webview.onDidReceiveMessage(async message => {
             switch (message.command) {

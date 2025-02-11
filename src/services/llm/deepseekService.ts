@@ -42,7 +42,7 @@ export class DeepseekService implements LLMService {
 
     private endpoint: string;
     private apiKey: string;
-    private model: string;
+    private currentModel: string;
     private statusBarItem: vscode.StatusBarItem;
     private performanceMetrics: PerformanceMetrics = {
         averageResponseTime: 0,
@@ -58,10 +58,17 @@ export class DeepseekService implements LLMService {
         const config = vscode.workspace.getConfiguration('smile-ai.deepseek');
         this.endpoint = config.get<string>('endpoint') || DeepseekService.DEFAULT_ENDPOINT;
         this.apiKey = config.get<string>('apiKey') || '';
-        this.model = config.get<string>('model') || DeepseekService.DEFAULT_MODEL;
+        this.currentModel = config.get<string>('model') || DeepseekService.DEFAULT_MODEL;
         this.statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right);
         this.updateStatusBar();
-        this.registerEventHandlers();
+        this.initialize();
+        this.disposables.push(
+            vscode.workspace.onDidChangeConfiguration(e => {
+                if (e.affectsConfiguration('smile-ai.deepseek')) {
+                    this.initialize();
+                }
+            })
+        );
     }
 
     private updateStatusBar(): void {
@@ -73,33 +80,9 @@ export class DeepseekService implements LLMService {
             this.statusBarItem.tooltip = `Error: ${this.lastError.message}`;
         } else {
             this.statusBarItem.text = "$(check) Deepseek";
-            this.statusBarItem.tooltip = `Model: ${this.model}\nTPS: ${this.performanceMetrics.tokensPerSecond.toFixed(2)}`;
+            this.statusBarItem.tooltip = `Model: ${this.currentModel}\nTPS: ${this.performanceMetrics.tokensPerSecond.toFixed(2)}`;
         }
         this.statusBarItem.show();
-    }
-
-    private registerEventHandlers(): void {
-        this.disposables.push(
-            vscode.workspace.onDidChangeConfiguration(async e => {
-                if (e.affectsConfiguration('smile-ai.deepseek')) {
-                    await this.handleConfigurationChange();
-                }
-            })
-        );
-    }
-
-    private async handleConfigurationChange(): Promise<void> {
-        const config = vscode.workspace.getConfiguration('smile-ai.deepseek');
-        const newEndpoint = config.get<string>('endpoint') || DeepseekService.DEFAULT_ENDPOINT;
-        const newApiKey = config.get<string>('apiKey') || '';
-        const newModel = config.get<string>('model') || DeepseekService.DEFAULT_MODEL;
-
-        if (this.endpoint !== newEndpoint || this.apiKey !== newApiKey || this.model !== newModel) {
-            this.endpoint = newEndpoint;
-            this.apiKey = newApiKey;
-            this.model = newModel;
-            await this.initialize();
-        }
     }
 
     public async initialize(): Promise<void> {
@@ -153,7 +136,7 @@ export class DeepseekService implements LLMService {
             const config = vscode.workspace.getConfiguration('smile-ai.deepseek');
             
             const response = await axios.post(`${this.endpoint}/chat/completions`, {
-                model: this.model,
+                model: this.currentModel,
                 messages: [
                     {
                         role: 'system',
@@ -192,7 +175,7 @@ export class DeepseekService implements LLMService {
                 metadata: {
                     tokensUsed: stats.totalTokens,
                     executionTime: stats.duration,
-                    modelName: this.model
+                    modelName: this.currentModel
                 }
             };
         } catch (error) {
@@ -204,7 +187,7 @@ export class DeepseekService implements LLMService {
                 metadata: {
                     tokensUsed: 0,
                     executionTime: Date.now() - startTime,
-                    modelName: this.model
+                    modelName: this.currentModel
                 }
             };
         }
@@ -265,8 +248,14 @@ export class DeepseekService implements LLMService {
         return prompt;
     }
 
+    public async setModel(model: string): Promise<void> {
+        this.currentModel = model;
+        await vscode.workspace.getConfiguration('smile-ai.deepseek').update('model', model, true);
+    }
+
     public dispose(): void {
         this.disposables.forEach(d => d.dispose());
         this.statusBarItem.dispose();
+        this.disposables = [];
     }
 } 

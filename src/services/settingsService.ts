@@ -20,22 +20,27 @@ export interface ModelSettings {
 
 export interface ProviderSettings {
     endpoint?: string;
-    apiKey?: string;
-    defaultModel?: string;
+    model?: string;
     models?: string[];
-    customModels?: string[];
+    activeModels?: string[];
+    temperature?: number;
 }
 
 export class SettingsService {
     private static instance: SettingsService;
-    private _onSettingsChanged = new EventEmitter<void>();
-    readonly onSettingsChanged = this._onSettingsChanged.event;
+    private readonly _configuration: vscode.WorkspaceConfiguration;
+    private readonly _onSettingsChanged: vscode.EventEmitter<void>;
+    readonly onSettingsChanged: vscode.Event<void>;
     private readonly configPrefix = 'smile-ai';
     private readonly workspace = vscode.workspace;
 
     private constructor() {
+        this._configuration = this.workspace.getConfiguration(this.configPrefix);
+        this._onSettingsChanged = new vscode.EventEmitter<void>();
+        this.onSettingsChanged = this._onSettingsChanged.event;
+
         // Settings değişikliklerini dinle
-        vscode.workspace.onDidChangeConfiguration(e => {
+        this.workspace.onDidChangeConfiguration(e => {
             if (e.affectsConfiguration('smile-ai')) {
                 this._onSettingsChanged.fire();
             }
@@ -50,29 +55,25 @@ export class SettingsService {
     }
 
     getActiveProvider(): ModelProvider {
-        const config = this.workspace.getConfiguration(this.configPrefix);
-        return config.get<ModelProvider>('modelProvider', 'ollama');
+        return this._configuration.get<ModelProvider>('modelProvider', 'ollama');
     }
 
     async setActiveProvider(provider: ModelProvider): Promise<void> {
-        const config = this.workspace.getConfiguration(this.configPrefix);
-        await config.update('modelProvider', provider, vscode.ConfigurationTarget.Global);
+        await this._configuration.update('modelProvider', provider, vscode.ConfigurationTarget.Global);
     }
 
-    getProviderSettings(provider: ModelProvider): ProviderSettings {
-        const config = this.workspace.getConfiguration(this.configPrefix);
-        return config.get<ProviderSettings>(`${provider}`, {});
+    getProviderSettings(provider: string): ProviderSettings | undefined {
+        return this._configuration.get<ProviderSettings>(provider);
     }
 
     async updateProviderSettings(provider: ModelProvider | string, settings: any): Promise<void> {
-        const config = this.workspace.getConfiguration(this.configPrefix);
         if (typeof settings === 'object') {
             for (const [key, value] of Object.entries(settings)) {
-                await config.update(`${provider}.${key}`, value, vscode.ConfigurationTarget.Global);
+                await this._configuration.update(key, value, vscode.ConfigurationTarget.Global);
             }
         } else {
-            const currentSettings = this.getProviderSettings(provider as ModelProvider);
-            await config.update(
+            const currentSettings = this.getProviderSettings(provider as string);
+            await this._configuration.update(
                 provider,
                 { ...currentSettings, ...settings },
                 vscode.ConfigurationTarget.Global
@@ -81,27 +82,68 @@ export class SettingsService {
         this._onSettingsChanged.fire();
     }
 
+    async setActiveModel(provider: string, model: string): Promise<void> {
+        try {
+            // Update the current model
+            await this._configuration.update(`${provider}.model`, model, vscode.ConfigurationTarget.Global);
+
+            // Get current active models
+            const providerSettings = this.getProviderSettings(provider);
+            const activeModels = providerSettings?.activeModels || [];
+
+            // Add to active models if not already present
+            if (!activeModels.includes(model)) {
+                activeModels.push(model);
+                await this._configuration.update(`${provider}.activeModels`, activeModels, vscode.ConfigurationTarget.Global);
+            }
+
+            this._onSettingsChanged.fire();
+        } catch (error) {
+            console.error('Error setting active model:', error);
+            throw error;
+        }
+    }
+
+    async removeActiveModel(provider: string, model: string): Promise<void> {
+        try {
+            const providerSettings = this.getProviderSettings(provider);
+            const activeModels = providerSettings?.activeModels || [];
+            const updatedActiveModels = activeModels.filter(m => m !== model);
+
+            await this._configuration.update(`${provider}.activeModels`, updatedActiveModels, vscode.ConfigurationTarget.Global);
+
+            // If the current model is being removed, update it
+            if (providerSettings?.model === model) {
+                const newModel = updatedActiveModels[0] || '';
+                await this._configuration.update(`${provider}.model`, newModel, vscode.ConfigurationTarget.Global);
+            }
+
+            this._onSettingsChanged.fire();
+        } catch (error) {
+            console.error('Error removing active model:', error);
+            throw error;
+        }
+    }
+
     getModelSettings(): ModelSettings {
-        const config = this.workspace.getConfiguration(this.configPrefix);
         const provider = this.getActiveProvider();
         const providerSettings = this.getProviderSettings(provider);
 
         return {
             provider,
-            model: config.get(`${provider}.model`, providerSettings.defaultModel || ''),
-            temperature: config.get('temperature', 0.7),
-            maxTokens: config.get('maxTokens', 2048),
-            topP: config.get('topP', 0.9),
-            topK: config.get('topK', 50),
-            frequencyPenalty: config.get('frequencyPenalty', 0),
-            presencePenalty: config.get('presencePenalty', 0),
-            stopTokens: config.get('stopTokens', []),
-            systemPrompt: config.get('systemPrompt', '')
+            model: this._configuration.get(`${provider}.model`, providerSettings?.model || ''),
+            temperature: this._configuration.get('temperature', 0.7),
+            maxTokens: this._configuration.get('maxTokens', 2048),
+            topP: this._configuration.get('topP', 0.9),
+            topK: this._configuration.get('topK', 50),
+            frequencyPenalty: this._configuration.get('frequencyPenalty', 0),
+            presencePenalty: this._configuration.get('presencePenalty', 0),
+            stopTokens: this._configuration.get('stopTokens', []),
+            systemPrompt: this._configuration.get('systemPrompt', '')
         };
     }
 
     async updateModelSettings(settings: Partial<ModelSettings>): Promise<void> {
-        const config = this.workspace.getConfiguration(this.configPrefix);
         const provider = settings.provider || this.getActiveProvider();
 
         if (settings.provider) {
@@ -111,13 +153,13 @@ export class SettingsService {
         for (const [key, value] of Object.entries(settings)) {
             if (key === 'provider') continue;
             if (key === 'model') {
-                await config.update(
+                await this._configuration.update(
                     `${provider}.model`,
                     value,
                     vscode.ConfigurationTarget.Global
                 );
             } else {
-                await config.update(
+                await this._configuration.update(
                     key,
                     value,
                     vscode.ConfigurationTarget.Global
@@ -142,7 +184,7 @@ export class SettingsService {
     private async refreshOllamaModels(): Promise<string[]> {
         try {
             const settings = this.getProviderSettings('ollama');
-            const endpoint = settings.endpoint || 'http://localhost:11434';
+            const endpoint = settings?.endpoint || 'http://localhost:11434';
             
             const response = await fetch(`${endpoint}/api/tags`);
             if (!response.ok) {
@@ -163,7 +205,7 @@ export class SettingsService {
     private async refreshLMStudioModels(): Promise<string[]> {
         try {
             const settings = this.getProviderSettings('lmstudio');
-            const endpoint = settings.endpoint || 'http://localhost:1234/v1';
+            const endpoint = settings?.endpoint || 'http://localhost:1234/v1';
             
             const response = await fetch(`${endpoint}/models`);
             if (!response.ok) {
@@ -184,7 +226,7 @@ export class SettingsService {
     private async refreshLocalAIModels(): Promise<string[]> {
         try {
             const settings = this.getProviderSettings('localai');
-            const endpoint = settings.endpoint || 'http://localhost:8080/v1';
+            const endpoint = settings?.endpoint || 'http://localhost:8080/v1';
             
             const response = await fetch(`${endpoint}/models`);
             if (!response.ok) {
@@ -204,22 +246,22 @@ export class SettingsService {
 
     async addCustomModel(provider: ModelProvider, modelName: string): Promise<void> {
         const settings = this.getProviderSettings(provider);
-        const customModels = settings.customModels || [];
+        const customModels = settings?.models || [];
         
         if (!customModels.includes(modelName)) {
             customModels.push(modelName);
-            await this.updateProviderSettings(provider, { customModels });
+            await this.updateProviderSettings(provider, { models: customModels });
         }
     }
 
     async removeCustomModel(provider: ModelProvider, modelName: string): Promise<void> {
         const settings = this.getProviderSettings(provider);
-        const customModels = settings.customModels || [];
+        const customModels = settings?.models || [];
         
         const index = customModels.indexOf(modelName);
         if (index > -1) {
             customModels.splice(index, 1);
-            await this.updateProviderSettings(provider, { customModels });
+            await this.updateProviderSettings(provider, { models: customModels });
         }
     }
 
@@ -230,18 +272,31 @@ export class SettingsService {
             ollama: {
                 endpoint: config.get('ollama.endpoint', 'http://localhost:11434'),
                 model: config.get('ollama.model', ''),
-                models: config.get('ollama.models', [])
+                models: config.get('ollama.models', []),
+                activeModels: config.get('ollama.activeModels', [])
             },
             openai: {
                 apiKey: config.get('openai.apiKey', ''),
-                model: config.get('openai.model', '')
+                model: config.get('openai.model', ''),
+                activeModels: config.get('openai.activeModels', [])
             },
             anthropic: {
                 apiKey: config.get('anthropic.apiKey', ''),
-                model: config.get('anthropic.model', '')
+                model: config.get('anthropic.model', ''),
+                activeModels: config.get('anthropic.activeModels', [])
             },
             temperature: config.get('temperature', 0.7),
             maxTokens: config.get('maxTokens', 2048)
         };
+    }
+
+    getCurrentModel(provider: string): string | undefined {
+        const providerSettings = this.getProviderSettings(provider);
+        return providerSettings?.model;
+    }
+
+    getActiveModels(provider: string): string[] {
+        const providerSettings = this.getProviderSettings(provider);
+        return providerSettings?.activeModels || [];
     }
 } 
