@@ -1,8 +1,17 @@
 import * as vscode from 'vscode';
 import { exec, spawn } from 'child_process';
-import { promisify } from 'util';
 
-const execAsync = promisify(exec);
+function execAsync(command: string): Promise<{ stdout: string; stderr: string }> {
+    return new Promise((resolve, reject) => {
+        exec(command, (error, stdout, stderr) => {
+            if (error) {
+                reject(error);
+                return;
+            }
+            resolve({ stdout, stderr });
+        });
+    });
+}
 
 interface DockerContainer {
     id: string;
@@ -50,7 +59,6 @@ export class DockerService {
             console.error('Docker control error:', error);
         }
         this.updateStatusBar();
-
     }
 
     public async isContainerRunning(containerName: string): Promise<boolean> {

@@ -1,0 +1,10 @@
+!media/*
+!resources/*
+/node_modules/*
+/dist/*
+/build/*
+/out/*
+!/src/*
+
+
+

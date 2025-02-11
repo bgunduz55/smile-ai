@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { aiService } from '../services/aiService';
+import { SettingsService } from '../services/settingsService';
 
 interface ComposerContext {
     fileContent: string;
@@ -13,10 +14,14 @@ export class ComposerViewProvider implements vscode.WebviewViewProvider {
     private _view?: vscode.WebviewView;
     private currentContext?: ComposerContext;
     private currentResponse?: string;
+    private history: any[] = [];
+    private settingsService: SettingsService;
 
     constructor(
         private readonly _extensionUri: vscode.Uri
-    ) {}
+    ) {
+        this.settingsService = SettingsService.getInstance();
+    }
 
     public resolveWebviewView(
         webviewView: vscode.WebviewView,
@@ -116,12 +121,30 @@ export class ComposerViewProvider implements vscode.WebviewViewProvider {
 
 
     private _getHtmlForWebview(_webview: vscode.Webview) {
+        const settings = this.settingsService.getSettings();
+        const currentProvider = settings.provider || 'ollama';
+        const providerSettings = settings[currentProvider] || {};
+        const activeModels = providerSettings.activeModels || [];
+        const currentModel = providerSettings.model || '';
+
+        const modelSelectorHtml = `
+            <div class="model-selector" data-provider="${currentProvider}">
+                <label>Model:</label>
+                <select onchange="window.updateModel('${currentProvider}', this.value)">
+                    ${activeModels.map(model => `
+                        <option value="${model}" ${model === currentModel ? 'selected' : ''}>
+                            ${model}
+                        </option>
+                    `).join('\n')}
+                </select>
+            </div>
+        `;
+
         const contextInfo = this.currentContext
             ? `Active File: ${this.currentContext.filePath}\nLanguage: ${this.currentContext.language}\n${
                 this.currentContext.selection ? 'Selected text exists' : 'No selected text'
             }`
             : 'Please open a file';
-
 
         return `
             <!DOCTYPE html>
@@ -138,6 +161,27 @@ export class ComposerViewProvider implements vscode.WebviewViewProvider {
                         color: var(--vscode-foreground);
                         background-color: var(--vscode-editor-background);
                     }
+                    .header {
+                        display: flex;
+                        justify-content: space-between;
+                        align-items: center;
+                        margin-bottom: 20px;
+                        padding: 10px;
+                        background-color: var(--vscode-editor-inactiveSelectionBackground);
+                        border-radius: 4px;
+                    }
+                    .model-selector {
+                        display: flex;
+                        align-items: center;
+                        gap: 10px;
+                    }
+                    .model-selector select {
+                        padding: 4px 8px;
+                        background-color: var(--vscode-dropdown-background);
+                        color: var(--vscode-dropdown-foreground);
+                        border: 1px solid var(--vscode-dropdown-border);
+                        border-radius: 4px;
+                    }
                     .context-info {
                         font-family: var(--vscode-editor-font-family);
                         font-size: 12px;
@@ -151,7 +195,7 @@ export class ComposerViewProvider implements vscode.WebviewViewProvider {
                         display: flex;
                         flex-direction: column;
                         gap: 20px;
-                        height: calc(100vh - 150px);
+                        height: calc(100vh - 200px);
                     }
                     .section {
                         flex: 1;
@@ -191,27 +235,27 @@ export class ComposerViewProvider implements vscode.WebviewViewProvider {
                 </style>
             </head>
             <body>
+                <div class="header">
+                    ${modelSelectorHtml}
+                </div>
                 <div class="context-info">${this._escapeHtml(contextInfo)}</div>
                 <div class="container">
                     <div class="section">
                         <h3>Request</h3>
                         <textarea id="promptInput" placeholder="Explain what you want to do..."></textarea>
                         <div class="button-container">
-                            <button onclick="generateCode()">Generate Code</button>
+                            <button onclick="window.generateCode()">Generate Code</button>
                         </div>
-
                     </div>
                     <div class="section">
                         <h3>Response</h3>
                         <textarea id="responseOutput" readonly>${this._escapeHtml(this.currentResponse || '')}</textarea>
                         <div class="button-container">
-                            <button onclick="applyChanges()">Apply Changes</button>
+                            <button onclick="window.applyChanges()">Apply Changes</button>
                         </div>
                     </div>
-
                 </div>
                 <script>
-                    const vscode = acquireVsCodeApi();
                     const promptInput = document.getElementById('promptInput');
                     const responseOutput = document.getElementById('responseOutput');
 
@@ -226,29 +270,9 @@ export class ComposerViewProvider implements vscode.WebviewViewProvider {
 
                     promptInput.addEventListener('keydown', (e) => {
                         if (e.key === 'Enter' && e.ctrlKey) {
-                            generateCode();
+                            window.generateCode();
                         }
                     });
-
-                    function generateCode() {
-                        const text = promptInput.value;
-                        if (text) {
-                            vscode.postMessage({
-                                type: 'generateCode',
-                                value: text
-                            });
-                        }
-                    }
-
-                    function applyChanges() {
-                        const text = responseOutput.value;
-                        if (text) {
-                            vscode.postMessage({
-                                type: 'applyChanges',
-                                value: text
-                            });
-                        }
-                    }
                 </script>
             </body>
             </html>
@@ -267,71 +291,156 @@ export class ComposerViewProvider implements vscode.WebviewViewProvider {
     }
 
     public async getContent(): Promise<string> {
-        const currentContext = this.currentContext ? `
-            <div class="context-info">
-                <p>Active File: ${this._escapeHtml(this.currentContext.filePath)}</p>
-                <p>Language: ${this._escapeHtml(this.currentContext.language)}</p>
-                ${this.currentContext.selection ? '<p>Selection: Active</p>' : '<p>No selection</p>'}
-            </div>
-        ` : '<div class="context-info">Please open a file to start.</div>';
+        const config = vscode.workspace.getConfiguration('smile-ai');
+        const currentProvider = config.get<string>('modelProvider', 'ollama');
+        const currentModel = config.get(`${currentProvider}.model`, '');
 
         return `
-            <div class="composer-container">
-                ${currentContext}
-                <div class="composer-header">
-                    <select id="composerAction">
-                        <option value="generate">Generate Code</option>
-                        <option value="refactor">Refactor Code</option>
-                        <option value="test">Generate Tests</option>
-                        <option value="docs">Generate Documentation</option>
-                        <option value="fix">Fix Issues</option>
-                    </select>
+            <div class="page-container">
+                <div class="page-header">
+                    <div class="model-selector">
+                        <label>Aktif Model:</label>
+                        <div class="active-model">
+                            <span class="provider-badge">${currentProvider}</span>
+                            <span class="model-name">${currentModel || 'Model seçilmedi'}</span>
+                        </div>
+                    </div>
                 </div>
-                <div class="composer-content">
-                    <div class="input-section">
+                
+                <div class="page-content">
+                    <div class="composer-content" id="composerContent">
+                        ${this.renderHistory()}
+                    </div>
+                </div>
+                
+                <div class="page-footer">
+                    <div class="composer-input">
                         <textarea 
-                            id="composerInput" 
-                            placeholder="Explain what you want to do..."
-                            rows="5"
+                            class="composer-textarea" 
+                            placeholder="İyileştirmek istediğiniz metni girin..."
+                            rows="3"
                         ></textarea>
-                    </div>
-                    <div class="options-section">
-                        <div class="option-item">
-                            <label for="language">Programming Language:</label>
-                            <select id="language">
-                                <option value="typescript">TypeScript</option>
-                                <option value="javascript">JavaScript</option>
-                                <option value="python">Python</option>
-                                <option value="java">Java</option>
-                                <option value="csharp">C#</option>
-                            </select>
-                        </div>
-                        <div class="option-item">
-                            <label for="style">Code Style:</label>
-                            <select id="style">
-                                <option value="clean">Clean Code</option>
-                                <option value="documented">Documented</option>
-                                <option value="optimized">Optimized</option>
-                            </select>
+                        <div class="composer-actions">
+                            <button class="action-button" id="improveText">
+                                <i class="codicon codicon-wand"></i>
+                                İyileştir
+                            </button>
+                            <button class="action-button" id="translateText">
+                                <i class="codicon codicon-globe"></i>
+                                Çevir
+                            </button>
+                            <button class="action-button" id="formatText">
+                                <i class="codicon codicon-symbol-keyword"></i>
+                                Biçimlendir
+                            </button>
                         </div>
                     </div>
-                    <div class="action-buttons">
-                        <button id="generateCode">
-                            <i class="codicon codicon-play"></i>
-                            Start
-                        </button>
-                    </div>
-                </div>
-                <div class="composer-output" id="composerOutput">
-                    ${this.currentResponse ? `
-                        <div class="output-content">
-                            <pre><code>${this._escapeHtml(this.currentResponse)}</code></pre>
-                            <button onclick="applyChanges()">Apply Changes</button>
-                        </div>
-                    ` : ''}
                 </div>
             </div>
         `;
+    }
+
+    private renderHistory(): string {
+        if (this.history.length === 0) {
+            return `
+                <div class="composer-welcome">
+                    <h3>Metin İyileştirici</h3>
+                    <p>Metninizi girin ve iyileştirme seçeneklerinden birini seçin.</p>
+                    <ul>
+                        <li>Dilbilgisi ve yazım hatalarını düzeltme</li>
+                        <li>Cümle yapısını iyileştirme</li>
+                        <li>Farklı dillere çevirme</li>
+                        <li>Metin biçimlendirme</li>
+                    </ul>
+                </div>
+            `;
+        }
+
+        return this.history.map(item => this.renderHistoryItem(item)).join('\\n');
+    }
+
+    private renderHistoryItem(item: any): string {
+        return `
+            <div class="composer-item">
+                <div class="item-original">
+                    <div class="item-header">
+                        <span class="item-label">Orijinal Metin</span>
+                        <button class="action-button small" onclick="copyToClipboard('${item.id}-original')">
+                            <i class="codicon codicon-copy"></i>
+                        </button>
+                    </div>
+                    <div class="item-content" id="${item.id}-original">
+                        ${this.formatText(item.original)}
+                    </div>
+                </div>
+                <div class="item-improved">
+                    <div class="item-header">
+                        <span class="item-label">İyileştirilmiş Metin</span>
+                        <button class="action-button small" onclick="copyToClipboard('${item.id}-improved')">
+                            <i class="codicon codicon-copy"></i>
+                        </button>
+                    </div>
+                    <div class="item-content" id="${item.id}-improved">
+                        ${this.formatText(item.improved)}
+                    </div>
+                </div>
+                <div class="item-meta">
+                    <span class="item-time">${this.formatTime(item.timestamp)}</span>
+                    <span class="item-type">${this.getOperationLabel(item.type)}</span>
+                </div>
+            </div>
+        `;
+    }
+
+    private formatText(text: string): string {
+        // TODO: Implement text formatting (markdown, code blocks, etc.)
+        return text;
+    }
+
+    private formatTime(timestamp: number): string {
+        return new Date(timestamp).toLocaleTimeString();
+    }
+
+    private getOperationLabel(type: string): string {
+        switch (type) {
+            case 'improve': return 'İyileştirme';
+            case 'translate': return 'Çeviri';
+            case 'format': return 'Biçimlendirme';
+            default: return type;
+        }
+    }
+
+    public async handleOperation(operation: any) {
+        if (!this._view) return;
+
+        try {
+            // Add operation to history
+            const item = {
+                id: Date.now().toString(),
+                type: operation.type,
+                original: operation.text,
+                improved: `Improved: ${operation.text}`, // TODO: Implement actual improvement
+                timestamp: Date.now()
+            };
+
+            this.history.unshift(item);
+
+            // Update UI
+            await this.updateHistory();
+
+        } catch (error) {
+            console.error('Error handling operation:', error);
+            vscode.window.showErrorMessage('İşlem gerçekleştirilirken hata oluştu.');
+        }
+    }
+
+    private async updateHistory() {
+        if (!this._view) return;
+
+        await this._view.webview.postMessage({
+            type: 'updateComposerHistory',
+            content: this.renderHistory()
+        });
     }
 
     private _escapeHtml(unsafe: string): string {

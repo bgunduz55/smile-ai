@@ -3,11 +3,10 @@
 'use strict';
 
 const path = require('path');
-const CopyWebpackPlugin = require('copy-webpack-plugin');
+const CopyPlugin = require('copy-webpack-plugin');
 
 //@type {import('webpack').Configuration}
-module.exports = {
-    mode: 'none',
+const extensionConfig = {
     target: 'node',
     entry: './src/extension.ts',
     output: {
@@ -15,10 +14,9 @@ module.exports = {
         filename: 'extension.js',
         libraryTarget: 'commonjs2'
     },
-    devtool: 'nosources-source-map',
+    devtool: 'source-map',
     externals: {
-        vscode: 'commonjs vscode',
-        '@vscode/codicons': 'commonjs @vscode/codicons'
+        vscode: 'commonjs vscode'
     },
     resolve: {
         extensions: ['.ts', '.js']
@@ -30,31 +28,57 @@ module.exports = {
                 exclude: /node_modules/,
                 use: [
                     {
-                        loader: 'ts-loader',
-                        options: {
-                            configFile: 'tsconfig.json',
-                            transpileOnly: true
-                        }
+                        loader: 'ts-loader'
+                    }
+                ]
+            }
+        ]
+    }
+};
+
+const webviewConfig = {
+    target: 'web',
+    entry: './media/main.ts',
+    output: {
+        path: path.resolve(__dirname, 'dist'),
+        filename: 'media/main.js',
+        libraryTarget: 'window'
+    },
+    devtool: 'source-map',
+    resolve: {
+        extensions: ['.ts', '.js']
+    },
+    module: {
+        rules: [
+            {
+                test: /\.ts$/,
+                exclude: /node_modules/,
+                use: [
+                    {
+                        loader: 'ts-loader'
                     }
                 ]
             }
         ]
     },
     plugins: [
-        new CopyWebpackPlugin({
+        new CopyPlugin({
             patterns: [
                 {
-                    from: 'node_modules/@vscode/codicons/dist',
+                    from: 'node_modules/@vscode/codicons/dist/codicon.css',
                     to: 'media'
                 },
                 {
-                    from: 'media',
-                    to: 'media',
-                    globOptions: {
-                        ignore: ['**/*.js']
-                    }
+                    from: 'node_modules/@vscode/codicons/dist/codicon.ttf',
+                    to: 'media'
+                },
+                {
+                    from: 'media/main.css',
+                    to: 'media'
                 }
             ]
         })
     ]
-}; 
+};
+
+module.exports = [extensionConfig, webviewConfig]; 

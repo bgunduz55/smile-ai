@@ -5,6 +5,7 @@ import { AgentTask, TaskResult } from './types';
 
 export class OpenAIService implements LLMService {
     private client: OpenAI | null = null;
+    private currentModel: string = 'gpt-4';
     private disposables: vscode.Disposable[] = [];
 
     constructor() {
@@ -18,9 +19,10 @@ export class OpenAIService implements LLMService {
         );
     }
 
-    private initialize(): void {
+    public async initialize(): Promise<void> {
         const config = vscode.workspace.getConfiguration('smile-ai.openai');
         const apiKey = config.get<string>('apiKey');
+        const model = config.get<string>('model');
 
         if (!apiKey) {
             vscode.window.showErrorMessage('OpenAI API key is not configured');
@@ -30,6 +32,15 @@ export class OpenAIService implements LLMService {
         this.client = new OpenAI({
             apiKey: apiKey
         });
+
+        if (model) {
+            this.currentModel = model;
+        }
+    }
+
+    public async setModel(model: string): Promise<void> {
+        this.currentModel = model;
+        await vscode.workspace.getConfiguration('smile-ai.openai').update('model', model, true);
     }
 
     public async processTask(task: AgentTask): Promise<TaskResult> {
@@ -43,7 +54,7 @@ export class OpenAIService implements LLMService {
 
         try {
             const response = await this.client.chat.completions.create({
-                model: 'gpt-4',
+                model: this.currentModel,
                 messages: [
                     {
                         role: 'system',

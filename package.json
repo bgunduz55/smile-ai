@@ -9,7 +9,7 @@
     "url": "https://github.com/bgund/smile-ai"
   },
   "engines": {
-    "vscode": "^1.85.0"
+    "vscode": "^1.86.0"
   },
   "categories": [
     "Other"
@@ -24,22 +24,41 @@
     "@anthropic-ai/sdk": "^0.36.3",
     "@vscode/codicons": "^0.0.35",
     "axios": "^1.7.9",
-    "openai": "^4.83.0",
-    "smile-ai": "file:"
+    "openai": "^4.83.0"
   },
   "devDependencies": {
+    "@angular/compiler-cli": "^19.1.5",
+    "@babel/parser": "^7.26.8",
+    "@babel/traverse": "^7.26.8",
+    "@babel/types": "^7.26.8",
+    "@types/glob": "^8.1.0",
     "@types/minimatch": "^5.1.2",
-    "@types/node": "^18.0.0",
-    "@types/vscode": "^1.85.0",
-    "@typescript-eslint/eslint-plugin": "^6.21.0",
-    "@typescript-eslint/parser": "^6.21.0",
+    "@types/mocha": "^10.0.6",
+    "@types/node": "18.x",
+    "@types/vscode": "^1.86.0",
+    "@typescript-eslint/eslint-plugin": "^6.19.1",
+    "@typescript-eslint/parser": "^6.19.1",
     "@vscode/codicons": "^0.0.36",
+    "@vscode/test-cli": "^0.0.4",
+    "@vscode/test-electron": "^2.3.9",
+    "@vue/compiler-dom": "^3.5.13",
+    "@vue/compiler-sfc": "^3.5.13",
     "copy-webpack-plugin": "^12.0.2",
+    "crypto-browserify": "^3.12.1",
+    "css-loader": "^7.1.2",
     "eslint": "^8.56.0",
-    "ts-loader": "^9.5.0",
-    "typescript": "^5.3.0",
-    "webpack": "^5.97.0",
-    "webpack-cli": "^5.1.0"
+    "glob": "^10.3.10",
+    "mocha": "^10.2.0",
+    "path-browserify": "^1.0.1",
+    "stream-browserify": "^3.0.0",
+    "style-loader": "^4.0.0",
+    "svelte": "^5.19.9",
+    "ts-loader": "^9.5.1",
+    "typescript": "^5.3.3",
+    "util": "^0.12.5",
+    "vm-browserify": "^1.1.2",
+    "webpack": "^5.90.0",
+    "webpack-cli": "^5.1.4"
   },
   "contributes": {
     "viewsContainers": {
@@ -47,7 +66,7 @@
         {
           "id": "smile-ai",
           "title": "Smile AI",
-          "icon": "$(hubot)"
+          "icon": "media/icon.svg"
         }
       ]
     },
@@ -166,17 +185,146 @@
     "configuration": {
       "title": "Smile AI",
       "properties": {
-        "smile-ai.modelProvider": {
+        "smile-ai.provider": {
           "type": "string",
+          "default": "ollama",
           "enum": [
             "ollama",
-            "llamacpp",
             "openai",
             "anthropic",
-            "local"
+            "lmstudio",
+            "localai",
+            "deepseek",
+            "qwen"
           ],
-          "default": "ollama",
-          "description": "AI model provider"
+          "description": "Active AI provider"
+        },
+        "smile-ai.ollama": {
+          "type": "object",
+          "title": "Ollama Configuration",
+          "properties": {
+            "endpoint": {
+              "type": "string",
+              "default": "http://localhost:11434",
+              "description": "Ollama API endpoint"
+            },
+            "model": {
+              "type": "string",
+              "description": "Active Ollama model"
+            },
+            "models": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Available Ollama models",
+              "scope": "machine"
+            },
+            "activeModels": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Active Ollama models",
+              "scope": "machine"
+            }
+          }
+        },
+        "smile-ai.ollama.endpoint": {
+          "type": "string",
+          "default": "http://localhost:11434",
+          "description": "Ollama API endpoint"
+        },
+        "smile-ai.ollama.model": {
+          "type": "string",
+          "description": "Active Ollama model"
+        },
+        "smile-ai.ollama.models": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Available Ollama models"
+        },
+        "smile-ai.ollama.activeModels": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Active Ollama models"
+        },
+        "smile-ai.openai.apiKey": {
+          "type": "string",
+          "description": "OpenAI API key"
+        },
+        "smile-ai.openai.model": {
+          "type": "string",
+          "description": "Active OpenAI model"
+        },
+        "smile-ai.openai.activeModels": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Active OpenAI models"
+        },
+        "smile-ai.anthropic.apiKey": {
+          "type": "string",
+          "description": "Anthropic API key"
+        },
+        "smile-ai.anthropic.model": {
+          "type": "string",
+          "description": "Active Anthropic model"
+        },
+        "smile-ai.anthropic.activeModels": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Active Anthropic models"
+        },
+        "smile-ai.deepseek.apiKey": {
+          "type": "string",
+          "description": "Deepseek API key"
+        },
+        "smile-ai.deepseek.model": {
+          "type": "string",
+          "description": "Active Deepseek model"
+        },
+        "smile-ai.deepseek.activeModels": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Active Deepseek models"
+        },
+        "smile-ai.qwen.apiKey": {
+          "type": "string",
+          "description": "Qwen API key"
+        },
+        "smile-ai.qwen.model": {
+          "type": "string",
+          "description": "Active Qwen model"
+        },
+        "smile-ai.qwen.activeModels": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Active Qwen models"
+        },
+        "smile-ai.temperature": {
+          "type": "number",
+          "default": 0.7,
+          "minimum": 0,
+          "maximum": 1,
+          "description": "Temperature for response generation"
+        },
+        "smile-ai.maxTokens": {
+          "type": "number",
+          "default": 2048,
+          "minimum": 1,
+          "description": "Maximum tokens for response generation"
         },
         "smile-ai.modelSettings": {
           "type": "object",
@@ -259,16 +407,6 @@
           "default": 4096,
           "description": "Model context size"
         },
-        "smile-ai.temperature": {
-          "type": "number",
-          "default": 0.7,
-          "description": "Model temperature value (0-1)"
-        },
-        "smile-ai.maxTokens": {
-          "type": "number",
-          "default": 2048,
-          "description": "Maximum token count"
-        },
         "smile-ai.gpu.enabled": {
           "type": "boolean",
           "default": true,
@@ -324,56 +462,6 @@
           "default": 3600000,
           "description": "Cache entry lifetime (ms)"
         },
-        "smile-ai.ollama": {
-          "type": "object",
-          "title": "Ollama Configuration",
-          "properties": {
-            "endpoint": {
-              "type": "string",
-              "default": "http://localhost:11434",
-              "description": "Ollama API endpoint"
-            },
-            "defaultModel": {
-              "type": "string",
-              "default": "llama2",
-              "description": "Default Ollama model"
-            },
-            "temperature": {
-              "type": "number",
-              "default": 0.7,
-              "minimum": 0,
-              "maximum": 1,
-              "description": "Model temperature value"
-            },
-            "topP": {
-              "type": "number",
-              "default": 0.9,
-              "minimum": 0,
-              "maximum": 1,
-              "description": "Top-p sampling value"
-            },
-            "maxTokens": {
-              "type": "number",
-              "default": 4096,
-              "description": "Maximum token count"
-            },
-            "contextSize": {
-              "type": "number",
-              "default": 4096,
-              "description": "Context window size"
-            },
-            "gpuLayers": {
-              "type": "number",
-              "default": 0,
-              "description": "Number of layers to run on GPU"
-            },
-            "threads": {
-              "type": "number",
-              "default": 4,
-              "description": "Number of CPU threads to use"
-            }
-          }
-        },
         "smile-ai.lmstudio": {
           "type": "object",
           "title": "LM Studio Yapılandırması",
@@ -383,10 +471,23 @@
               "default": "http://localhost:1234/v1",
               "description": "LM Studio API endpoint address"
             },
-            "defaultModel": {
+            "model": {
               "type": "string",
-              "default": "default",
-              "description": "Default LM Studio model"
+              "description": "Active LM Studio model"
+            },
+            "models": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Available LM Studio models"
+            },
+            "activeModels": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Active LM Studio models"
             },
             "temperature": {
               "type": "number",
@@ -394,49 +495,6 @@
               "minimum": 0,
               "maximum": 1,
               "description": "Model temperature value"
-            },
-            "topP": {
-              "type": "number",
-              "default": 0.9,
-              "minimum": 0,
-              "maximum": 1,
-              "description": "Top-p sampling value"
-            },
-            "maxTokens": {
-              "type": "number",
-              "default": 2048,
-              "description": "Maximum token count"
-            },
-            "stopTokens": {
-              "type": "array",
-              "items": {
-                "type": "string"
-              },
-              "default": [
-                "</s>",
-                "<s>"
-              ],
-              "description": "Tokens to stop response generation"
-            },
-            "systemPrompt": {
-              "type": "string",
-              "default": "You are a helpful AI assistant specialized in software development.",
-              "description": "System prompt"
-            },
-            "requestTimeout": {
-              "type": "number",
-              "default": 60000,
-              "description": "Request timeout (ms)"
-            },
-            "retryAttempts": {
-              "type": "number",
-              "default": 3,
-              "description": "Number of retry attempts for failed requests"
-            },
-            "retryDelay": {
-              "type": "number",
-              "default": 1000,
-              "description": "Retry delay (ms)"
             }
           }
         },
@@ -449,99 +507,23 @@
               "default": "http://localhost:8080/v1",
               "description": "LocalAI API endpoint address"
             },
-            "defaultModel": {
+            "model": {
               "type": "string",
-              "default": "default",
-              "description": "Default LocalAI model"
+              "description": "Active LocalAI model"
             },
-            "modelsPath": {
-              "type": "string",
-              "description": "Directory containing LocalAI models"
-            },
-            "gpuEnabled": {
-              "type": "boolean",
-              "default": false,
-              "description": "Enable GPU support"
-            },
-            "debug": {
-              "type": "boolean",
-              "default": false,
-              "description": "Enable debug mode"
-            },
-            "temperature": {
-              "type": "number",
-              "default": 0.7,
-              "minimum": 0,
-              "maximum": 1,
-              "description": "Model temperature value"
-            },
-            "topP": {
-              "type": "number",
-              "default": 0.9,
-              "minimum": 0,
-              "maximum": 1,
-              "description": "Top-p sampling value"
-            },
-            "maxTokens": {
-              "type": "number",
-              "default": 2048,
-              "description": "Maximum token count"
-            },
-            "stopTokens": {
+            "models": {
               "type": "array",
               "items": {
                 "type": "string"
               },
-              "default": [
-                "</s>",
-                "<s>"
-              ],
-              "description": "Tokens to stop response generation"
+              "description": "Available LocalAI models"
             },
-            "systemPrompt": {
-              "type": "string",
-              "default": "You are a helpful AI assistant specialized in software development.",
-              "description": "System prompt"
-            },
-            "docker": {
-              "type": "object",
-              "properties": {
-                "image": {
-                  "type": "string",
-                  "default": "localai/localai:latest",
-                  "description": "Docker image to use"
-                },
-                "containerName": {
-                  "type": "string",
-                  "default": "smile-ai-localai",
-                  "description": "Container name"
-                },
-                "port": {
-                  "type": "number",
-                  "default": 8080,
-                  "description": "Port on which LocalAI service will run"
-                },
-                "autoRestart": {
-                  "type": "boolean",
-                  "default": true,
-                  "description": "Container will be automatically restarted"
-                },
-                "resources": {
-                  "type": "object",
-                  "properties": {
-                    "cpuLimit": {
-                      "type": "string",
-                      "default": "2",
-                      "description": "CPU limit"
-                    },
-                    "memoryLimit": {
-                      "type": "string",
-                      "default": "4g",
-                      "description": "Memory limit"
-                    }
-                  }
-                }
-              }
+            "activeModels": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Active LocalAI models"
             }
           }
         },
@@ -921,7 +903,7 @@
     }
   },
   "scripts": {
-    "vscode:prepublish": "npm run compile",
+    "vscode:prepublish": "npm run package",
     "compile": "webpack",
     "watch": "webpack --watch",
     "package": "webpack --mode production --devtool hidden-source-map",
@@ -929,7 +911,7 @@
     "watch-tests": "tsc -p . -w --outDir out",
     "pretest": "npm run compile-tests && npm run compile && npm run lint",
     "lint": "eslint src --ext ts",
-    "test": "node ./out/test/runTest.js"
+    "test": "vscode-test"
   },
   "pnpm": {
     "ignoredBuiltDependencies": [
