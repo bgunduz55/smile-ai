@@ -1,0 +1,188 @@
+---
+description: Smile Ai Coding Assistant Extension For Vscode 
+globs: 
+---
+# Smile AI - VSCode Eklentisi Geliştirme Kuralları
+
+Bu doküman, Smile AI VSCode eklentisinin geliştirme sürecinde uyulması gereken kuralları ve standartları içerir.
+
+## 🌟 Proje Bilgileri
+
+- **İsim**: Smile AI - VSCode AI Asistan
+- **Açıklama**: VSCode için akıllı AI asistan eklentisi
+- **Dil**: TypeScript
+- **Tür**: VSCode Eklentisi
+- Kod içerisinde statik textler dahil her şeyde İngilizce kullanılacak!!
+
+## 💻 Geliştirme Standartları
+
+### TypeScript Yapılandırması
+- Versiyon: ^5.0.0
+- Strict Mode: Aktif
+- Module Resolution: Node
+- Target: ES2022
+
+### Kod Formatı
+- Girinti: 4 boşluk
+- Maksimum Satır Uzunluğu: 120 karakter
+- Tırnak İşareti Stili: Tek tırnak (')
+- Noktalı Virgül: Zorunlu
+
+### İsimlendirme Kuralları
+- Sınıflar: PascalCase (örn. ChatService)
+- Arayüzler: PascalCase (örn. IMessageHandler)
+- Tipler: PascalCase (örn. MessageType)
+- Fonksiyonlar: camelCase (örn. sendMessage)
+- Değişkenler: camelCase (örn. userInput)
+- Sabitler: UPPER_SNAKE_CASE (örn. MAX_TOKEN_LENGTH)
+- Private üyeler: _camelCase (örn. _privateMethod)
+
+## 📁 Proje Yapısı
+
+### Dizin Yapısı
+- `src/services`: Servis sınıfları
+- `src/webview`: Webview sağlayıcıları
+- `src/models`: Veri modelleri
+- `src/utils`: Yardımcı fonksiyonlar
+
+### Dosya İsimlendirme
+- Servisler: `{name}Service.ts`
+- Webview'lar: `{name}ViewProvider.ts`
+- Modeller: `{name}.ts`
+- Yardımcı Sınıflar: `{name}Utils.ts`
+
+## 🤖 AI Özellikleri
+
+### Desteklenen Sağlayıcılar
+1. **Ollama**
+   - Tür: Yerel
+   - Varsayılan Endpoint: http://localhost:11434
+
+2. **OpenAI**
+   - Tür: Bulut
+   - API Anahtarı Gerekli
+
+3. **Anthropic**
+   - Tür: Bulut
+   - API Anahtarı Gerekli
+
+4. **LM Studio**
+   - Tür: Yerel
+   - Varsayılan Endpoint: http://localhost:1234
+
+5. **LocalAI**
+   - Tür: Yerel
+   - Varsayılan Endpoint: http://localhost:8080
+
+### Özellikler
+
+#### Chat
+- Maksimum Token: 2048
+- Varsayılan Sıcaklık: 0.7
+- Streaming: Aktif
+
+#### Kod Tamamlama
+- Tetikleyici Karakterler: . ( [ { < boşluk
+- Maksimum Token: 1024
+- Sıcaklık: 0.2
+
+#### Bağlam Farkındalığı
+- Açık Dosyaları Dahil Et
+- Seçimi Dahil Et
+- Pano İçeriğini Dahil Et
+
+## 🎨 Kullanıcı Arayüzü
+
+### Tema
+- VSCode temasını kullan
+- Özel değişkenler için VSCode tema değişkenlerini kullan
+
+### Bileşenler
+
+#### Chat
+- Dikey düzen
+- Kullanıcı mesajları sağda
+- Asistan mesajları solda
+- Özellikler:
+  - Model seçici
+  - Mesaj geçmişi
+  - Kod vurgulama
+  - Markdown desteği
+  - Emoji desteği
+
+#### Composer
+- Chat ile benzer arayüz.
+- Bu modelde agent şeklinde sıralı kod düzenlemeleri, terminal komutu execute, seçime göre auto apply, rollback, re-apply gibi işlemler olacak
+- Local küçük modellerde bunu sağlayabilmek için, işlemleri küçük iş parçalarına bölüp sırasıyla veya bazıları eşzamanlı işlemler yaptırmalıyız.
+- Cursor benzeri ama lokal alternatif dil modelleri ile çalışabilen bir development asistanı.
+
+#### Ayarlar
+- Bölümler:
+  - Genel
+  - Sağlayıcılar
+  - Modeller
+  - Görünüm
+- Özellikler:
+  - Model yönetimi
+  - API anahtarı yönetimi
+  - Endpoint yapılandırması
+  - Tema özelleştirme
+
+### Kısayollar
+- Chat'i Aç: `Ctrl+Shift+A`
+- Ayarları Aç: `Ctrl+Shift+,`
+- Chat'i Temizle: `Ctrl+Shift+L`
+- Giriş Alanına Odaklan: `Ctrl+Shift+I`
+
+## 📝 Dokümantasyon
+
+### Kod Yorumları
+- JSDoc stili zorunlu
+- Tüm public API'ler için dokümantasyon gerekli
+
+### README Bölümleri
+1. Giriş
+2. Özellikler
+3. Kurulum
+4. Kullanım
+5. Yapılandırma
+6. Geliştirme
+7. Katkıda Bulunma
+8. Lisans
+
+## 🧪 Test
+
+### Test Çerçevesi
+- Jest kullanılacak
+
+### Kapsama Hedefleri
+- İfadeler: %80
+- Dallar: %70
+- Fonksiyonlar: %80
+- Satırlar: %80
+
+### Test Türleri
+- Birim Testleri
+- Entegrasyon Testleri
+- Uçtan Uca Testler
+
+## 📦 Dağıtım
+
+### Gereksinimler
+- VSCode: ^1.80.0
+- Node.js: >=18.0.0
+
+### Paketleme
+- Dahil Edilecekler:
+  - dist/**/*
+  - package.json
+  - README.md
+  - CHANGELOG.md
+  - LICENSE
+
+- Hariç Tutulacaklar:
+  - src/**/*
+  - test/**/*
+  - node_modules/**/*
+  - .vscode/**/*
+  - .git/**/* 

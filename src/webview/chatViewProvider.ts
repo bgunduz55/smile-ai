@@ -14,6 +14,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     private _view?: vscode.WebviewView;
     private messages: ChatMessage[] = [];
     private settingsService: SettingsService;
+    private aiService = aiService;
 
     constructor(
         private readonly _extensionUri: vscode.Uri
@@ -40,15 +41,29 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
                 case 'sendMessage':
                     await this.handleMessage(data.value);
                     break;
+                case 'setActiveModel':
+                    await this.handleModelChange(data.provider, data.model);
+                    break;
             }
         });
+    }
+
+    private async handleModelChange(provider: string, model: string) {
+        try {
+            const settings = this.settingsService.getSettings();
+            settings[provider].model = model;
+            await this.settingsService.updateSettings(settings);
+            vscode.window.showInformationMessage(`Model changed to ${model}`);
+        } catch (error) {
+            vscode.window.showErrorMessage(`Failed to change model: ${error}`);
+        }
     }
 
     public async handleMessage(content: string) {
         if (!this._view) return;
 
         try {
-            // Kullanıcı mesajını ekle
+            // Add user message
             const userMessage: ChatMessage = {
                 id: Date.now().toString(),
                 role: 'user',
@@ -63,20 +78,20 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
                 content: content
             });
 
-            // Yükleme göstergesini göster
+            // Show loading indicator
             await this._view.webview.postMessage({
                 type: 'showLoading'
             });
 
-            // AI yanıtını al
-            const response = await aiService.generateResponse(content);
+            // Get AI response using the current model
+            const response = await this.aiService.generateResponse(content);
             
-            // Yükleme göstergesini gizle
+            // Hide loading indicator
             await this._view.webview.postMessage({
                 type: 'hideLoading'
             });
 
-            // AI yanıtını ekle
+            // Add AI response
             const assistantMessage: ChatMessage = {
                 id: Date.now().toString(),
                 role: 'assistant',
@@ -92,7 +107,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
             });
 
         } catch (error: unknown) {
-            // Yükleme göstergesini gizle
+            // Hide loading indicator
             await this._view.webview.postMessage({
                 type: 'hideLoading'
             });
@@ -117,7 +132,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         const modelSelectorHtml = `
             <div class="model-selector" data-provider="${currentProvider}">
                 <label>Model:</label>
-                <select id="modelSelect" onchange="window.updateModel('${currentProvider}', this.value)">
+                <select id="modelSelect">
                     ${activeModels.map(model => `
                         <option value="${model}" ${model === currentModel ? 'selected' : ''}>
                             ${model}
@@ -126,17 +141,6 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
                 </select>
             </div>
         `;
-
-        const messageHtml = this.messages
-            .map(
-                (msg) => `
-                <div class="message ${msg.role}">
-                    <div class="message-content">${this._escapeHtml(msg.content)}</div>
-                    <div class="message-time">${this.formatTime(msg.timestamp)}</div>
-                </div>
-            `
-            )
-            .join('');
 
         return `
             <!DOCTYPE html>
@@ -183,6 +187,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
                         margin: 10px 0;
                         padding: 10px;
                         border-radius: 4px;
+                        white-space: pre-wrap;
                     }
                     .user {
                         background-color: var(--vscode-editor-selectionBackground);
@@ -204,6 +209,8 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
                         right: 20px;
                         display: flex;
                         gap: 10px;
+                        background-color: var(--vscode-editor-background);
+                        padding: 10px 0;
                     }
                     #messageInput {
                         flex: 1;
@@ -212,6 +219,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
                         color: var(--vscode-input-foreground);
                         border: 1px solid var(--vscode-input-border);
                         border-radius: 4px;
+                        font-family: var(--vscode-font-family);
                     }
                     button {
                         padding: 8px 16px;
@@ -224,6 +232,17 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
                     button:hover {
                         background-color: var(--vscode-button-hoverBackground);
                     }
+                    .loading {
+                        display: none;
+                        margin: 10px 0;
+                        padding: 10px;
+                        border-radius: 4px;
+                        background-color: var(--vscode-editor-inactiveSelectionBackground);
+                        margin-right: 20%;
+                    }
+                    .loading.visible {
+                        display: block;
+                    }
                 </style>
             </head>
             <body>
@@ -231,71 +250,85 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
                     ${modelSelectorHtml}
                 </div>
                 <div class="messages">
-                    ${messageHtml}
+                    ${this.messages.map(msg => `
+                        <div class="message ${msg.role}">
+                            <div class="message-content">${this._escapeHtml(msg.content)}</div>
+                            <div class="message-time">${this.formatTime(msg.timestamp)}</div>
+                        </div>
+                    `).join('')}
                 </div>
+                <div class="loading">Düşünüyorum...</div>
                 <div class="input-container">
-                    <input type="text" id="messageInput" placeholder="Write your message...">
-                    <button onclick="sendMessage()">Send</button>
+                    <input type="text" id="messageInput" placeholder="Mesajınızı yazın...">
+                    <button onclick="sendMessage()">Gönder</button>
                 </div>
                 <script>
                     const vscode = acquireVsCodeApi();
-                    const messages = document.querySelector('.messages');
                     const messageInput = document.getElementById('messageInput');
+                    const modelSelect = document.getElementById('modelSelect');
+                    const loading = document.querySelector('.loading');
+                    const messages = document.querySelector('.messages');
 
-                    window.updateModel = (provider, model) => {
+                    // Scroll to bottom on new messages
+                    function scrollToBottom() {
+                        messages.scrollTop = messages.scrollHeight;
+                    }
+
+                    // Handle model change
+                    modelSelect.addEventListener('change', (e) => {
+                        const provider = document.querySelector('.model-selector').dataset.provider;
                         vscode.postMessage({
                             type: 'setActiveModel',
                             provider: provider,
-                            model: model
+                            model: e.target.value
                         });
-                    };
+                    });
 
-                    window.sendMessage = () => {
-                        const message = messageInput.value.trim();
-                        if (message) {
-                            vscode.postMessage({
-                                type: 'sendMessage',
-                                value: message
-                            });
-                            messageInput.value = '';
-                        }
-                    };
-
+                    // Handle message input
                     messageInput.addEventListener('keypress', (e) => {
-                        if (e.key === 'Enter') {
+                        if (e.key === 'Enter' && !e.shiftKey) {
+                            e.preventDefault();
                             sendMessage();
                         }
                     });
 
+                    function sendMessage() {
+                        const text = messageInput.value.trim();
+                        if (text) {
+                            vscode.postMessage({
+                                type: 'sendMessage',
+                                value: text
+                            });
+                            messageInput.value = '';
+                        }
+                    }
+
+                    // Handle messages from extension
                     window.addEventListener('message', event => {
                         const message = event.data;
                         switch (message.type) {
-                            case 'addMessage': {
+                            case 'addMessage':
                                 const messageDiv = document.createElement('div');
-                                messageDiv.className = 'message ' + message.role;
-                                const content = document.createElement('div');
-                                content.className = 'message-content';
-                                content.textContent = message.content;
-                                const time = document.createElement('div');
-                                time.className = 'message-time';
-                                time.textContent = new Date().toLocaleTimeString();
-                                messageDiv.appendChild(content);
-                                messageDiv.appendChild(time);
+                                messageDiv.className = \`message \${message.role}\`;
+                                messageDiv.innerHTML = \`
+                                    <div class="message-content">\${message.content}</div>
+                                    <div class="message-time">\${new Date().toLocaleTimeString()}</div>
+                                \`;
                                 messages.appendChild(messageDiv);
-                                messages.scrollTop = messages.scrollHeight;
+                                scrollToBottom();
                                 break;
-                            }
                             case 'showLoading':
-                                // TODO: Implement loading indicator
+                                loading.classList.add('visible');
+                                scrollToBottom();
                                 break;
                             case 'hideLoading':
-                                // TODO: Hide loading indicator
+                                loading.classList.remove('visible');
                                 break;
                         }
                     });
 
                     // Initial scroll to bottom
-                    messages.scrollTop = messages.scrollHeight;
+                    scrollToBottom();
                 </script>
             </body>
             </html>

@@ -299,4 +299,11 @@ export class SettingsService {
         const providerSettings = this.getProviderSettings(provider);
         return providerSettings?.activeModels || [];
     }
+
+    public async updateSettings(settings: any): Promise<void> {
+        for (const [key, value] of Object.entries(settings)) {
+            await this._configuration.update(key, value, vscode.ConfigurationTarget.Global);
+        }
+        this._onSettingsChanged.fire();
+    }
 } 

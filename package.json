@@ -24,7 +24,8 @@
     "@anthropic-ai/sdk": "^0.36.3",
     "@vscode/codicons": "^0.0.35",
     "axios": "^1.7.9",
-    "openai": "^4.83.0"
+    "openai": "^4.83.0",
+    "smile-ai": "file:"
   },
   "devDependencies": {
     "@angular/compiler-cli": "^19.1.5",

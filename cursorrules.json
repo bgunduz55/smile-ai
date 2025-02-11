@@ -1,0 +1,226 @@
+{
+    "project": {
+        "name": "Smile AI - VSCode AI Asistan",
+        "description": "VSCode için akıllı AI asistan eklentisi",
+        "language": "TypeScript",
+        "type": "vscode-extension"
+    },
+    "development": {
+        "standards": {
+            "typescript": {
+                "version": "^5.0.0",
+                "strict": true,
+                "moduleResolution": "node",
+                "target": "ES2022"
+            },
+            "formatting": {
+                "indentSize": 4,
+                "maxLineLength": 120,
+                "quoteStyle": "single",
+                "semicolons": true
+            },
+            "naming": {
+                "classes": "PascalCase",
+                "interfaces": "PascalCase",
+                "types": "PascalCase",
+                "functions": "camelCase",
+                "variables": "camelCase",
+                "constants": "UPPER_SNAKE_CASE",
+                "private": "_camelCase"
+            }
+        },
+        "patterns": {
+            "services": {
+                "location": "src/services",
+                "naming": "{name}Service.ts"
+            },
+            "webviews": {
+                "location": "src/webview",
+                "naming": "{name}ViewProvider.ts"
+            },
+            "models": {
+                "location": "src/models",
+                "naming": "{name}.ts"
+            },
+            "utils": {
+                "location": "src/utils",
+                "naming": "{name}Utils.ts"
+            }
+        }
+    },
+    "ai": {
+        "providers": [
+            {
+                "name": "ollama",
+                "type": "local",
+                "defaultEndpoint": "http://localhost:11434"
+            },
+            {
+                "name": "openai",
+                "type": "cloud",
+                "requiresApiKey": true
+            },
+            {
+                "name": "anthropic",
+                "type": "cloud",
+                "requiresApiKey": true
+            },
+            {
+                "name": "lmstudio",
+                "type": "local",
+                "defaultEndpoint": "http://localhost:1234"
+            },
+            {
+                "name": "localai",
+                "type": "local",
+                "defaultEndpoint": "http://localhost:8080"
+            }
+        ],
+        "features": {
+            "chat": {
+                "enabled": true,
+                "maxTokens": 2048,
+                "defaultTemperature": 0.7,
+                "streaming": true
+            },
+            "codeCompletion": {
+                "enabled": true,
+                "triggerCharacters": [".", "(", "[", "{", "<", " "],
+                "maxTokens": 1024,
+                "temperature": 0.2
+            },
+            "contextAwareness": {
+                "enabled": true,
+                "includeOpenFiles": true,
+                "includeSelection": true,
+                "includeClipboard": true
+            }
+        },
+        "security": {
+            "apiKeys": {
+                "storage": "secure",
+                "encryption": true
+            },
+            "localModels": {
+                "allowCustomEndpoints": true,
+                "validateSSL": false
+            }
+        }
+    },
+    "ui": {
+        "theme": {
+            "useVSCodeTheme": true,
+            "customVariables": {
+                "fontFamily": "var(--vscode-font-family)",
+                "fontSize": "var(--vscode-font-size)",
+                "foreground": "var(--vscode-foreground)",
+                "background": "var(--vscode-editor-background)",
+                "selectionBackground": "var(--vscode-editor-selectionBackground)",
+                "inactiveSelectionBackground": "var(--vscode-editor-inactiveSelectionBackground)"
+            }
+        },
+        "components": {
+            "chat": {
+                "layout": "vertical",
+                "messageAlignment": {
+                    "user": "right",
+                    "assistant": "left"
+                },
+                "features": {
+                    "modelSelector": true,
+                    "messageHistory": true,
+                    "codeHighlighting": true,
+                    "markdownSupport": true,
+                    "emojiSupport": true
+                }
+            },
+            "settings": {
+                "sections": [
+                    "general",
+                    "providers",
+                    "models",
+                    "appearance"
+                ],
+                "features": {
+                    "modelManagement": true,
+                    "apiKeyManagement": true,
+                    "endpointConfiguration": true,
+                    "themeCustomization": true
+                }
+            }
+        },
+        "interactions": {
+            "shortcuts": {
+                "openChat": "ctrl+shift+a",
+                "openSettings": "ctrl+shift+,",
+                "clearChat": "ctrl+shift+l",
+                "focusInput": "ctrl+shift+i"
+            },
+            "contextMenu": {
+                "enabled": true,
+                "items": [
+                    "Ask AI",
+                    "Explain Code",
+                    "Generate Tests",
+                    "Find Similar Code",
+                    "Optimize Code"
+                ]
+            }
+        }
+    },
+    "documentation": {
+        "comments": {
+            "required": true,
+            "style": "JSDoc"
+        },
+        "readme": {
+            "sections": [
+                "Introduction",
+                "Features",
+                "Installation",
+                "Usage",
+                "Configuration",
+                "Development",
+                "Contributing",
+                "License"
+            ]
+        }
+    },
+    "testing": {
+        "framework": "jest",
+        "coverage": {
+            "statements": 80,
+            "branches": 70,
+            "functions": 80,
+            "lines": 80
+        },
+        "types": [
+            "unit",
+            "integration",
+            "e2e"
+        ]
+    },
+    "deployment": {
+        "target": "vscode-marketplace",
+        "requirements": {
+            "vscode": "^1.80.0",
+            "node": ">=18.0.0"
+        },
+        "packaging": {
+            "includes": [
+                "dist/**/*",
+                "package.json",
+                "README.md",
+                "CHANGELOG.md",
+                "LICENSE"
+            ],
+            "excludes": [
+                "src/**/*",
+                "test/**/*",
+                "node_modules/**/*",
+                ".vscode/**/*",
+                ".git/**/*"
+            ]
+        }
+    }
+} 
