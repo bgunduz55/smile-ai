@@ -27,7 +27,7 @@ export class AIService implements vscode.Disposable {
     private disposables: vscode.Disposable[] = [];
 
     private constructor() {
-        this.settingsService = SettingsService.getInstance(vscode.workspace.getConfiguration('smile-ai'));
+        this.settingsService = SettingsService.getInstance();
         const rateLimiter = RateLimiterService.getInstance(this.settingsService);
         const errorHandler = ErrorHandlingService.getInstance(this.settingsService);
 
@@ -50,8 +50,8 @@ export class AIService implements vscode.Disposable {
 
     private async updateProvider(): Promise<void> {
         const settings = this.settingsService.getSettings();
-        this.currentProvider = settings.provider || 'openai';
-        const providerSettings = settings[this.currentProvider] || {};
+        this.currentProvider = settings.modelProvider || 'openai';
+        const providerSettings = settings.providers[this.currentProvider] || {};
         this.currentModel = providerSettings.model || '';
         await this.initializeProvider();
     }

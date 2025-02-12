@@ -1,6 +1,6 @@
 // @ts-check
 
-import { ExtensionSettings, ModelProvider, ThemeSettings, SecuritySettings, ShortcutSettings } from '../src/models/settings';
+import { ExtensionSettings, ModelProvider, ThemeSettings, SecuritySettings, ShortcutSettings } from '../../models/settings';
 
 declare global {
     interface Window {

@@ -83,7 +83,7 @@ export class ChatService {
     public async createSession(name: string, config?: AIModelConfig): Promise<ChatSession> {
         const sessionConfig = config || await this.getDefaultConfig();
         const session = new ChatSession(name, sessionConfig);
-        await this.chatRepository.createSession(session);
+        await this.chatRepository.saveSession(session);
         this.currentSession = session;
         return session;
     }

@@ -130,7 +130,7 @@ function initializeContentHandlers() {
     console.log('Initializing content handlers');
     
     // Initialize chat handlers
-    const chatInput = document.querySelector('.message-input');
+    const chatInput = document.getElementById('messageInput') as HTMLTextAreaElement;
     const sendButton = document.querySelector('.send-button');
     if (chatInput && sendButton) {
         sendButton.addEventListener('click', () => {
@@ -144,8 +144,8 @@ function initializeContentHandlers() {
             }
         });
 
-        chatInput.addEventListener('keypress', (event: KeyboardEvent) => {
-            if (event.key === 'Enter' && !event.shiftKey) {
+        chatInput.addEventListener('keydown', (event) => {
+            if (event instanceof KeyboardEvent && event.key === 'Enter' && !event.shiftKey) {
                 event.preventDefault();
                 (sendButton as HTMLButtonElement).click();
             }

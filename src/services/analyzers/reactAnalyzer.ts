@@ -71,44 +71,43 @@ export class ReactAnalyzer implements LanguageAnalyzer {
 
     private collectReactSymbols(ast: parser.ParseResult<t.File>): ReactSymbol[] {
         const symbols: ReactSymbol[] = [];
+        const self = this;
 
         traverse(ast, {
             // Function component analizi
             FunctionDeclaration(path) {
-                if (this.isReactComponent(path.node)) {
-                    symbols.push(this.createComponentSymbol(path.node));
+                if (self.isReactComponent(path.node)) {
+                    symbols.push(self.createComponentSymbol(path.node));
                 }
             },
 
             // Arrow function component analizi
             VariableDeclarator(path) {
-                if (t.isArrowFunctionExpression(path.node.init) && this.isReactComponent(path.node.init)) {
-                    symbols.push(this.createComponentSymbol(path.node));
+                if (t.isArrowFunctionExpression(path.node.init) && self.isReactComponent(path.node.init)) {
+                    symbols.push(self.createComponentSymbol(path.node));
                 }
             },
 
             // Class component analizi
             ClassDeclaration(path) {
-                if (this.isReactClassComponent(path.node)) {
-                    symbols.push(this.createClassComponentSymbol(path.node));
+                if (self.isReactClassComponent(path.node)) {
+                    symbols.push(self.createClassComponentSymbol(path.node));
                 }
             },
 
             // Hook ve HOC analizi
-            CallExpression: {
-                enter(path) {
-                    if (this.isReactHook(path.node)) {
-                        symbols.push(this.createHookSymbol(path.node));
-                    } else if (this.isHigherOrderComponent(path.node)) {
-                        symbols.push(this.createHOCSymbol(path.node));
-                    }
+            CallExpression(path) {
+                if (self.isReactHook(path.node)) {
+                    symbols.push(self.createHookSymbol(path.node));
+                } else if (self.isHigherOrderComponent(path.node)) {
+                    symbols.push(self.createHOCSymbol(path.node));
                 }
             },
 
             // Context analizi
             MemberExpression(path) {
-                if (this.isReactContext(path.node)) {
-                    symbols.push(this.createContextSymbol(path.node));
+                if (self.isReactContext(path.node)) {
+                    symbols.push(self.createContextSymbol(path.node));
                 }
             }
         });
@@ -167,8 +166,8 @@ export class ReactAnalyzer implements LanguageAnalyzer {
     }
 
     private createComponentSymbol(node: t.Node): ReactSymbol {
-        const name = t.isFunctionDeclaration(node) ? node.id?.name :
-                    t.isVariableDeclarator(node) ? (node.id as t.Identifier).name : 'AnonymousComponent';
+        const name = t.isFunctionDeclaration(node) ? node.id?.name || 'AnonymousComponent' :
+                    t.isVariableDeclarator(node) ? (node.id as t.Identifier).name || 'AnonymousComponent' : 'AnonymousComponent';
 
         const props = this.extractProps(node);
         const hooks = this.extractHooks(node);

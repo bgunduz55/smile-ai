@@ -145,8 +145,9 @@ export class ExpressAnalyzer implements LanguageAnalyzer {
             return false;
         }
         const [req, res] = params;
-        return req.type?.getText().includes('Request') === true && 
-               res.type?.getText().includes('Response') === true;
+        const reqType = req.type?.getText() || '';
+        const resType = res.type?.getText() || '';
+        return reqType.includes('Request') && resType.includes('Response');
     }
 
     private analyzeControllers(sourceFile: ts.SourceFile): ExpressSymbol[] {
@@ -168,7 +169,7 @@ export class ExpressAnalyzer implements LanguageAnalyzer {
     }
 
     private isController(node: ts.ClassDeclaration): boolean {
-        const hasControllerName = node.name?.text?.toLowerCase().includes('controller') === true;
+        const hasControllerName = (node.name?.text || '').toLowerCase().includes('controller');
         const hasRequestResponseMethods = node.members.some(member => {
             if (!ts.isMethodDeclaration(member)) {
                 return false;
@@ -178,8 +179,9 @@ export class ExpressAnalyzer implements LanguageAnalyzer {
                 return false;
             }
             const [req, res] = params;
-            return req.type?.getText().includes('Request') === true && 
-                   res.type?.getText().includes('Response') === true;
+            const reqType = req.type?.getText() || '';
+            const resType = res.type?.getText() || '';
+            return reqType.includes('Request') && resType.includes('Response');
         });
         return hasControllerName || hasRequestResponseMethods;
     }
@@ -208,14 +210,14 @@ export class ExpressAnalyzer implements LanguageAnalyzer {
     }
 
     private isModel(node: ts.ClassDeclaration): boolean {
-        const hasModelName = node.name?.text.toLowerCase().includes('model');
+        const hasModelName = (node.name?.text || '').toLowerCase().includes('model');
         const hasModelDecorator = ts.canHaveDecorators(node) && 
             ts.getDecorators(node)?.some(decorator => 
                 ts.isCallExpression(decorator.expression) &&
                 (decorator.expression.getText().includes('model') ||
                  decorator.expression.getText().includes('entity'))
             );
-        return hasModelName || !!hasModelDecorator;
+        return hasModelName || Boolean(hasModelDecorator);
     }
 
     private analyzeAuth(sourceFile: ts.SourceFile): ExpressSymbol[] {
