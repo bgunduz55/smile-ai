@@ -122,16 +122,16 @@ export class ComposerViewProvider implements vscode.WebviewViewProvider {
 
     private _getHtmlForWebview(_webview: vscode.Webview) {
         const settings = this.settingsService.getSettings();
-        const currentProvider = settings.provider || 'ollama';
-        const providerSettings = settings[currentProvider] || {};
-        const activeModels = providerSettings.activeModels || [];
-        const currentModel = providerSettings.model || '';
+        const currentProvider = settings.modelProvider || 'ollama';
+        const providerSettings = settings.providers[currentProvider] || {};
+        const models = providerSettings.models || [];
+        const currentModel = models[0] || '';
 
         const modelSelectorHtml = `
             <div class="model-selector" data-provider="${currentProvider}">
                 <label>Model:</label>
                 <select onchange="window.updateModel('${currentProvider}', this.value)">
-                    ${activeModels.map(model => `
+                    ${models.map(model => `
                         <option value="${model}" ${model === currentModel ? 'selected' : ''}>
                             ${model}
                         </option>

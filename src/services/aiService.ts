@@ -87,9 +87,7 @@ export class AIService implements vscode.Disposable {
     private async initializeOpenAI(): Promise<void> {
         if (!this.openai) {
             this.openai = new OpenAIService(
-                this.settingsService,
-                RateLimiterService.getInstance(this.settingsService),
-                ErrorHandlingService.getInstance(this.settingsService)
+                this.settingsService.getSettings()
             );
         }
         if (this.currentModel) {

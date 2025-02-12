@@ -1,24 +1,13 @@
 import * as vscode from 'vscode';
-import OpenAI from 'openai';
-import { IAIService, AIModelConfig } from '../../domain/interfaces/IAIService';
-import { Message } from '../../domain/entities/Message';
+import { BaseLLMService } from './llmService';
 import { SettingsService } from '../settingsService';
 import { RateLimiterService } from '../rateLimiterService';
-import { ErrorHandlingService, APIError } from '../errorHandlingService';
-import { v4 as uuidv4 } from 'uuid';
-import { BaseLLMService } from './llmService';
-
-interface LocalAIResponse {
-    choices: Array<{
-        message: {
-            content: string;
-        };
-    }>;
-}
+import { ErrorHandlingService } from '../errorHandlingService';
+import { OpenAI } from 'openai';
 
 export class LocalAIService extends BaseLLMService {
-    private endpoint: string;
-    private currentModel: string = 'local-model';
+    private client: OpenAI;
+    private currentModel: string;
 
     constructor(
         settingsService: SettingsService,
@@ -26,20 +15,73 @@ export class LocalAIService extends BaseLLMService {
         errorHandler: ErrorHandlingService
     ) {
         super(settingsService, rateLimiter, errorHandler);
-        this.endpoint = this.settingsService.getConfiguration<string>('localai.endpoint', 'http://localhost:8080/v1');
+        const settings = settingsService.getSettings();
+        const endpoint = settings.providers.localai.endpoint || 'http://localhost:8080/v1';
+        
+        this.client = new OpenAI({
+            baseURL: endpoint,
+            apiKey: 'not-needed'
+        });
+
+        this.currentModel = settings.models.localai.model;
+    }
+
+    public async generateResponse(prompt: string): Promise<string> {
+        try {
+            await this.rateLimiter.checkRateLimit(prompt.length);
+
+            const response = await this.client.chat.completions.create({
+                model: this.currentModel,
+                messages: [{ role: 'user', content: prompt }],
+                temperature: 0.7,
+                max_tokens: 1000
+            });
+
+            const content = response.choices[0]?.message?.content || '';
+            await this.rateLimiter.incrementCounters(content.length);
+            return content;
+        } catch (error) {
+            await this.errorHandler.handleError(error);
+            throw error;
+        }
+    }
+
+    public async streamResponse<T>(prompt: string, onUpdate: (chunk: string) => void): Promise<T> {
+        try {
+            await this.rateLimiter.checkRateLimit(prompt.length);
+
+            const stream = await this.client.chat.completions.create({
+                model: this.currentModel,
+                messages: [{ role: 'user', content: prompt }],
+                temperature: 0.7,
+                max_tokens: 1000,
+                stream: true
+            });
+
+            let totalLength = 0;
+            for await (const chunk of stream) {
+                const content = chunk.choices[0]?.delta?.content || '';
+                if (content) {
+                    totalLength += content.length;
+                    onUpdate(content);
+                }
+            }
+
+            await this.rateLimiter.incrementCounters(totalLength);
+            return {} as T;
+        } catch (error) {
+            await this.errorHandler.handleError(error);
+            throw error;
+        }
     }
 
     public async getAvailableModels(): Promise<string[]> {
         try {
-            const response = await fetch(`${this.endpoint}/models`);
-            if (!response.ok) {
-                throw new Error(`HTTP error! status: ${response.status}`);
-            }
-            const data = await response.json() as { data: Array<{ id: string }> };
-            return data.data.map(model => model.id);
+            const models = await this.client.models.list();
+            return models.data.map(model => model.id);
         } catch (error) {
-            this.errorHandler.handleError(error, 'Failed to fetch LocalAI models');
-            return [];
+            console.error('Error fetching models:', error);
+            return ['default-model'];
         }
     }
 
@@ -48,32 +90,7 @@ export class LocalAIService extends BaseLLMService {
     }
 
     public async processTask(task: string): Promise<string> {
-        await this.rateLimiter.checkRateLimit();
-        
-        try {
-            const response = await fetch(`${this.endpoint}/chat/completions`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                    model: this.currentModel,
-                    messages: [{ role: 'user', content: task }],
-                    temperature: 0.7,
-                    max_tokens: 2000
-                })
-            });
-
-            if (!response.ok) {
-                throw new Error(`HTTP error! status: ${response.status}`);
-            }
-
-            const data = await response.json() as LocalAIResponse;
-            return data.choices[0]?.message?.content || '';
-        } catch (error) {
-            this.errorHandler.handleError(error, 'Failed to process LocalAI task');
-            throw error;
-        }
+        return this.generateResponse(task);
     }
 
     public dispose(): void {

@@ -211,7 +211,7 @@ export class SvelteAnalyzer implements LanguageAnalyzer {
     }
 
     private isAction(node: t.FunctionDeclaration): boolean {
-        return node.id?.name.endsWith('Action') || false;
+        return node.id && t.isIdentifier(node.id) ? node.id.name.endsWith('Action') : false;
     }
 
     private isTransition(node: t.ObjectProperty): boolean {
@@ -242,8 +242,9 @@ export class SvelteAnalyzer implements LanguageAnalyzer {
     }
 
     private createActionSymbol(node: t.FunctionDeclaration): SvelteSymbol {
+        const name = node.id && t.isIdentifier(node.id) ? node.id.name : 'AnonymousAction';
         return {
-            name: node.id?.name || 'AnonymousAction',
+            name,
             type: 'action',
             location: this.getNodeLocation(node),
             documentation: this.getNodeDocumentation(node)

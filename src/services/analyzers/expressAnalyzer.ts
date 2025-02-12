@@ -216,8 +216,8 @@ export class ExpressAnalyzer implements LanguageAnalyzer {
                 ts.isCallExpression(decorator.expression) &&
                 (decorator.expression.getText().includes('model') ||
                  decorator.expression.getText().includes('entity'))
-            );
-        return hasModelName || Boolean(hasModelDecorator);
+            ) || false;
+        return hasModelName || hasModelDecorator;
     }
 
     private analyzeAuth(sourceFile: ts.SourceFile): ExpressSymbol[] {
@@ -238,10 +238,10 @@ export class ExpressAnalyzer implements LanguageAnalyzer {
     }
 
     private isAuthFunction(node: ts.FunctionDeclaration): boolean {
-        return node.name?.text.toLowerCase().includes('auth') ||
+        return (node.name?.text.toLowerCase().includes('auth') ||
                node.name?.text.toLowerCase().includes('passport') ||
                node.name?.text.toLowerCase().includes('login') ||
-               node.name?.text.toLowerCase().includes('logout');
+               node.name?.text.toLowerCase().includes('logout')) || false;
     }
 
     private analyzeDatabase(sourceFile: ts.SourceFile): ExpressSymbol[] {
