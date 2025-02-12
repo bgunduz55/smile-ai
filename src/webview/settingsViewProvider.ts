@@ -27,7 +27,8 @@ export class SettingsViewProvider implements vscode.WebviewViewProvider {
 
         webviewView.webview.options = {
             enableScripts: true,
-            localResourceRoots: [this.extensionUri]
+            localResourceRoots: [this.extensionUri],
+            enableCommandUris: true
         };
 
         webviewView.webview.html = this.getWebviewContent(webviewView.webview);
@@ -79,10 +80,10 @@ export class SettingsViewProvider implements vscode.WebviewViewProvider {
             <head>
                 <meta charset="UTF-8">
                 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-                <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource}; script-src ${webview.cspSource};">
+                <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${webview.cspSource} https:; script-src ${webview.cspSource} 'unsafe-inline'; style-src ${webview.cspSource} 'unsafe-inline'; font-src ${webview.cspSource};">
+                <title>Settings</title>
                 <link href="${styleUri}" rel="stylesheet">
                 <link href="${codiconsUri}" rel="stylesheet">
-                <title>Settings</title>
             </head>
             <body>
                 <div class="settings-container">

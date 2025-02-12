@@ -48,6 +48,14 @@ module.exports = {
                     globOptions: {
                         ignore: ['**/*.ts']
                     }
+                },
+                {
+                    from: 'node_modules/@vscode/codicons/dist',
+                    to: 'media/codicons'
+                },
+                {
+                    from: 'resources/smile.svg',
+                    to: '.'
                 }
             ]
         })

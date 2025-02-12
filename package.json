@@ -4,12 +4,14 @@
   "description": "Smile AI Coding Assistant Extension For Vscode",
   "version": "0.0.1",
   "publisher": "bgund",
+  "private": true,
+  "license": "MIT",
   "repository": {
     "type": "git",
     "url": "https://github.com/bgund/smile-ai"
   },
   "engines": {
-    "vscode": "^1.86.0"
+    "vscode": "^1.97.0"
   },
   "categories": [
     "Other"
@@ -17,10 +19,8 @@
   "activationEvents": [],
   "main": "./dist/extension.js",
   "dependencies": {
-    "@vscode/codicons": "^0.0.35",
-    "@vscode/webview-ui-toolkit": "^1.4.0",
     "events": "^3.3.0",
-    "vscode": "^1.1.37"
+    "smile-ai": "file:"
   },
   "devDependencies": {
     "@angular/compiler-cli": "^19.1.5",
@@ -36,8 +36,10 @@
     "@types/vscode-webview": "^1.57.4",
     "@typescript-eslint/eslint-plugin": "^6.19.1",
     "@typescript-eslint/parser": "^6.19.1",
+    "@vscode/codicons": "^0.0.35",
     "@vscode/test-cli": "^0.0.4",
     "@vscode/test-electron": "^2.3.9",
+    "@vscode/webview-ui-toolkit": "^1.4.0",
     "@vue/compiler-dom": "^3.5.13",
     "@vue/compiler-sfc": "^3.5.13",
     "axios": "^1.7.9",
@@ -50,6 +52,7 @@
     "ts-loader": "^9.5.1",
     "typescript": "^5.3.3",
     "uuid": "^11.0.5",
+    "vscode": "^1.1.37",
     "webpack": "^5.90.0",
     "webpack-cli": "^5.1.4"
   },
@@ -136,21 +139,25 @@
               "type": "string",
               "description": "Active Ollama model"
             },
+            "defaultModel": {
+              "type": "string",
+              "default": "codellama",
+              "description": "Default Ollama model to use"
+            },
             "models": {
               "type": "array",
               "items": {
                 "type": "string"
               },
-              "description": "Available Ollama models",
-              "scope": "machine"
+              "default": [],
+              "description": "Available Ollama models"
             },
             "activeModels": {
               "type": "array",
               "items": {
                 "type": "string"
               },
-              "description": "Active Ollama models",
-              "scope": "machine"
+              "description": "Active Ollama models"
             }
           }
         },

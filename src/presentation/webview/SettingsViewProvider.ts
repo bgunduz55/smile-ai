@@ -3,6 +3,7 @@ import { SettingsService } from '../../services/settingsService';
 import { ExtensionSettings } from '../../models/settings';
 
 export class SettingsViewProvider implements vscode.WebviewViewProvider {
+    public static readonly viewType = 'smile-ai.settingsView';
     private _view?: vscode.WebviewView;
     private readonly _extensionUri: vscode.Uri;
 

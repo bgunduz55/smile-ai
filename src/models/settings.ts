@@ -33,6 +33,13 @@ export interface ProviderSettings {
     isLocal?: boolean;
     endpoint?: string;
     models: string[];
+    modelMetadata?: {
+        [key: string]: {
+            name: string;
+            details: any;
+            lastUpdated: string;
+        };
+    };
 }
 
 /**

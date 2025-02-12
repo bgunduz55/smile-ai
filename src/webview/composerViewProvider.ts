@@ -32,7 +32,8 @@ export class ComposerViewProvider implements vscode.WebviewViewProvider {
 
         webviewView.webview.options = {
             enableScripts: true,
-            localResourceRoots: [this._extensionUri]
+            localResourceRoots: [this._extensionUri],
+            enableCommandUris: true
         };
 
         this.updateContext();
@@ -152,6 +153,7 @@ export class ComposerViewProvider implements vscode.WebviewViewProvider {
             <head>
                 <meta charset="UTF-8">
                 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${_webview.cspSource} https:; script-src ${_webview.cspSource} 'unsafe-inline'; style-src ${_webview.cspSource} 'unsafe-inline'; font-src ${_webview.cspSource};">
                 <title>Smile AI Composer</title>
                 <style>
                     body {

@@ -6,7 +6,7 @@ import { ComposerViewProvider } from './webview/composerViewProvider';
 import { SuggestionViewProvider } from './webview/suggestionViewProvider';
 import { RulesViewProvider } from './webview/rulesViewProvider';
 import { MainViewProvider } from './webview/mainViewProvider';
-import { SettingsViewProvider } from './webview/settingsViewProvider';
+import { SettingsViewProvider } from './presentation/webview/SettingsViewProvider';
 import { VSCodeChatRepository } from './infrastructure/repositories/VSCodeChatRepository';
 import { ChatService } from './application/services/ChatService';
 import { SettingsService } from './services/settingsService';

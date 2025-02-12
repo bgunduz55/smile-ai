@@ -160,32 +160,51 @@ export class OllamaService extends BaseLLMService {
         }
     }
 
-    private async loadModels(): Promise<void> {
+    public async loadModels(): Promise<string[]> {
         try {
             const response = await axios.get(`${this.endpoint}/api/tags`);
-            this.models = response.data.models;
+            const models = response.data.models || [];
+            const modelNames = models.map((model: any) => model.name);
             
-            if (this.currentModel) {
-                await this.updateModelMetadata(this.currentModel);
+            // Modelleri ayarlara kaydet
+            await this.settingsService.updateProviderSettings('ollama', {
+                models: modelNames
+            });
+
+            if (modelNames.length > 0) {
+                await this.setModel(modelNames[0]);
             }
+
+            return modelNames;
         } catch (error) {
             console.error('Error loading models:', error);
-            throw new Error('Could not load Ollama models. Ensure Ollama service is running.');
+            return [];
         }
     }
 
-    private async updateModelMetadata(modelName: string): Promise<void> {
+    public async updateModelMetadata(modelName: string): Promise<void> {
         try {
             const response = await axios.get(`${this.endpoint}/api/show`, {
                 params: { name: modelName }
             });
             
-            const model = this.models.find(m => m.name === modelName);
-            if (model) {
-                Object.assign(model.details, response.data.details);
+            if (response.data) {
+                const settings = this.settingsService.getSettings();
+                const ollamaSettings = settings.providers.ollama || {};
+                
+                await this.settingsService.updateProviderSettings('ollama', {
+                    ...ollamaSettings,
+                    modelMetadata: {
+                        ...ollamaSettings.modelMetadata,
+                        [modelName]: {
+                            ...response.data,
+                            lastUpdated: new Date().toISOString()
+                        }
+                    }
+                });
             }
         } catch (error) {
-            console.warn(`Could not update model metadata (${modelName}):`, error);
+            console.error(`Error updating model metadata for ${modelName}:`, error);
         }
     }
 

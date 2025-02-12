@@ -21,7 +21,7 @@ export class AIService implements vscode.Disposable {
     private localai: LocalAIService | null = null;
     private deepseek: DeepseekService | null = null;
     private qwen: QwenService | null = null;
-    private currentProvider: string = 'openai';
+    private currentProvider: string = 'ollama';
     private currentModel: string = '';
     private settingsService: SettingsService;
     private disposables: vscode.Disposable[] = [];
@@ -38,6 +38,9 @@ export class AIService implements vscode.Disposable {
                 }
             })
         );
+        
+        // Set default provider to Ollama
+        this.currentProvider = 'ollama';
         this.updateProvider();
     }
 
@@ -50,7 +53,7 @@ export class AIService implements vscode.Disposable {
 
     private async updateProvider(): Promise<void> {
         const settings = this.settingsService.getSettings();
-        this.currentProvider = settings.modelProvider || 'openai';
+        this.currentProvider = settings.modelProvider || 'ollama';
         const providerSettings = settings.providers[this.currentProvider] || {};
         this.currentModel = providerSettings.model || '';
         await this.initializeProvider();

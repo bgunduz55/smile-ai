@@ -122,7 +122,7 @@ export class ExpressAnalyzer implements LanguageAnalyzer {
     private analyzeMiddleware(sourceFile: ts.SourceFile): ExpressSymbol[] {
         const middleware: ExpressSymbol[] = [];
         const visit = (node: ts.Node) => {
-            if (this.isMiddleware(node)) {
+            if (this.isMiddleware(node) && ts.isFunctionDeclaration(node)) {
                 middleware.push({
                     type: 'middleware',
                     name: node.name?.text || 'anonymous',
