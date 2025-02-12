@@ -1,0 +1,200 @@
+.chat-container {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    padding: 1rem;
+    box-sizing: border-box;
+    font-family: var(--vscode-font-family);
+    color: var(--vscode-foreground);
+}
+
+.header {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    margin-bottom: 1rem;
+}
+
+.session-info {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+}
+
+.session-select {
+    flex: 1;
+    padding: 0.25rem;
+    background: var(--vscode-input-background);
+    color: var(--vscode-input-foreground);
+    border: 1px solid var(--vscode-input-border);
+    border-radius: 2px;
+}
+
+.model-selector {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+}
+
+.provider-select,
+.model-select {
+    flex: 1;
+    padding: 0.25rem;
+    background: var(--vscode-input-background);
+    color: var(--vscode-input-foreground);
+    border: 1px solid var(--vscode-input-border);
+    border-radius: 2px;
+}
+
+.icon-button {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    padding: 0;
+    background: none;
+    border: none;
+    color: var(--vscode-button-foreground);
+    cursor: pointer;
+}
+
+.icon-button:hover {
+    color: var(--vscode-button-hoverBackground);
+}
+
+.messages {
+    flex: 1;
+    overflow-y: auto;
+    margin: 1rem 0;
+    padding: 0.5rem;
+    background: var(--vscode-editor-background);
+    border: 1px solid var(--vscode-input-border);
+    border-radius: 4px;
+}
+
+.message {
+    margin-bottom: 1rem;
+    padding: 0.5rem;
+    border-radius: 4px;
+    background: var(--vscode-editor-background);
+}
+
+.message.user {
+    background: var(--vscode-editor-selectionBackground);
+}
+
+.message.assistant {
+    background: var(--vscode-editor-inactiveSelectionBackground);
+}
+
+.message .content {
+    margin-bottom: 0.5rem;
+    white-space: pre-wrap;
+}
+
+.message .metadata {
+    display: flex;
+    gap: 0.5rem;
+    font-size: 0.8em;
+    color: var(--vscode-descriptionForeground);
+}
+
+.message .provider,
+.message .model,
+.message .tokens {
+    padding: 0.125rem 0.25rem;
+    border-radius: 2px;
+    background: var(--vscode-badge-background);
+    color: var(--vscode-badge-foreground);
+}
+
+.message .actions {
+    display: flex;
+    gap: 0.25rem;
+    margin-top: 0.5rem;
+}
+
+.input-container {
+    margin-top: auto;
+}
+
+.input-wrapper {
+    display: flex;
+    gap: 0.5rem;
+    align-items: flex-start;
+}
+
+#messageInput {
+    flex: 1;
+    min-height: 2.5rem;
+    max-height: 120px;
+    padding: 0.5rem;
+    background: var(--vscode-input-background);
+    color: var(--vscode-input-foreground);
+    border: 1px solid var(--vscode-input-border);
+    border-radius: 4px;
+    resize: none;
+    font-family: inherit;
+}
+
+#messageInput:focus {
+    outline: none;
+    border-color: var(--vscode-focusBorder);
+}
+
+.loading {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 1rem;
+}
+
+.loading::after {
+    content: '';
+    width: 24px;
+    height: 24px;
+    border: 2px solid var(--vscode-progressBar-background);
+    border-radius: 50%;
+    border-top-color: transparent;
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+/* Syntax highlighting */
+pre {
+    margin: 0.5rem 0;
+    padding: 0.5rem;
+    background: var(--vscode-textBlockQuote-background);
+    border-radius: 4px;
+    overflow-x: auto;
+}
+
+code {
+    font-family: var(--vscode-editor-font-family);
+    font-size: var(--vscode-editor-font-size);
+}
+
+/* Scrollbar styles */
+::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+::-webkit-scrollbar-track {
+    background: var(--vscode-scrollbarSlider-background);
+}
+
+::-webkit-scrollbar-thumb {
+    background: var(--vscode-scrollbarSlider-hoverBackground);
+    border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: var(--vscode-scrollbarSlider-activeBackground);
+} 

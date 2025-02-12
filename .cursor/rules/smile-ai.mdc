@@ -1,5 +1,5 @@
 ---
-description: Smile Ai Coding Assistant Extension For Vscode 
+description: Smile Ai Coding Assistant Extension For Vscode
 globs: 
 ---
 # Smile AI - VSCode Eklentisi Geliştirme Kuralları
@@ -21,6 +21,7 @@ Bu doküman, Smile AI VSCode eklentisinin geliştirme sürecinde uyulması gerek
 - Strict Mode: Aktif
 - Module Resolution: Node
 - Target: ES2022
+- js değil ts dosyası tercih et
 
 ### Kod Formatı
 - Girinti: 4 boşluk
@@ -169,7 +170,7 @@ Bu doküman, Smile AI VSCode eklentisinin geliştirme sürecinde uyulması gerek
 ## 📦 Dağıtım
 
 ### Gereksinimler
-- VSCode: ^1.80.0
+- VSCode: ^1.86.0
 - Node.js: >=18.0.0
 
 ### Paketleme

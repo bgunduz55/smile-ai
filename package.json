@@ -1,7 +1,7 @@
 {
   "name": "smile-ai",
   "displayName": "Smile AI",
-  "description": "A local AI developer assistant for VS Code",
+  "description": "Smile AI Coding Assistant Extension For Vscode",
   "version": "0.0.1",
   "publisher": "bgund",
   "repository": {
@@ -14,50 +14,42 @@
   "categories": [
     "Other"
   ],
-  "activationEvents": [
-    "onStartupFinished",
-    "onView:smile-ai.mainView",
-    "*"
-  ],
+  "activationEvents": [],
   "main": "./dist/extension.js",
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.36.3",
     "@vscode/codicons": "^0.0.35",
-    "axios": "^1.7.9",
-    "openai": "^4.83.0",
-    "smile-ai": "file:"
+    "@vscode/webview-ui-toolkit": "^1.4.0",
+    "events": "^3.3.0",
+    "vscode": "^1.1.37"
   },
   "devDependencies": {
     "@angular/compiler-cli": "^19.1.5",
+    "@anthropic-ai/sdk": "^0.36.3",
     "@babel/parser": "^7.26.8",
     "@babel/traverse": "^7.26.8",
     "@babel/types": "^7.26.8",
-    "@types/glob": "^8.1.0",
-    "@types/minimatch": "^5.1.2",
+    "@types/events": "^3.0.3",
     "@types/mocha": "^10.0.6",
-    "@types/node": "18.x",
-    "@types/vscode": "^1.86.0",
+    "@types/node": "^18.19.75",
+    "@types/uuid": "^10.0.0",
+    "@types/vscode": "^1.97.0",
+    "@types/vscode-webview": "^1.57.4",
     "@typescript-eslint/eslint-plugin": "^6.19.1",
     "@typescript-eslint/parser": "^6.19.1",
-    "@vscode/codicons": "^0.0.36",
     "@vscode/test-cli": "^0.0.4",
     "@vscode/test-electron": "^2.3.9",
     "@vue/compiler-dom": "^3.5.13",
     "@vue/compiler-sfc": "^3.5.13",
+    "axios": "^1.7.9",
     "copy-webpack-plugin": "^12.0.2",
-    "crypto-browserify": "^3.12.1",
-    "css-loader": "^7.1.2",
     "eslint": "^8.56.0",
-    "glob": "^10.3.10",
-    "mocha": "^10.2.0",
-    "path-browserify": "^1.0.1",
-    "stream-browserify": "^3.0.0",
-    "style-loader": "^4.0.0",
-    "svelte": "^5.19.9",
+    "highlight.js": "^11.11.1",
+    "marked": "^15.0.7",
+    "openai": "^4.83.0",
+    "svelte": "^5.19.10",
     "ts-loader": "^9.5.1",
     "typescript": "^5.3.3",
-    "util": "^0.12.5",
-    "vm-browserify": "^1.1.2",
+    "uuid": "^11.0.5",
     "webpack": "^5.90.0",
     "webpack-cli": "^5.1.4"
   },
@@ -67,7 +59,7 @@
         {
           "id": "smile-ai",
           "title": "Smile AI",
-          "icon": "media/icon.svg"
+          "icon": "media/smile.svg"
         }
       ]
     },
@@ -75,102 +67,33 @@
       "smile-ai": [
         {
           "type": "webview",
-          "id": "smile-ai.mainView",
-          "name": "Smile AI",
-          "icon": "$(hubot)",
-          "contextualTitle": "Smile AI",
-          "visibility": "visible"
+          "id": "smile-ai.chatView",
+          "name": "Chat"
+        },
+        {
+          "type": "webview",
+          "id": "smile-ai.composerView",
+          "name": "Composer"
+        },
+        {
+          "type": "webview",
+          "id": "smile-ai.settingsView",
+          "name": "Settings"
+        },
+        {
+          "type": "webview",
+          "id": "smile-ai.rulesView",
+          "name": "Rules"
         }
       ]
     },
     "commands": [
       {
-        "command": "smile-ai.switchToChat",
-        "title": "Chat",
-        "category": "Smile AI",
-        "icon": "$(comment-discussion)"
-      },
-      {
-        "command": "smile-ai.switchToComposer",
-        "title": "Composer",
-        "category": "Smile AI",
-        "icon": "$(edit)"
-      },
-      {
-        "command": "smile-ai.switchToSuggestions",
-        "title": "Suggestions",
-        "category": "Smile AI",
-        "icon": "$(lightbulb)"
-      },
-      {
-        "command": "smile-ai.switchToRules",
-        "title": "Rules",
-        "category": "Smile AI",
-        "icon": "$(book)"
-      },
-      {
-        "command": "smile-ai.switchToSettings",
-        "title": "Settings",
-        "category": "Smile AI",
-        "icon": "$(gear)"
-      },
-      {
-        "command": "smile-ai.codeCompletion",
-        "title": "Code Completion",
-        "category": "Smile AI"
-      },
-      {
-        "command": "smile-ai.codeAnalysis",
-        "title": "Code Analysis",
-        "category": "Smile AI"
-      },
-      {
-        "command": "smile-ai.generateCode",
-        "title": "Generate Code",
-        "category": "Smile AI"
-      },
-      {
-        "command": "smile-ai.generateDocs",
-        "title": "Generate Docs",
-        "category": "Smile AI"
-      },
-      {
-        "command": "smile-ai.generateTests",
-        "title": "Generate Tests",
-        "category": "Smile AI"
-      },
-      {
-        "command": "smile-ai.refactorCode",
-        "title": "Refactor Code",
-        "category": "Smile AI"
-      },
-      {
-        "command": "smile-ai.fixBug",
-        "title": "Fix Bug",
-        "category": "Smile AI"
-      },
-      {
-        "command": "smile-ai.createRule",
-        "title": "Create New Rule Set",
-        "category": "Smile AI"
-      },
-      {
-        "command": "smile-ai.editRule",
-        "title": "Edit Rule Set",
-        "category": "Smile AI"
-      },
-      {
-        "command": "smile-ai.viewRules",
-        "title": "View Rules",
-        "category": "Smile AI"
+        "command": "smile-ai.helloWorld",
+        "title": "Hello World"
       }
     ],
     "keybindings": [
-      {
-        "command": "smile-ai.openChat",
-        "key": "ctrl+shift+a",
-        "mac": "cmd+shift+a"
-      },
       {
         "command": "smile-ai.startComposer",
         "key": "ctrl+shift+c",
@@ -286,33 +209,42 @@
         },
         "smile-ai.deepseek.apiKey": {
           "type": "string",
-          "description": "Deepseek API key"
+          "default": "",
+          "description": "Deepseek API anahtarı"
         },
-        "smile-ai.deepseek.model": {
+        "smile-ai.deepseek.endpoint": {
           "type": "string",
-          "description": "Active Deepseek model"
+          "default": "https://api.deepseek.com/v1",
+          "description": "Deepseek API endpoint URL'si"
         },
-        "smile-ai.deepseek.activeModels": {
+        "smile-ai.deepseek.models": {
           "type": "array",
-          "items": {
-            "type": "string"
-          },
-          "description": "Active Deepseek models"
+          "default": [
+            "deepseek-coder-33b-instruct",
+            "deepseek-coder-6.7b-instruct",
+            "deepseek-coder-1.3b-instruct"
+          ],
+          "description": "Kullanılabilir Deepseek modelleri"
         },
         "smile-ai.qwen.apiKey": {
           "type": "string",
-          "description": "Qwen API key"
+          "default": "",
+          "description": "Qwen API anahtarı"
         },
-        "smile-ai.qwen.model": {
+        "smile-ai.qwen.endpoint": {
           "type": "string",
-          "description": "Active Qwen model"
+          "default": "https://dashscope.aliyuncs.com/api/v1",
+          "description": "Qwen API endpoint URL'si"
         },
-        "smile-ai.qwen.activeModels": {
+        "smile-ai.qwen.models": {
           "type": "array",
-          "items": {
-            "type": "string"
-          },
-          "description": "Active Qwen models"
+          "default": [
+            "qwen2.5-turbo",
+            "qwen2.5-pro",
+            "qwen1.5-72b",
+            "qwen1.5-14b"
+          ],
+          "description": "Kullanılabilir Qwen modelleri"
         },
         "smile-ai.temperature": {
           "type": "number",
@@ -899,6 +831,21 @@
               "description": "Return value documentation requirement"
             }
           }
+        },
+        "smile-ai.lmstudio.endpoint": {
+          "type": "string",
+          "default": "http://localhost:1234/v1",
+          "description": "LM Studio API endpoint URL"
+        },
+        "smile-ai.lmstudio.models": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [
+            "local-model"
+          ],
+          "description": "List of available models in LM Studio"
         }
       }
     }

@@ -1,94 +1,116 @@
 import * as vscode from 'vscode';
 import Anthropic from '@anthropic-ai/sdk';
-import { LLMService } from './llmService';
-import { AgentTask, TaskResult } from './types';
+import { IAIService, AIModelConfig } from '../../domain/interfaces/IAIService';
+import { Message } from '../../domain/entities/Message';
+import { SettingsService } from '../settingsService';
+import { RateLimiterService } from '../rateLimiterService';
+import { ErrorHandlingService, APIError } from '../errorHandlingService';
+import { v4 as uuidv4 } from 'uuid';
+import { BaseLLMService } from './llmService';
+import { ExtensionSettings } from '../../models/settings';
 
-export class AnthropicService implements LLMService {
-    private client: Anthropic | null = null;
-    private currentModel: string = 'claude-3-sonnet-20240229';
-    private disposables: vscode.Disposable[] = [];
+export class AnthropicService extends BaseLLMService {
+    private client: Anthropic;
+    private currentModel: string;
+    protected readonly settingsService: SettingsService;
 
-    constructor() {
-        this.initialize();
-        this.disposables.push(
-            vscode.workspace.onDidChangeConfiguration(e => {
-                if (e.affectsConfiguration('smile-ai.anthropic')) {
-                    this.initialize();
-                }
-            })
-        );
+    constructor(
+        settingsService: SettingsService,
+        rateLimiter: RateLimiterService,
+        errorHandler: ErrorHandlingService
+    ) {
+        super(settingsService, rateLimiter, errorHandler);
+        this.settingsService = settingsService;
+        const settings = settingsService.getSettings();
+        const apiKey = settings.apiKeys['anthropic'];
+        if (!apiKey) {
+            throw new Error('Anthropic API key not found in settings');
+        }
+
+        this.client = new Anthropic({ apiKey });
+        this.currentModel = settings.models['anthropic'].model;
     }
 
-    public async initialize(): Promise<void> {
-        const config = vscode.workspace.getConfiguration('smile-ai.anthropic');
-        const apiKey = config.get<string>('apiKey');
-        const model = config.get<string>('model');
+    public async generateResponse(prompt: string): Promise<string> {
+        try {
+            await this.rateLimiter.checkRateLimit(prompt.length);
 
-        if (!apiKey) {
-            vscode.window.showErrorMessage('Anthropic API key is not configured');
-            return;
+            const response = await this.client.messages.create({
+                model: this.currentModel,
+                messages: [{ role: 'user', content: prompt }],
+                max_tokens: 1000
+            });
+
+            const content = response.content.find(c => c.type === 'text')?.text || '';
+            await this.rateLimiter.incrementCounters(content.length);
+            return content;
+        } catch (error) {
+            await this.errorHandler.handleError(error);
+            throw error;
         }
+    }
 
-        this.client = new Anthropic({
-            apiKey: apiKey
-        });
+    public async streamResponse<T>(prompt: string, onUpdate: (chunk: string) => void): Promise<T> {
+        try {
+            await this.rateLimiter.checkRateLimit(prompt.length);
 
-        if (model) {
-            this.currentModel = model;
+            const stream = await this.client.messages.create({
+                model: this.currentModel,
+                messages: [{ role: 'user', content: prompt }],
+                max_tokens: 1000,
+                stream: true
+            });
+
+            let totalLength = 0;
+            for await (const chunk of stream) {
+                if (chunk.type === 'content_block_delta' && chunk.delta.type === 'text_delta') {
+                    const content = chunk.delta.text;
+                    if (content) {
+                        totalLength += content.length;
+                        onUpdate(content);
+                    }
+                }
+            }
+
+            await this.rateLimiter.incrementCounters(totalLength);
+            return {} as T;
+        } catch (error) {
+            await this.errorHandler.handleError(error);
+            throw error;
         }
+    }
+
+    public async getAvailableModels(): Promise<string[]> {
+        return [
+            'claude-3-opus-20240229',
+            'claude-3-sonnet-20240229',
+            'claude-3-haiku-20240307',
+            'claude-2.1',
+            'claude-2.0',
+            'claude-instant-1.2'
+        ];
     }
 
     public async setModel(model: string): Promise<void> {
         this.currentModel = model;
-        await vscode.workspace.getConfiguration('smile-ai.anthropic').update('model', model, true);
     }
 
-    public async processTask(task: AgentTask): Promise<TaskResult> {
-        if (!this.client) {
-            return {
-                success: false,
-                error: 'Anthropic client is not initialized',
-                output: ''
-            };
-        }
-
-        try {
-            const response = await this.client.messages.create({
-                model: this.currentModel,
-                max_tokens: 2048,
-                messages: [
-                    {
-                        role: 'user',
-                        content: task.input
-                    }
-                ]
-            });
-
-            const content = response.content[0];
-            if (content?.type === 'text') {
-                return {
-                    success: true,
-                    output: content.text
-                };
-            }
-
-            return {
-                success: false,
-                error: 'Unexpected response format',
-                output: ''
-            };
-        } catch (error) {
-            return {
-                success: false,
-                error: error instanceof Error ? error.message : 'Unknown error occurred',
-                output: ''
-            };
-        }
+    public async processTask(task: string): Promise<string> {
+        return this.generateResponse(task);
     }
 
     public dispose(): void {
-        this.disposables.forEach(d => d.dispose());
-        this.disposables = [];
-        this.client = null;
+        // Clean up resources if needed
+    }
+
+    private estimateTokens(text: string): number {
+        // Claude'un token hesaplama yaklaşımı:
+        // Ortalama olarak her 4 karaktere 1 token
+        return Math.ceil(text.length / 4);
+    }
+
+    public async updateApiKey(apiKey: string): Promise<void> {
+        await this.settingsService.setApiKey('anthropic', apiKey);
+        this.client = new Anthropic({ apiKey });
     }
 } 

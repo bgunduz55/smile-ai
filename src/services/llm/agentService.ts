@@ -5,28 +5,41 @@ import { OllamaService } from './ollamaService';
 import { AgentTask, TaskResult } from './types';
 import { suggestionService } from '../suggestionService';
 import { SuggestionItem } from '../suggestionService';
+import { SettingsService } from '../settingsService';
+import { RateLimiterService } from '../rateLimiterService';
+import { ErrorHandlingService } from '../errorHandlingService';
 
 export class AgentService {
     private static instance: AgentService;
-    private aiService: AIService;
-    // private llamaService: LlamaService;
-    private ollamaService: OllamaService;
+    private readonly settingsService: SettingsService;
+    private readonly rateLimiter: RateLimiterService;
+    private readonly errorHandler: ErrorHandlingService;
+    private readonly ollamaService: OllamaService;
+    private readonly statusBarItem: vscode.StatusBarItem;
     private disposables: vscode.Disposable[] = [];
-    private statusBarItem: vscode.StatusBarItem;
 
-    private constructor() {
-        this.aiService = AIService.getInstance();
-        // this.llamaService = new LlamaService();
-        this.ollamaService = new OllamaService();
-        this.statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right);
+    private constructor(
+        settingsService: SettingsService,
+        rateLimiter: RateLimiterService,
+        errorHandler: ErrorHandlingService
+    ) {
+        this.settingsService = settingsService;
+        this.rateLimiter = rateLimiter;
+        this.errorHandler = errorHandler;
+        this.ollamaService = new OllamaService(settingsService, rateLimiter, errorHandler);
+        this.statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
         this.statusBarItem.text = "$(hubot) Smile AI";
-        this.statusBarItem.tooltip = "Smile AI Agent";
         this.statusBarItem.show();
+        this.registerCommands();
     }
 
-    public static getInstance(): AgentService {
+    public static getInstance(
+        settingsService: SettingsService,
+        rateLimiter: RateLimiterService,
+        errorHandler: ErrorHandlingService
+    ): AgentService {
         if (!AgentService.instance) {
-            AgentService.instance = new AgentService();
+            AgentService.instance = new AgentService(settingsService, rateLimiter, errorHandler);
         }
         return AgentService.instance;
     }
@@ -46,7 +59,7 @@ export class AgentService {
         // Register all agent-related commands
         this.disposables.push(
             vscode.commands.registerCommand('smile-ai.executeTask', async (task: AgentTask) => {
-                return await this.ollamaService.processTask(task);
+                return await this.ollamaService.processTask(task.input);
             })
         );
     }
@@ -440,20 +453,10 @@ export class AgentService {
         this.statusBarItem.text = "$(sync~spin) Smile AI";
         
         try {
-            // const result = await this.llamaService.executeTask(task);
-            await this.handleTaskResult({
+            const response = await this.ollamaService.processTask(task.input);
+            const result = {
                 success: true,
-                output: '',
-                error: '',
-                metadata: {
-                    tokensUsed: 0,
-                    executionTime: 0,
-                    modelName: 'unknown'
-                }
-            });
-            return {
-                success: true,
-                output: '',
+                output: response,
                 error: '',
                 metadata: {
                     tokensUsed: 0,
@@ -461,6 +464,8 @@ export class AgentService {
                     modelName: 'unknown'
                 }
             };
+            await this.handleTaskResult(result);
+            return result;
         } catch (error) {
             vscode.window.showErrorMessage(
                 error instanceof Error ? error.message : 'Görev yürütülürken bir hata oluştu'
@@ -505,10 +510,9 @@ export class AgentService {
     }
 
     public dispose(): void {
-        // this.llamaService.dispose();
         this.statusBarItem.dispose();
         this.disposables.forEach(d => d.dispose());
-        this.disposables = [];
+        this.disposables.length = 0;
         this.ollamaService.dispose();
     }
 } 

@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { ChatService } from '../application/services/ChatService';
+import { ChatService } from '../../application/services/ChatService';
 
 export class RulesViewProvider implements vscode.WebviewViewProvider {
     public static readonly viewType = 'smile-ai.rulesView';

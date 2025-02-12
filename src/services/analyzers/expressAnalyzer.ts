@@ -122,23 +122,31 @@ export class ExpressAnalyzer implements LanguageAnalyzer {
     private analyzeMiddleware(sourceFile: ts.SourceFile): ExpressSymbol[] {
         const middleware: ExpressSymbol[] = [];
         const visit = (node: ts.Node) => {
-            if (ts.isFunctionDeclaration(node) && node.parameters.length >= 3) {
-                const [req, res, next] = node.parameters;
-                if (req && res && next && 
-                    req.type?.getText().includes('Request') && 
-                    res.type?.getText().includes('Response')) {
-                    middleware.push({
-                        type: 'middleware',
-                        name: node.name?.text || 'anonymous',
-                        documentation: this.getNodeDocumentation(node),
-                        location: this.getNodeLocation(node)
-                    });
-                }
+            if (this.isMiddleware(node)) {
+                middleware.push({
+                    type: 'middleware',
+                    name: node.name?.text || 'anonymous',
+                    documentation: this.getNodeDocumentation(node),
+                    location: this.getNodeLocation(node)
+                });
             }
             ts.forEachChild(node, visit);
         };
         visit(sourceFile);
         return middleware;
+    }
+
+    private isMiddleware(node: ts.Node): boolean {
+        if (!ts.isFunctionDeclaration(node)) {
+            return false;
+        }
+        const params = node.parameters;
+        if (params.length < 3) {
+            return false;
+        }
+        const [req, res] = params;
+        return req.type?.getText().includes('Request') === true && 
+               res.type?.getText().includes('Response') === true;
     }
 
     private analyzeControllers(sourceFile: ts.SourceFile): ExpressSymbol[] {
@@ -160,13 +168,19 @@ export class ExpressAnalyzer implements LanguageAnalyzer {
     }
 
     private isController(node: ts.ClassDeclaration): boolean {
-        const hasControllerName = node.name?.text.toLowerCase().includes('controller');
-        const hasRequestResponseMethods = node.members.some(member => 
-            ts.isMethodDeclaration(member) && 
-            member.parameters.length >= 2 &&
-            member.parameters[0].type?.getText().includes('Request') &&
-            member.parameters[1].type?.getText().includes('Response')
-        );
+        const hasControllerName = node.name?.text?.toLowerCase().includes('controller') === true;
+        const hasRequestResponseMethods = node.members.some(member => {
+            if (!ts.isMethodDeclaration(member)) {
+                return false;
+            }
+            const params = member.parameters;
+            if (params.length < 2) {
+                return false;
+            }
+            const [req, res] = params;
+            return req.type?.getText().includes('Request') === true && 
+                   res.type?.getText().includes('Response') === true;
+        });
         return hasControllerName || hasRequestResponseMethods;
     }
 

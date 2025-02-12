@@ -74,6 +74,16 @@
                 "name": "localai",
                 "type": "local",
                 "defaultEndpoint": "http://localhost:8080"
+            },
+            {
+                "name": "deepseek",
+                "type": "local",
+                "defaultEndpoint": "http://localhost:8081"
+            },
+            {
+                "name": "qwen",
+                "type": "local",
+                "defaultEndpoint": "http://localhost:8082"
             }
         ],
         "features": {
@@ -146,6 +156,30 @@
                     "apiKeyManagement": true,
                     "endpointConfiguration": true,
                     "themeCustomization": true
+                }
+            },
+            "composer": {
+                "layout": "vertical",
+                "description": "Cursor benzeri lokal AI development asistanı",
+                "features": {
+                    "modelSelector": true,
+                    "codeHighlighting": true,
+                    "markdownSupport": true,
+                    "terminalIntegration": true,
+                    "fileExplorer": true,
+                    "autoApply": true,
+                    "rollback": true,
+                    "reApply": true,
+                    "taskSplitting": true,
+                    "parallelExecution": true
+                },
+                "agentCapabilities": {
+                    "codeEditing": true,
+                    "terminalCommands": true,
+                    "fileOperations": true,
+                    "contextAwareness": true,
+                    "sequentialEditing": true,
+                    "taskOrchestration": true
                 }
             }
         },
