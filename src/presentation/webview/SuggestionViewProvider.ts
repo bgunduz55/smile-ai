@@ -1,8 +1,8 @@
 import * as vscode from 'vscode';
-import { ChatService } from '../application/services/ChatService';
+import { ChatService } from '../../application/services/ChatService';
 
-export class RulesViewProvider implements vscode.WebviewViewProvider {
-    public static readonly viewType = 'smile-ai.rulesView';
+export class SuggestionViewProvider implements vscode.WebviewViewProvider {
+    public static readonly viewType = 'smile-ai.suggestionView';
     private _view?: vscode.WebviewView;
 
     constructor(
@@ -28,9 +28,9 @@ export class RulesViewProvider implements vscode.WebviewViewProvider {
     }
 
     private _getHtmlForWebview(webview: vscode.Webview): string {
-        const scriptUri = webview.asWebviewUri(vscode.Uri.joinPath(this.extensionUri, 'media', 'rules.js'));
+        const scriptUri = webview.asWebviewUri(vscode.Uri.joinPath(this.extensionUri, 'media', 'suggestion.js'));
         const styleMainUri = webview.asWebviewUri(vscode.Uri.joinPath(this.extensionUri, 'media', 'main.css'));
-        const styleRulesUri = webview.asWebviewUri(vscode.Uri.joinPath(this.extensionUri, 'media', 'rules.css'));
+        const styleSuggestionUri = webview.asWebviewUri(vscode.Uri.joinPath(this.extensionUri, 'media', 'suggestion.css'));
         const codiconsUri = webview.asWebviewUri(vscode.Uri.joinPath(this.extensionUri, 'node_modules', '@vscode/codicons', 'dist', 'codicon.css'));
 
         return `<!DOCTYPE html>
@@ -39,17 +39,17 @@ export class RulesViewProvider implements vscode.WebviewViewProvider {
                 <meta charset="UTF-8">
                 <meta name="viewport" content="width=device-width, initial-scale=1.0">
                 <link href="${styleMainUri}" rel="stylesheet">
-                <link href="${styleRulesUri}" rel="stylesheet">
+                <link href="${styleSuggestionUri}" rel="stylesheet">
                 <link href="${codiconsUri}" rel="stylesheet">
-                <title>Rules</title>
+                <title>Suggestions</title>
             </head>
             <body>
-                <div class="rules-container">
-                    <div class="rules-list" id="rulesList"></div>
-                    <div class="rules-input-container">
-                        <input type="text" id="ruleInput" placeholder="Enter rule name...">
-                        <button id="addButton" class="add-button">
-                            <i class="codicon codicon-add"></i>
+                <div class="suggestion-container">
+                    <div class="suggestion-list" id="suggestionList"></div>
+                    <div class="suggestion-input-container">
+                        <textarea id="suggestionInput" placeholder="Type your suggestion..."></textarea>
+                        <button id="sendButton" class="send-button">
+                            <i class="codicon codicon-send"></i>
                         </button>
                     </div>
                 </div>
@@ -61,15 +61,15 @@ export class RulesViewProvider implements vscode.WebviewViewProvider {
     private _setWebviewMessageListener(webview: vscode.Webview) {
         webview.onDidReceiveMessage(
             async (message: any) => {
-                const { command, rule } = message;
+                const { command, text } = message;
 
                 switch (command) {
-                    case 'getRules':
+                    case 'getSuggestions':
                         try {
-                            const rules = await this.chatService.getRules();
+                            const suggestions = await this.chatService.getSuggestions(text);
                             webview.postMessage({
-                                type: 'setRules',
-                                rules
+                                type: 'setSuggestions',
+                                suggestions
                             });
                         } catch (error) {
                             webview.postMessage({
@@ -79,27 +79,11 @@ export class RulesViewProvider implements vscode.WebviewViewProvider {
                         }
                         break;
 
-                    case 'addRule':
+                    case 'applySuggestion':
                         try {
-                            await this.chatService.addRule(rule);
+                            await this.chatService.applySuggestion(text);
                             webview.postMessage({
-                                type: 'ruleAdded',
-                                rule
-                            });
-                        } catch (error) {
-                            webview.postMessage({
-                                type: 'error',
-                                message: error instanceof Error ? error.message : 'An error occurred'
-                            });
-                        }
-                        break;
-
-                    case 'removeRule':
-                        try {
-                            await this.chatService.removeRule(rule);
-                            webview.postMessage({
-                                type: 'ruleRemoved',
-                                rule
+                                type: 'suggestionApplied'
                             });
                         } catch (error) {
                             webview.postMessage({

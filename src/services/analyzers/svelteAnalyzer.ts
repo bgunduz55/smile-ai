@@ -157,11 +157,12 @@ export class SvelteAnalyzer implements LanguageAnalyzer {
                 plugins: ['typescript', 'decorators-legacy']
             });
 
+            const self = this;
             traverse(ast, {
-                // Context tanımları
                 CallExpression(path) {
-                    if (this.isContextDefinition(path.node)) {
-                        symbols.push(this.createContextSymbol(path.node));
+                    const node = path.node as t.CallExpression;
+                    if (self.isContextDefinition(node)) {
+                        symbols.push(self.createContextSymbol(node));
                     }
                 }
             });
@@ -210,8 +211,16 @@ export class SvelteAnalyzer implements LanguageAnalyzer {
                ['writable', 'readable', 'derived'].includes(node.callee.name);
     }
 
+    private isContextDefinition(node: t.CallExpression): boolean {
+        return t.isIdentifier(node.callee) && 
+               ['getContext', 'setContext'].includes(node.callee.name);
+    }
+
     private isAction(node: t.FunctionDeclaration): boolean {
-        return node.id?.name.endsWith('Action') || false;
+        if (!node.id || !t.isIdentifier(node.id)) {
+            return false;
+        }
+        return node.id.name.endsWith('Action');
     }
 
     private isTransition(node: t.ObjectProperty): boolean {
@@ -220,11 +229,6 @@ export class SvelteAnalyzer implements LanguageAnalyzer {
 
     private isAnimation(node: t.ObjectProperty): boolean {
         return t.isIdentifier(node.key) && node.key.name.startsWith('animate');
-    }
-
-    private isContextDefinition(node: t.CallExpression): boolean {
-        return t.isIdentifier(node.callee) && 
-               ['getContext', 'setContext'].includes(node.callee.name);
     }
 
     private isCustomComponent(node: any): boolean {
@@ -241,9 +245,26 @@ export class SvelteAnalyzer implements LanguageAnalyzer {
         };
     }
 
-    private createActionSymbol(node: t.FunctionDeclaration): SvelteSymbol {
+    private createContextSymbol(node: t.CallExpression): SvelteSymbol {
         return {
-            name: node.id?.name || 'AnonymousAction',
+            name: t.isIdentifier(node.callee) ? node.callee.name : 'anonymous',
+            type: 'store',
+            location: this.getNodeLocation(node),
+            documentation: this.getNodeDocumentation(node)
+        };
+    }
+
+    private createActionSymbol(node: t.FunctionDeclaration): SvelteSymbol {
+        if (!node.id || !t.isIdentifier(node.id)) {
+            return {
+                name: 'AnonymousAction',
+                type: 'action',
+                location: this.getNodeLocation(node),
+                documentation: this.getNodeDocumentation(node)
+            };
+        }
+        return {
+            name: node.id.name,
             type: 'action',
             location: this.getNodeLocation(node),
             documentation: this.getNodeDocumentation(node)
@@ -294,8 +315,8 @@ export class SvelteAnalyzer implements LanguageAnalyzer {
             }
         });
         
-        if (parentNode && t.isVariableDeclarator(parentNode) && t.isIdentifier(parentNode.id)) {
-            return parentNode.id.name;
+        if (parentNode && t.isVariableDeclarator(parentNode)) {
+            return parentNode;
         }
         return undefined;
     }

@@ -122,23 +122,32 @@ export class ExpressAnalyzer implements LanguageAnalyzer {
     private analyzeMiddleware(sourceFile: ts.SourceFile): ExpressSymbol[] {
         const middleware: ExpressSymbol[] = [];
         const visit = (node: ts.Node) => {
-            if (ts.isFunctionDeclaration(node) && node.parameters.length >= 3) {
-                const [req, res, next] = node.parameters;
-                if (req && res && next && 
-                    req.type?.getText().includes('Request') && 
-                    res.type?.getText().includes('Response')) {
-                    middleware.push({
-                        type: 'middleware',
-                        name: node.name?.text || 'anonymous',
-                        documentation: this.getNodeDocumentation(node),
-                        location: this.getNodeLocation(node)
-                    });
-                }
+            if (this.isMiddleware(node) && ts.isFunctionDeclaration(node)) {
+                middleware.push({
+                    type: 'middleware',
+                    name: node.name?.text || 'anonymous',
+                    documentation: this.getNodeDocumentation(node),
+                    location: this.getNodeLocation(node)
+                });
             }
             ts.forEachChild(node, visit);
         };
         visit(sourceFile);
         return middleware;
+    }
+
+    private isMiddleware(node: ts.Node): boolean {
+        if (!ts.isFunctionDeclaration(node)) {
+            return false;
+        }
+        const params = node.parameters;
+        if (params.length < 3) {
+            return false;
+        }
+        const [req, res] = params;
+        const reqType = req.type?.getText() || '';
+        const resType = res.type?.getText() || '';
+        return reqType.includes('Request') && resType.includes('Response');
     }
 
     private analyzeControllers(sourceFile: ts.SourceFile): ExpressSymbol[] {
@@ -160,13 +169,20 @@ export class ExpressAnalyzer implements LanguageAnalyzer {
     }
 
     private isController(node: ts.ClassDeclaration): boolean {
-        const hasControllerName = node.name?.text.toLowerCase().includes('controller');
-        const hasRequestResponseMethods = node.members.some(member => 
-            ts.isMethodDeclaration(member) && 
-            member.parameters.length >= 2 &&
-            member.parameters[0].type?.getText().includes('Request') &&
-            member.parameters[1].type?.getText().includes('Response')
-        );
+        const hasControllerName = (node.name?.text || '').toLowerCase().includes('controller');
+        const hasRequestResponseMethods = node.members.some(member => {
+            if (!ts.isMethodDeclaration(member)) {
+                return false;
+            }
+            const params = member.parameters;
+            if (params.length < 2) {
+                return false;
+            }
+            const [req, res] = params;
+            const reqType = req.type?.getText() || '';
+            const resType = res.type?.getText() || '';
+            return reqType.includes('Request') && resType.includes('Response');
+        });
         return hasControllerName || hasRequestResponseMethods;
     }
 
@@ -194,14 +210,14 @@ export class ExpressAnalyzer implements LanguageAnalyzer {
     }
 
     private isModel(node: ts.ClassDeclaration): boolean {
-        const hasModelName = node.name?.text.toLowerCase().includes('model');
+        const hasModelName = (node.name?.text || '').toLowerCase().includes('model');
         const hasModelDecorator = ts.canHaveDecorators(node) && 
             ts.getDecorators(node)?.some(decorator => 
                 ts.isCallExpression(decorator.expression) &&
                 (decorator.expression.getText().includes('model') ||
                  decorator.expression.getText().includes('entity'))
-            );
-        return hasModelName || !!hasModelDecorator;
+            ) || false;
+        return hasModelName || hasModelDecorator;
     }
 
     private analyzeAuth(sourceFile: ts.SourceFile): ExpressSymbol[] {
@@ -222,10 +238,10 @@ export class ExpressAnalyzer implements LanguageAnalyzer {
     }
 
     private isAuthFunction(node: ts.FunctionDeclaration): boolean {
-        return node.name?.text.toLowerCase().includes('auth') ||
+        return (node.name?.text.toLowerCase().includes('auth') ||
                node.name?.text.toLowerCase().includes('passport') ||
                node.name?.text.toLowerCase().includes('login') ||
-               node.name?.text.toLowerCase().includes('logout');
+               node.name?.text.toLowerCase().includes('logout')) || false;
     }
 
     private analyzeDatabase(sourceFile: ts.SourceFile): ExpressSymbol[] {

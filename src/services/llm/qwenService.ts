@@ -1,262 +1,103 @@
 import * as vscode from 'vscode';
-import axios from 'axios';
-import { LLMService } from './llmService';
-import { AgentTask, TaskResult } from './types';
+import { BaseLLMService } from './llmService';
+import { SettingsService } from '../settingsService';
+import { RateLimiterService } from '../rateLimiterService';
+import { ErrorHandlingService } from '../errorHandlingService';
+import { OpenAI } from 'openai';
 
-interface QwenStats {
-    promptTokens: number;
-    completionTokens: number;
-    totalTokens: number;
-    duration: number;
-}
-
-interface PerformanceMetrics {
-    averageResponseTime: number;
-    tokensPerSecond: number;
-    totalTokensGenerated: number;
-    memoryUsage?: {
-        heapUsed: number;
-        heapTotal: number;
-        external: number;
-    };
-    gpuUsage?: {
-        memoryUsed: number;
-        utilization: number;
-    };
-}
-
-export class QwenService implements LLMService {
-    private static readonly DEFAULT_ENDPOINT = 'https://dashscope.aliyuncs.com/api/v1';
-    private static readonly DEFAULT_MODEL = 'qwen2.5-turbo';
-    private static readonly MAX_RETRIES = 3;
-    private static readonly RETRY_DELAY = 1000;
-
-    private endpoint: string;
-    private apiKey: string;
+export class QwenService extends BaseLLMService {
+    private client: OpenAI;
     private currentModel: string;
-    private statusBarItem: vscode.StatusBarItem;
-    private performanceMetrics: PerformanceMetrics = {
-        averageResponseTime: 0,
-        tokensPerSecond: 0,
-        totalTokensGenerated: 0
-    };
-    private errorCount: number = 0;
-    private lastError?: Error;
-    private isInitialized: boolean = false;
-    private disposables: vscode.Disposable[] = [];
 
-    constructor() {
-        const config = vscode.workspace.getConfiguration('smile-ai.qwen');
-        this.endpoint = config.get<string>('endpoint') || QwenService.DEFAULT_ENDPOINT;
-        this.apiKey = config.get<string>('apiKey') || '';
-        this.currentModel = config.get<string>('model') || QwenService.DEFAULT_MODEL;
-        this.statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right);
-        this.updateStatusBar();
-        this.initialize();
-        this.disposables.push(
-            vscode.workspace.onDidChangeConfiguration(e => {
-                if (e.affectsConfiguration('smile-ai.qwen')) {
-                    this.initialize();
-                }
-            })
-        );
-    }
-
-    private updateStatusBar(): void {
-        if (!this.isInitialized) {
-            this.statusBarItem.text = "$(sync~spin) Qwen";
-            this.statusBarItem.tooltip = "Qwen starting...";
-        } else if (this.lastError) {
-            this.statusBarItem.text = "$(error) Qwen";
-            this.statusBarItem.tooltip = `Error: ${this.lastError.message}`;
-        } else {
-            this.statusBarItem.text = "$(check) Qwen";
-            this.statusBarItem.tooltip = `Model: ${this.currentModel}\nTPS: ${this.performanceMetrics.tokensPerSecond.toFixed(2)}`;
+    constructor(
+        settingsService: SettingsService,
+        rateLimiter: RateLimiterService,
+        errorHandler: ErrorHandlingService
+    ) {
+        super(settingsService, rateLimiter, errorHandler);
+        const settings = settingsService.getSettings();
+        const endpoint = settings.providers.qwen.endpoint || 'https://dashscope.aliyuncs.com/api/v1';
+        const apiKey = settings.apiKeys.qwen;
+        
+        if (!apiKey) {
+            throw new Error('Qwen API key not found in settings');
         }
-        this.statusBarItem.show();
+
+        this.client = new OpenAI({
+            baseURL: endpoint,
+            apiKey
+        });
+
+        this.currentModel = settings.models.qwen.model;
     }
 
-    public async initialize(): Promise<void> {
+    public async generateResponse(prompt: string): Promise<string> {
         try {
-            if (!this.apiKey) {
-                throw new Error('Qwen API key is not configured');
-            }
+            await this.rateLimiter.checkRateLimit(prompt.length);
 
-            await this.checkConnection();
-            this.isInitialized = true;
-            this.updateStatusBar();
+            const response = await this.client.chat.completions.create({
+                model: this.currentModel,
+                messages: [{ role: 'user', content: prompt }],
+                temperature: 0.7,
+                max_tokens: 1000
+            });
+
+            const content = response.choices[0]?.message?.content || '';
+            await this.rateLimiter.incrementCounters(content.length);
+            return content;
         } catch (error) {
-            this.lastError = error instanceof Error ? error : new Error('Unknown error');
-            this.updateStatusBar();
+            await this.errorHandler.handleError(error);
             throw error;
         }
     }
 
-    private async checkConnection(): Promise<void> {
-        for (let i = 0; i < QwenService.MAX_RETRIES; i++) {
-            try {
-                const response = await axios.get(`${this.endpoint}/services/aigc/text-generation/generation`, {
-                    headers: {
-                        'Authorization': `Bearer ${this.apiKey}`
-                    }
-                });
-                if (response.status === 200) {
-                    return;
-                }
-            } catch (error) {
-                if (i === QwenService.MAX_RETRIES - 1) {
-                    if (error instanceof Error && error.message.includes('401')) {
-                        throw new Error('Invalid Qwen API key');
-                    }
-                    throw new Error('Qwen connection failed');
-                }
-                await new Promise(resolve => setTimeout(resolve, QwenService.RETRY_DELAY));
-            }
-        }
-    }
-
-    public async processTask(task: AgentTask): Promise<TaskResult> {
-        if (!this.isInitialized) {
-            throw new Error('Qwen service is not initialized');
-        }
-
-        const startTime = Date.now();
-
+    public async streamResponse<T>(prompt: string, onUpdate: (chunk: string) => void): Promise<T> {
         try {
-            const prompt = this.buildPrompt(task);
-            const config = vscode.workspace.getConfiguration('smile-ai.qwen');
-            
-            const response = await axios.post(
-                `${this.endpoint}/services/aigc/text-generation/generation`,
-                {
-                    model: this.currentModel,
-                    input: {
-                        messages: [
-                            {
-                                role: 'system',
-                                content: config.get<string>('systemPrompt') || 'You are a helpful AI assistant specialized in software development.'
-                            },
-                            {
-                                role: 'user',
-                                content: prompt
-                            }
-                        ]
-                    },
-                    parameters: {
-                        temperature: config.get<number>('temperature') ?? 0.7,
-                        top_p: config.get<number>('topP') ?? 0.9,
-                        max_tokens: config.get<number>('maxTokens') ?? 2048,
-                        stop: config.get<string[]>('stopTokens') ?? ['</s>', '<s>'],
-                        result_format: 'message',
-                        enable_search: config.get<boolean>('enableSearch') ?? true,
-                        seed: config.get<number>('seed'),
-                        repetition_penalty: config.get<number>('repetitionPenalty') ?? 1.1,
-                        top_k: config.get<number>('topK') ?? 50
-                    }
-                },
-                {
-                    headers: {
-                        'Authorization': `Bearer ${this.apiKey}`,
-                        'Content-Type': 'application/json'
-                    }
+            await this.rateLimiter.checkRateLimit(prompt.length);
+
+            const stream = await this.client.chat.completions.create({
+                model: this.currentModel,
+                messages: [{ role: 'user', content: prompt }],
+                temperature: 0.7,
+                max_tokens: 1000,
+                stream: true
+            });
+
+            let totalLength = 0;
+            for await (const chunk of stream) {
+                const content = chunk.choices[0]?.delta?.content || '';
+                if (content) {
+                    totalLength += content.length;
+                    onUpdate(content);
                 }
-            );
-
-            const stats: QwenStats = {
-                promptTokens: response.data.usage?.input_tokens || 0,
-                completionTokens: response.data.usage?.output_tokens || 0,
-                totalTokens: response.data.usage?.total_tokens || 0,
-                duration: Date.now() - startTime
-            };
-
-            this.updatePerformanceMetrics(stats);
-
-            return {
-                success: true,
-                output: response.data.output?.text || '',
-                metadata: {
-                    tokensUsed: stats.totalTokens,
-                    executionTime: stats.duration,
-                    modelName: this.currentModel
-                }
-            };
-        } catch (error) {
-            this.handleError(error);
-            return {
-                success: false,
-                output: '',
-                error: this.lastError?.message || 'Unknown error',
-                metadata: {
-                    tokensUsed: 0,
-                    executionTime: Date.now() - startTime,
-                    modelName: this.currentModel
-                }
-            };
-        }
-    }
-
-    private updatePerformanceMetrics(stats: QwenStats): void {
-        const tokensPerSecond = stats.totalTokens / (stats.duration / 1000);
-        
-        this.performanceMetrics.totalTokensGenerated += stats.totalTokens;
-        this.performanceMetrics.averageResponseTime = 
-            (this.performanceMetrics.averageResponseTime + stats.duration) / 2;
-        this.performanceMetrics.tokensPerSecond = 
-            (this.performanceMetrics.tokensPerSecond + tokensPerSecond) / 2;
-
-        this.updateStatusBar();
-    }
-
-    private handleError(error: unknown): void {
-        this.errorCount++;
-        this.lastError = error instanceof Error ? error : new Error('Unknown error');
-        this.updateStatusBar();
-
-        if (this.errorCount >= QwenService.MAX_RETRIES) {
-            this.errorCount = 0;
-            if (this.lastError.message.includes('401')) {
-                vscode.window.showErrorMessage(
-                    'Qwen API key is invalid or expired',
-                    'Update API Key'
-                ).then(selection => {
-                    if (selection === 'Update API Key') {
-                        vscode.commands.executeCommand('workbench.action.openSettings', 'smile-ai.qwen.apiKey');
-                    }
-                });
-            } else {
-                vscode.window.showErrorMessage(
-                    `Qwen service encountered multiple errors. Please check your connection.`,
-                    'Retry Connection'
-                ).then(selection => {
-                    if (selection === 'Retry Connection') {
-                        this.initialize().catch(console.error);
-                    }
-                });
             }
+
+            await this.rateLimiter.incrementCounters(totalLength);
+            return {} as T;
+        } catch (error) {
+            await this.errorHandler.handleError(error);
+            throw error;
         }
     }
 
-    private buildPrompt(task: AgentTask): string {
-        let prompt = task.input;
-        
-        if (task.context) {
-            prompt = `Context:\n${task.context}\n\nTask:\n${task.input}`;
-        }
-
-        if (task.constraints) {
-            prompt += `\n\nConstraints:\n${JSON.stringify(task.constraints, null, 2)}`;
-        }
-
-        return prompt;
+    public async getAvailableModels(): Promise<string[]> {
+        return [
+            'qwen2.5-turbo',
+            'qwen2.5-pro',
+            'qwen1.5-72b',
+            'qwen1.5-14b'
+        ];
     }
 
     public async setModel(model: string): Promise<void> {
         this.currentModel = model;
-        await vscode.workspace.getConfiguration('smile-ai.qwen').update('model', model, true);
+    }
+
+    public async processTask(task: string): Promise<string> {
+        return this.generateResponse(task);
     }
 
     public dispose(): void {
-        this.disposables.forEach(d => d.dispose());
-        this.statusBarItem.dispose();
+        // Clean up resources if needed
     }
 } 

@@ -2,6 +2,14 @@ import * as vscode from 'vscode';
 import axios from 'axios';
 import { LLMService } from './llmService';
 import { AgentTask, TaskResult } from './types';
+import { v4 as uuidv4 } from 'uuid';
+import { IAIService, AIModelConfig } from '../../domain/interfaces/IAIService';
+import { Message } from '../../domain/entities/Message';
+import { OpenAI } from 'openai';
+import { SettingsService } from '../settingsService';
+import { RateLimiterService } from '../rateLimiterService';
+import { ErrorHandlingService } from '../errorHandlingService';
+import { BaseLLMService } from './llmService';
 
 interface OllamaModel {
     name: string;
@@ -71,9 +79,23 @@ interface PerformanceMetrics {
     };
 }
 
-export class OllamaService implements LLMService {
+interface OllamaResponse {
+    model: string;
+    created_at: string;
+    response: string;
+    done: boolean;
+    context?: number[];
+    total_duration?: number;
+    load_duration?: number;
+    prompt_eval_duration?: number;
+    eval_duration?: number;
+    prompt_tokens?: number;
+    eval_tokens?: number;
+}
+
+export class OllamaService extends BaseLLMService {
     private endpoint: string;
-    private currentModel: string;
+    private currentModel: string = 'llama2';
     private models: OllamaModel[] = [];
     private statusBarItem: vscode.StatusBarItem;
     private performanceMetrics: PerformanceMetrics = {
@@ -85,10 +107,13 @@ export class OllamaService implements LLMService {
     private lastError?: Error;
     private isInitialized: boolean = false;
 
-    constructor() {
-        const config = vscode.workspace.getConfiguration('smile-ai.ollama');
-        this.endpoint = config.get('endpoint') || 'http://localhost:11434';
-        this.currentModel = config.get('defaultModel') || 'llama2';
+    constructor(
+        settingsService: SettingsService,
+        rateLimiter: RateLimiterService,
+        errorHandler: ErrorHandlingService
+    ) {
+        super(settingsService, rateLimiter, errorHandler);
+        this.endpoint = this.settingsService.getConfiguration<string>('ollama.endpoint', 'http://localhost:11434');
         this.statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right);
         this.updateStatusBar();
     }
@@ -100,7 +125,6 @@ export class OllamaService implements LLMService {
         } else if (this.lastError) {
             this.statusBarItem.text = "$(error) Ollama";
             this.statusBarItem.tooltip = `Error: ${this.lastError.message}`;
-
         } else {
             this.statusBarItem.text = "$(check) Ollama";
             this.statusBarItem.tooltip = `Model: ${this.currentModel}\nTPS: ${this.performanceMetrics.tokensPerSecond.toFixed(2)}`;
@@ -119,7 +143,6 @@ export class OllamaService implements LLMService {
             this.updateStatusBar();
             throw error;
         }
-
     }
 
     private async checkGPUSupport(): Promise<void> {
@@ -137,64 +160,83 @@ export class OllamaService implements LLMService {
         }
     }
 
-
-    private async loadModels(): Promise<void> {
+    public async loadModels(): Promise<string[]> {
         try {
             const response = await axios.get(`${this.endpoint}/api/tags`);
-            this.models = response.data.models;
+            const models = response.data.models || [];
+            const modelNames = models.map((model: any) => model.name);
             
-            // Model metadata'sını güncelle
-            if (this.currentModel) {
-                await this.updateModelMetadata(this.currentModel);
+            // Modelleri ayarlara kaydet
+            await this.settingsService.updateProviderSettings('ollama', {
+                models: modelNames
+            });
+
+            if (modelNames.length > 0) {
+                await this.setModel(modelNames[0]);
             }
+
+            return modelNames;
         } catch (error) {
             console.error('Error loading models:', error);
-            throw new Error('Could not load Ollama models. Ensure Ollama service is running.');
+            return [];
         }
     }
 
-
-    private async updateModelMetadata(modelName: string): Promise<void> {
+    public async updateModelMetadata(modelName: string): Promise<void> {
         try {
             const response = await axios.get(`${this.endpoint}/api/show`, {
                 params: { name: modelName }
             });
             
-            const model = this.models.find(m => m.name === modelName);
-            if (model) {
-                Object.assign(model.details, response.data.details);
+            if (response.data) {
+                const settings = this.settingsService.getSettings();
+                const ollamaSettings = settings.providers.ollama || {};
+                
+                await this.settingsService.updateProviderSettings('ollama', {
+                    ...ollamaSettings,
+                    modelMetadata: {
+                        ...ollamaSettings.modelMetadata,
+                        [modelName]: {
+                            ...response.data,
+                            lastUpdated: new Date().toISOString()
+                        }
+                    }
+                });
             }
         } catch (error) {
-            console.warn(`Could not update model metadata (${modelName}):`, error);
+            console.error(`Error updating model metadata for ${modelName}:`, error);
         }
     }
 
-
-    public async listModels(): Promise<OllamaModel[]> {
-        return this.models;
+    public async getAvailableModels(): Promise<string[]> {
+        try {
+            const response = await axios.get(`${this.endpoint}/api/tags`);
+            return response.data.models.map((model: OllamaModel) => model.name);
+        } catch (error) {
+            this.errorHandler.handleError(error);
+            return [];
+        }
     }
 
-    public async setModel(modelName: string): Promise<void> {
-        if (!this.models.some(m => m.name === modelName)) {
-            throw new Error(`Model not found: ${modelName}`);
+    public async setModel(model: string): Promise<void> {
+        if (!this.models.some(m => m.name === model)) {
+            throw new Error(`Model not found: ${model}`);
         }
-        this.currentModel = modelName;
-        await this.updateModelMetadata(modelName);
-
-        await vscode.workspace.getConfiguration('smile-ai.ollama').update('defaultModel', modelName, true);
+        this.currentModel = model;
+        await this.updateModelMetadata(model);
+        await vscode.workspace.getConfiguration('smile-ai.ollama').update('defaultModel', model, true);
         this.updateStatusBar();
     }
 
-    public async processTask(task: AgentTask): Promise<TaskResult> {
+    public async processTask(task: string): Promise<string> {
         const startTime = Date.now();
 
         try {
-            const prompt = this.buildPrompt(task);
             const config = vscode.workspace.getConfiguration('smile-ai.ollama');
             
             const options: OllamaGenerateOptions = {
                 model: this.currentModel,
-                prompt,
+                prompt: task,
                 options: {
                     temperature: config.get('temperature') ?? 0.7,
                     top_p: config.get('topP') ?? 0.9,
@@ -210,40 +252,12 @@ export class OllamaService implements LLMService {
             const stats: OllamaModelStats = response.data.stats || {};
             const executionTime = Date.now() - startTime;
 
-            // Performans metriklerini güncelle
             this.updatePerformanceMetrics(stats, executionTime);
 
-            return {
-                success: true,
-                output: response.data.response,
-                metadata: {
-                    tokensUsed: stats.totalTokens || 0,
-                    executionTime,
-                    modelName: this.currentModel,
-                    memoryUsage: this.performanceMetrics.memoryUsage ? {
-                        heapUsed: this.performanceMetrics.memoryUsage.used,
-                        heapTotal: this.performanceMetrics.memoryUsage.total,
-                        external: 0
-                    } : undefined,
-                    gpuUsage: this.performanceMetrics.gpuUtilization ? {
-                        memoryUsed: 0, // GPU bellek kullanımı bilgisi şu anda mevcut değil
-                        utilization: this.performanceMetrics.gpuUtilization
-                    } : undefined
-                }
-            };
+            return response.data.response;
         } catch (error) {
             this.handleError(error);
-            return {
-                success: false,
-                output: '',
-                error: error instanceof Error ? error.message : 'Unknown error',
-                metadata: {
-                    tokensUsed: 0,
-                    executionTime: Date.now() - startTime,
-                    modelName: this.currentModel
-                }
-
-            };
+            throw error;
         }
     }
 
@@ -263,31 +277,12 @@ export class OllamaService implements LLMService {
         this.errorCount++;
         this.lastError = error instanceof Error ? error : new Error('Unknown error');
         
-
-        // Show error status
         this.updateStatusBar();
-        
-
-        // Restart the service after a certain number of errors
 
         if (this.errorCount >= 5) {
             this.errorCount = 0;
             this.initialize().catch(console.error);
         }
-    }
-
-    private buildPrompt(task: AgentTask): string {
-        let prompt = task.input;
-        
-        if (task.context) {
-            prompt = `Context:\n${task.context}\n\nTask:\n${task.input}`;
-        }
-
-        if (task.constraints) {
-            prompt += `\n\nConstraints:\n${JSON.stringify(task.constraints, null, 2)}`;
-        }
-
-        return prompt;
     }
 
     public getPerformanceMetrics(): PerformanceMetrics {
@@ -296,5 +291,84 @@ export class OllamaService implements LLMService {
 
     public dispose(): void {
         this.statusBarItem.dispose();
+    }
+
+    async generateResponse(prompt: string): Promise<string> {
+        try {
+            const response = await axios.post<OllamaResponse>(`${this.endpoint}/api/generate`, {
+                model: this.currentModel,
+                prompt,
+                stream: false,
+                options: {
+                    temperature: this.settingsService.getConfiguration<number>('temperature', 0.7),
+                    num_predict: this.settingsService.getConfiguration<number>('maxTokens', 2048)
+                }
+            });
+
+            return response.data.response;
+        } catch (error) {
+            if (axios.isAxiosError(error)) {
+                throw new Error(`Ollama API error: ${error.response?.data?.message || error.message}`);
+            }
+            throw error;
+        }
+    }
+
+    async streamResponse<T>(
+        prompt: string,
+        onChunk: (chunk: string) => void
+    ): Promise<T> {
+        try {
+            const response = await axios.post(`${this.endpoint}/api/generate`, {
+                model: this.currentModel,
+                prompt,
+                stream: true,
+                options: {
+                    temperature: this.settingsService.getConfiguration<number>('temperature', 0.7),
+                    num_predict: this.settingsService.getConfiguration<number>('maxTokens', 2048)
+                }
+            }, {
+                responseType: 'text',
+                transformResponse: (data) => data // Prevent JSON parsing
+            });
+
+            let fullResponse = '';
+            let metadata: any = {};
+
+            // Split the response by newlines and parse each line as JSON
+            const lines = response.data.split('\n').filter(Boolean);
+            for (const line of lines) {
+                const data: OllamaResponse = JSON.parse(line);
+                fullResponse += data.response;
+                onChunk(data.response);
+
+                if (data.done) {
+                    metadata = {
+                        model: this.currentModel,
+                        provider: 'ollama',
+                        tokens: data.eval_tokens,
+                        totalDuration: data.total_duration,
+                        promptEvalDuration: data.prompt_eval_duration,
+                        evalDuration: data.eval_duration
+                    };
+                }
+            }
+
+            return fullResponse as T;
+        } catch (error) {
+            if (axios.isAxiosError(error)) {
+                throw new Error(`Ollama API error: ${error.response?.data?.message || error.message}`);
+            }
+            throw error;
+        }
+    }
+
+    async validateConfig(config: AIModelConfig): Promise<boolean> {
+        try {
+            const models = await this.getAvailableModels();
+            return models.includes(config.model);
+        } catch {
+            return false;
+        }
     }
 } 

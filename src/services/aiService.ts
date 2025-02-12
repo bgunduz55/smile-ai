@@ -9,6 +9,8 @@ import { QwenService } from './llm/qwenService';
 import { LLMService } from './llm/llmService';
 import { AgentTask, TaskResult } from './llm/types';
 import { SettingsService } from './settingsService';
+import { RateLimiterService } from './rateLimiterService';
+import { ErrorHandlingService } from './errorHandlingService';
 
 export class AIService implements vscode.Disposable {
     private static instance: AIService;
@@ -19,13 +21,16 @@ export class AIService implements vscode.Disposable {
     private localai: LocalAIService | null = null;
     private deepseek: DeepseekService | null = null;
     private qwen: QwenService | null = null;
-    private currentProvider: string = 'openai';
+    private currentProvider: string = 'ollama';
     private currentModel: string = '';
     private settingsService: SettingsService;
     private disposables: vscode.Disposable[] = [];
 
     private constructor() {
         this.settingsService = SettingsService.getInstance();
+        const rateLimiter = RateLimiterService.getInstance(this.settingsService);
+        const errorHandler = ErrorHandlingService.getInstance(this.settingsService);
+
         this.disposables.push(
             vscode.workspace.onDidChangeConfiguration(e => {
                 if (e.affectsConfiguration('smile-ai')) {
@@ -33,6 +38,9 @@ export class AIService implements vscode.Disposable {
                 }
             })
         );
+        
+        // Set default provider to Ollama
+        this.currentProvider = 'ollama';
         this.updateProvider();
     }
 
@@ -45,8 +53,8 @@ export class AIService implements vscode.Disposable {
 
     private async updateProvider(): Promise<void> {
         const settings = this.settingsService.getSettings();
-        this.currentProvider = settings.provider || 'openai';
-        const providerSettings = settings[this.currentProvider] || {};
+        this.currentProvider = settings.modelProvider || 'ollama';
+        const providerSettings = settings.providers[this.currentProvider] || {};
         this.currentModel = providerSettings.model || '';
         await this.initializeProvider();
     }
@@ -81,7 +89,9 @@ export class AIService implements vscode.Disposable {
 
     private async initializeOpenAI(): Promise<void> {
         if (!this.openai) {
-            this.openai = new OpenAIService();
+            this.openai = new OpenAIService(
+                this.settingsService.getSettings()
+            );
         }
         if (this.currentModel) {
             await this.openai.setModel(this.currentModel);
@@ -90,7 +100,11 @@ export class AIService implements vscode.Disposable {
 
     private async initializeAnthropic(): Promise<void> {
         if (!this.anthropic) {
-            this.anthropic = new AnthropicService();
+            this.anthropic = new AnthropicService(
+                this.settingsService,
+                RateLimiterService.getInstance(this.settingsService),
+                ErrorHandlingService.getInstance(this.settingsService)
+            );
         }
         if (this.currentModel) {
             await this.anthropic.setModel(this.currentModel);
@@ -99,8 +113,11 @@ export class AIService implements vscode.Disposable {
 
     private async initializeOllama(): Promise<void> {
         if (!this.ollama) {
-            this.ollama = new OllamaService();
-            await this.ollama.initialize();
+            this.ollama = new OllamaService(
+                this.settingsService,
+                RateLimiterService.getInstance(this.settingsService),
+                ErrorHandlingService.getInstance(this.settingsService)
+            );
         }
         if (this.currentModel) {
             await this.ollama.setModel(this.currentModel);
@@ -109,8 +126,11 @@ export class AIService implements vscode.Disposable {
 
     private async initializeLMStudio(): Promise<void> {
         if (!this.lmstudio) {
-            this.lmstudio = new LMStudioService();
-            await this.lmstudio.initialize();
+            this.lmstudio = new LMStudioService(
+                this.settingsService,
+                RateLimiterService.getInstance(this.settingsService),
+                ErrorHandlingService.getInstance(this.settingsService)
+            );
         }
         if (this.currentModel) {
             await this.lmstudio.setModel(this.currentModel);
@@ -119,8 +139,11 @@ export class AIService implements vscode.Disposable {
 
     private async initializeLocalAI(): Promise<void> {
         if (!this.localai) {
-            this.localai = new LocalAIService();
-            await this.localai.initialize();
+            this.localai = new LocalAIService(
+                this.settingsService,
+                RateLimiterService.getInstance(this.settingsService),
+                ErrorHandlingService.getInstance(this.settingsService)
+            );
         }
         if (this.currentModel) {
             await this.localai.setModel(this.currentModel);
@@ -129,8 +152,11 @@ export class AIService implements vscode.Disposable {
 
     private async initializeDeepseek(): Promise<void> {
         if (!this.deepseek) {
-            this.deepseek = new DeepseekService();
-            await this.deepseek.initialize();
+            this.deepseek = new DeepseekService(
+                this.settingsService,
+                RateLimiterService.getInstance(this.settingsService),
+                ErrorHandlingService.getInstance(this.settingsService)
+            );
         }
         if (this.currentModel) {
             await this.deepseek.setModel(this.currentModel);
@@ -139,8 +165,11 @@ export class AIService implements vscode.Disposable {
 
     private async initializeQwen(): Promise<void> {
         if (!this.qwen) {
-            this.qwen = new QwenService();
-            await this.qwen.initialize();
+            this.qwen = new QwenService(
+                this.settingsService,
+                RateLimiterService.getInstance(this.settingsService),
+                ErrorHandlingService.getInstance(this.settingsService)
+            );
         }
         if (this.currentModel) {
             await this.qwen.setModel(this.currentModel);
@@ -214,7 +243,11 @@ export class AIService implements vscode.Disposable {
             throw new Error('No AI service initialized');
         }
 
-        return await service.processTask(task);
+        const response = await service.processTask(task.input);
+        return {
+            success: true,
+            output: response
+        };
     }
 
     public dispose(): void {

@@ -2,24 +2,32 @@
 	"compilerOptions": {
 		"module": "commonjs",
 		"target": "ES2020",
-		"outDir": "out",
+		"outDir": "dist",
 		"lib": ["ES2020", "DOM"],
 		"sourceMap": true,
 		"rootDir": ".",
-		"strict": false,
-		"noImplicitReturns": false,
+		"strict": true,
+		"noImplicitReturns": true,
 		"noFallthroughCasesInSwitch": true,
-		"noUnusedParameters": false,
-		"noImplicitAny": false,
-		"noImplicitThis": false,
-		"strictNullChecks": false,
-		"strictFunctionTypes": false,
 		"noUnusedLocals": false,
-		"moduleResolution": "node",
-		"esModuleInterop": true,
+		"noImplicitAny": false,
+		"noUnusedParameters": false,
 		"skipLibCheck": true,
-		"forceConsistentCasingInFileNames": true
+		"forceConsistentCasingInFileNames": true,
+		"resolveJsonModule": true,
+		"allowSyntheticDefaultImports": true,
+		"baseUrl": ".",
+		"paths": {
+			"*": ["node_modules/*"]
+		},
+		"types": ["node", "vscode", "mocha"]
 	},
-	"include": ["src", "media"],
-	"exclude": ["node_modules", ".vscode-test"]
+	"include": [
+		"src/**/*",
+		"media/**/*"
+	],
+	"exclude": [
+		"node_modules",
+		".vscode-test"
+	]
 }
