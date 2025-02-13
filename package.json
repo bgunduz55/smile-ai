@@ -1,858 +1,268 @@
 {
   "name": "smile-ai",
   "displayName": "Smile AI",
-  "description": "Smile AI Coding Assistant Extension For Vscode",
+  "description": "Local AI powered coding assistant with agent capabilities",
   "version": "0.0.1",
   "publisher": "bgund",
-  "private": true,
-  "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/bgund/smile-ai"
+    "url": "https://github.com/bgunduz55/smile-ai"
   },
   "engines": {
-    "vscode": "^1.97.0"
+    "vscode": "^1.85.0"
   },
   "categories": [
+    "Programming Languages",
+    "Machine Learning",
     "Other"
   ],
-  "activationEvents": [],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
   "main": "./dist/extension.js",
-  "dependencies": {
-    "events": "^3.3.0",
-    "smile-ai": "file:"
-  },
-  "devDependencies": {
-    "@angular/compiler-cli": "^19.1.5",
-    "@anthropic-ai/sdk": "^0.36.3",
-    "@babel/parser": "^7.26.8",
-    "@babel/traverse": "^7.26.8",
-    "@babel/types": "^7.26.8",
-    "@types/events": "^3.0.3",
-    "@types/mocha": "^10.0.6",
-    "@types/node": "^18.19.75",
-    "@types/uuid": "^10.0.0",
-    "@types/vscode": "^1.97.0",
-    "@types/vscode-webview": "^1.57.4",
-    "@typescript-eslint/eslint-plugin": "^6.19.1",
-    "@typescript-eslint/parser": "^6.19.1",
-    "@vscode/codicons": "^0.0.35",
-    "@vscode/test-cli": "^0.0.4",
-    "@vscode/test-electron": "^2.3.9",
-    "@vscode/webview-ui-toolkit": "^1.4.0",
-    "@vue/compiler-dom": "^3.5.13",
-    "@vue/compiler-sfc": "^3.5.13",
-    "axios": "^1.7.9",
-    "copy-webpack-plugin": "^12.0.2",
-    "eslint": "^8.56.0",
-    "highlight.js": "^11.11.1",
-    "marked": "^15.0.7",
-    "openai": "^4.83.0",
-    "svelte": "^5.19.10",
-    "ts-loader": "^9.5.1",
-    "typescript": "^5.3.3",
-    "uuid": "^11.0.5",
-    "vscode": "^1.1.37",
-    "webpack": "^5.90.0",
-    "webpack-cli": "^5.1.4"
-  },
   "contributes": {
     "viewsContainers": {
       "activitybar": [
         {
-          "id": "smile-ai",
+          "id": "smile-ai-sidebar",
           "title": "Smile AI",
-          "icon": "media/smile.svg"
+          "icon": "resources/smile-ai-logo.png"
         }
       ]
     },
     "views": {
-      "smile-ai": [
+      "smile-ai-sidebar": [
         {
-          "type": "webview",
-          "id": "smile-ai.chatView",
-          "name": "Chat"
+          "id": "smile-ai-models",
+          "name": "AI Models",
+          "type": "tree",
+          "icon": "resources/model-icon.svg"
         },
         {
-          "type": "webview",
-          "id": "smile-ai.composerView",
-          "name": "Composer"
+          "id": "smile-ai-settings",
+          "name": "Settings",
+          "type": "tree",
+          "icon": "resources/settings-icon.svg"
         },
         {
+          "id": "smile-ai-assistant",
+          "name": "AI Assistant",
           "type": "webview",
-          "id": "smile-ai.settingsView",
-          "name": "Settings"
+          "icon": "resources/assistant-icon.svg"
+        }
+      ]
+    },
+    "menus": {
+      "view/title": [
+        {
+          "command": "smile-ai.addModel",
+          "when": "view == smile-ai-models",
+          "group": "navigation"
         },
         {
-          "type": "webview",
-          "id": "smile-ai.rulesView",
-          "name": "Rules"
+          "command": "smile-ai.refreshModels",
+          "when": "view == smile-ai-models",
+          "group": "navigation"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "smile-ai.selectActiveModel",
+          "when": "view == smile-ai-models && viewItem == aiModel",
+          "group": "inline"
+        },
+        {
+          "command": "smile-ai.removeModel",
+          "when": "view == smile-ai-models && viewItem == aiModel",
+          "group": "inline"
         }
       ]
     },
     "commands": [
       {
-        "command": "smile-ai.helloWorld",
-        "title": "Hello World"
-      }
-    ],
-    "keybindings": [
-      {
-        "command": "smile-ai.startComposer",
-        "key": "ctrl+shift+c",
-        "mac": "cmd+shift+c"
+        "command": "smile-ai.startChat",
+        "title": "Smile AI: Start Chat"
       },
       {
-        "command": "smile-ai.switchView",
-        "key": "ctrl+tab",
-        "mac": "cmd+tab",
-        "when": "activeViewContainer == smile-ai-sidebar"
+        "command": "smile-ai.startComposer",
+        "title": "Smile AI: Start Composer"
+      },
+      {
+        "command": "smile-ai.analyzeCode",
+        "title": "Smile AI: Analyze Code"
+      },
+      {
+        "command": "smile-ai.generateTests",
+        "title": "Smile AI: Generate Tests"
+      },
+      {
+        "command": "smile-ai.refactorCode",
+        "title": "Smile AI: Refactor Code"
+      },
+      {
+        "command": "smile-ai.explainCode",
+        "title": "Smile AI: Explain Code"
+      },
+      {
+        "command": "smile-ai.reindexCodebase",
+        "title": "Smile AI: Reindex Codebase"
+      },
+      {
+        "command": "smile-ai.addModel",
+        "title": "Smile AI: Add AI Model"
+      },
+      {
+        "command": "smile-ai.removeModel",
+        "title": "Smile AI: Remove AI Model"
+      },
+      {
+        "command": "smile-ai.selectActiveModel",
+        "title": "Smile AI: Select Active Model"
       }
     ],
     "configuration": {
       "title": "Smile AI",
       "properties": {
-        "smile-ai.provider": {
+        "smile-ai.aiProvider": {
           "type": "string",
           "default": "ollama",
           "enum": [
             "ollama",
-            "openai",
-            "anthropic",
-            "lmstudio",
-            "localai",
-            "deepseek",
-            "qwen"
+            "lmstudio"
           ],
-          "description": "Active AI provider"
+          "description": "Select the local AI provider"
         },
-        "smile-ai.ollama": {
-          "type": "object",
-          "title": "Ollama Configuration",
-          "properties": {
-            "endpoint": {
-              "type": "string",
-              "default": "http://localhost:11434",
-              "description": "Ollama API endpoint"
-            },
-            "model": {
-              "type": "string",
-              "description": "Active Ollama model"
-            },
-            "defaultModel": {
-              "type": "string",
-              "default": "codellama",
-              "description": "Default Ollama model to use"
-            },
-            "models": {
-              "type": "array",
-              "items": {
-                "type": "string"
-              },
-              "default": [],
-              "description": "Available Ollama models"
-            },
-            "activeModels": {
-              "type": "array",
-              "items": {
-                "type": "string"
-              },
-              "description": "Active Ollama models"
-            }
-          }
-        },
-        "smile-ai.ollama.endpoint": {
-          "type": "string",
-          "default": "http://localhost:11434",
-          "description": "Ollama API endpoint"
-        },
-        "smile-ai.ollama.model": {
-          "type": "string",
-          "description": "Active Ollama model"
-        },
-        "smile-ai.ollama.models": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          },
-          "description": "Available Ollama models"
-        },
-        "smile-ai.ollama.activeModels": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          },
-          "description": "Active Ollama models"
-        },
-        "smile-ai.openai.apiKey": {
-          "type": "string",
-          "description": "OpenAI API key"
-        },
-        "smile-ai.openai.model": {
-          "type": "string",
-          "description": "Active OpenAI model"
-        },
-        "smile-ai.openai.activeModels": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          },
-          "description": "Active OpenAI models"
-        },
-        "smile-ai.anthropic.apiKey": {
-          "type": "string",
-          "description": "Anthropic API key"
-        },
-        "smile-ai.anthropic.model": {
-          "type": "string",
-          "description": "Active Anthropic model"
-        },
-        "smile-ai.anthropic.activeModels": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          },
-          "description": "Active Anthropic models"
-        },
-        "smile-ai.deepseek.apiKey": {
-          "type": "string",
-          "default": "",
-          "description": "Deepseek API anahtarı"
-        },
-        "smile-ai.deepseek.endpoint": {
-          "type": "string",
-          "default": "https://api.deepseek.com/v1",
-          "description": "Deepseek API endpoint URL'si"
-        },
-        "smile-ai.deepseek.models": {
+        "smile-ai.models": {
           "type": "array",
           "default": [
-            "deepseek-coder-33b-instruct",
-            "deepseek-coder-6.7b-instruct",
-            "deepseek-coder-1.3b-instruct"
+            {
+              "name": "CodeLlama",
+              "provider": "ollama",
+              "modelName": "codellama",
+              "apiEndpoint": "http://localhost:11434",
+              "maxTokens": 2048,
+              "temperature": 0.7
+            }
           ],
-          "description": "Kullanılabilir Deepseek modelleri"
-        },
-        "smile-ai.qwen.apiKey": {
-          "type": "string",
-          "default": "",
-          "description": "Qwen API anahtarı"
-        },
-        "smile-ai.qwen.endpoint": {
-          "type": "string",
-          "default": "https://dashscope.aliyuncs.com/api/v1",
-          "description": "Qwen API endpoint URL'si"
-        },
-        "smile-ai.qwen.models": {
-          "type": "array",
-          "default": [
-            "qwen2.5-turbo",
-            "qwen2.5-pro",
-            "qwen1.5-72b",
-            "qwen1.5-14b"
-          ],
-          "description": "Kullanılabilir Qwen modelleri"
-        },
-        "smile-ai.temperature": {
-          "type": "number",
-          "default": 0.7,
-          "minimum": 0,
-          "maximum": 1,
-          "description": "Temperature for response generation"
-        },
-        "smile-ai.maxTokens": {
-          "type": "number",
-          "default": 2048,
-          "minimum": 1,
-          "description": "Maximum tokens for response generation"
-        },
-        "smile-ai.modelSettings": {
-          "type": "object",
-          "properties": {
-            "ollama": {
-              "type": "object",
-              "properties": {
-                "modelPath": {
-                  "type": "string",
-                  "description": "Ollama model file path"
-                },
-                "apiEndpoint": {
-                  "type": "string",
-                  "default": "http://localhost:11434",
-                  "description": "Ollama API endpoint"
-                }
-              }
-            },
-            "llamacpp": {
-              "type": "object",
-              "properties": {
-                "modelPath": {
-                  "type": "string",
-                  "description": "LlamaCpp model file path"
-                }
-              }
-            },
-            "openai": {
-              "type": "object",
-              "properties": {
-                "apiKey": {
-                  "type": "string",
-                  "description": "OpenAI API key"
-                },
-                "model": {
-                  "type": "string",
-                  "default": "gpt-4",
-                  "description": "OpenAI model"
-                }
-              }
-            },
-            "anthropic": {
-              "type": "object",
-              "properties": {
-                "apiKey": {
-                  "type": "string",
-                  "description": "Anthropic API key"
-                },
-                "model": {
-                  "type": "string",
-                  "default": "claude-3-opus-20240229",
-                  "description": "Anthropic model"
-                }
-              }
-            }
-          }
-        },
-        "smile-ai.modelParameters": {
-          "type": "object",
-          "properties": {
-            "temperature": {
-              "type": "number",
-              "default": 0.7,
-              "description": "Model temperature value (0-1)"
-            },
-            "maxTokens": {
-              "type": "number",
-              "default": 2048,
-              "description": "Maximum token count"
-            },
-            "contextSize": {
-              "type": "number",
-              "default": 4096,
-              "description": "Model context size"
-            }
-          }
-        },
-        "smile-ai.contextSize": {
-          "type": "number",
-          "default": 4096,
-          "description": "Model context size"
-        },
-        "smile-ai.gpu.enabled": {
-          "type": "boolean",
-          "default": true,
-          "description": "Enable GPU usage"
-        },
-        "smile-ai.gpu.layers": {
-          "type": "number",
-          "default": 32,
-          "description": "Number of layers to run on GPU"
-        },
-        "smile-ai.gpu.device": {
-          "type": "string",
-          "default": "cuda",
-          "enum": [
-            "cuda",
-            "metal",
-            "directml"
-          ],
-          "description": "GPU device to use"
-        },
-        "smile-ai.performance.batchSize": {
-          "type": "number",
-          "default": 512,
-          "description": "Model batch size"
-        },
-        "smile-ai.performance.threads": {
-          "type": "number",
-          "default": 4,
-          "description": "Number of CPU threads to use"
-        },
-        "smile-ai.performance.useMlock": {
-          "type": "boolean",
-          "default": true,
-          "description": "Lock the model memory to improve performance"
-        },
-        "smile-ai.performance.useMemorymap": {
-          "type": "boolean",
-          "default": true,
-          "description": "Use memory mapping to optimize memory usage"
-        },
-        "smile-ai.caching.enabled": {
-          "type": "boolean",
-          "default": true,
-          "description": "Enable caching of model outputs"
-        },
-        "smile-ai.caching.maxSize": {
-          "type": "number",
-          "default": 1073741824,
-          "description": "Maximum cache size (bytes)"
-        },
-        "smile-ai.caching.ttl": {
-          "type": "number",
-          "default": 3600000,
-          "description": "Cache entry lifetime (ms)"
-        },
-        "smile-ai.lmstudio": {
-          "type": "object",
-          "title": "LM Studio Yapılandırması",
-          "properties": {
-            "endpoint": {
-              "type": "string",
-              "default": "http://localhost:1234/v1",
-              "description": "LM Studio API endpoint address"
-            },
-            "model": {
-              "type": "string",
-              "description": "Active LM Studio model"
-            },
-            "models": {
-              "type": "array",
-              "items": {
-                "type": "string"
-              },
-              "description": "Available LM Studio models"
-            },
-            "activeModels": {
-              "type": "array",
-              "items": {
-                "type": "string"
-              },
-              "description": "Active LM Studio models"
-            },
-            "temperature": {
-              "type": "number",
-              "default": 0.7,
-              "minimum": 0,
-              "maximum": 1,
-              "description": "Model temperature value"
-            }
-          }
-        },
-        "smile-ai.localai": {
-          "type": "object",
-          "title": "LocalAI Configuration",
-          "properties": {
-            "endpoint": {
-              "type": "string",
-              "default": "http://localhost:8080/v1",
-              "description": "LocalAI API endpoint address"
-            },
-            "model": {
-              "type": "string",
-              "description": "Active LocalAI model"
-            },
-            "models": {
-              "type": "array",
-              "items": {
-                "type": "string"
-              },
-              "description": "Available LocalAI models"
-            },
-            "activeModels": {
-              "type": "array",
-              "items": {
-                "type": "string"
-              },
-              "description": "Active LocalAI models"
-            }
-          }
-        },
-        "smile-ai.deepseek": {
-          "type": "object",
-          "title": "Deepseek Yapılandırması",
-          "properties": {
-            "endpoint": {
-              "type": "string",
-              "default": "https://api.deepseek.com/v1",
-              "description": "Deepseek API endpoint address"
-            },
-            "apiKey": {
-              "type": "string",
-              "description": "Deepseek API key"
-            },
-            "model": {
-              "type": "string",
-              "default": "deepseek-coder-33b-instruct",
-              "enum": [
-                "deepseek-coder-33b-instruct",
-                "deepseek-coder-6.7b-instruct",
-                "deepseek-coder-1.3b-instruct"
-              ],
-              "description": "Model to use"
-            },
-            "temperature": {
-              "type": "number",
-              "default": 0.7,
-              "minimum": 0,
-              "maximum": 1,
-              "description": "Model temperature value"
-            },
-            "topP": {
-              "type": "number",
-              "default": 0.9,
-              "minimum": 0,
-              "maximum": 1,
-              "description": "Top-p sampling value"
-            },
-            "maxTokens": {
-              "type": "number",
-              "default": 2048,
-              "description": "Maximum token count"
-            },
-            "stopTokens": {
-              "type": "array",
-              "items": {
-                "type": "string"
-              },
-              "default": [
-                "</s>",
-                "<s>"
-              ],
-              "description": "Tokens to stop response generation"
-            },
-            "systemPrompt": {
-              "type": "string",
-              "default": "You are a helpful AI assistant specialized in software development.",
-              "description": "System prompt"
-            },
-            "frequencyPenalty": {
-              "type": "number",
-              "default": 0,
-              "minimum": -2,
-              "maximum": 2,
-              "description": "Word repetition penalty"
-            },
-            "presencePenalty": {
-              "type": "number",
-              "default": 0,
-              "minimum": -2,
-              "maximum": 2,
-              "description": "Word repetition penalty"
-            }
-          }
-        },
-        "smile-ai.qwen": {
-          "type": "object",
-          "title": "Qwen Yapılandırması",
-          "properties": {
-            "endpoint": {
-              "type": "string",
-              "default": "https://dashscope.aliyuncs.com/api/v1",
-              "description": "Qwen API endpoint address"
-            },
-            "apiKey": {
-              "type": "string",
-              "description": "Qwen API key"
-            },
-            "model": {
-              "type": "string",
-              "default": "qwen2.5-turbo",
-              "enum": [
-                "qwen2.5-turbo",
-                "qwen2.5-pro",
-                "qwen1.5-72b",
-                "qwen1.5-14b"
-              ],
-              "description": "Model to use"
-            },
-            "temperature": {
-              "type": "number",
-              "default": 0.7,
-              "minimum": 0,
-              "maximum": 1,
-              "description": "Model temperature value"
-            },
-            "topP": {
-              "type": "number",
-              "default": 0.9,
-              "minimum": 0,
-              "maximum": 1,
-              "description": "Top-p sampling value"
-            },
-            "maxTokens": {
-              "type": "number",
-              "default": 2048,
-              "description": "Maximum token count"
-            },
-            "stopTokens": {
-              "type": "array",
-              "items": {
-                "type": "string"
-              },
-              "default": [
-                "</s>",
-                "<s>"
-              ],
-              "description": "Tokens to stop response generation"
-            },
-            "systemPrompt": {
-              "type": "string",
-              "default": "You are a helpful AI assistant specialized in software development.",
-              "description": "System prompt"
-            },
-            "enableSearch": {
-              "type": "boolean",
-              "default": true,
-              "description": "Enable web search feature"
-            },
-            "seed": {
-              "type": "number",
-              "description": "Seed value for random number generator"
-            },
-            "repetitionPenalty": {
-              "type": "number",
-              "default": 1.1,
-              "minimum": 1,
-              "maximum": 2,
-              "description": "Repetition penalty factor"
-            },
-            "topK": {
-              "type": "number",
-              "default": 50,
-              "minimum": 1,
-              "description": "Top-k sampling value"
-            }
-          }
-        },
-        "smile-ai.rules": {
-          "type": "object",
-          "title": "Smile Rules",
-          "properties": {
-            "rulesPath": {
-              "type": "string",
-              "default": ".smile",
-              "description": "Path to Smile rules folder"
-            },
-            "enabledRules": {
-              "type": "array",
-              "items": {
-                "type": "string"
-              },
-              "default": [
-                "code-style",
-                "naming",
-                "testing",
-                "documentation",
-                "git",
-                "architecture",
-                "security",
-                "performance"
-              ],
-              "description": "Active rule sets"
-            },
-            "customRules": {
-              "type": "array",
-              "items": {
-                "type": "object",
-                "properties": {
-                  "name": {
-                    "type": "string",
-                    "description": "Rule set name"
-                  },
-                  "path": {
-                    "type": "string",
-                    "description": "Path to rule file"
-                  },
-                  "description": {
-                    "type": "string",
-                    "description": "Rule set description"
-                  }
-                }
-              },
-              "default": [],
-              "description": "Custom rule sets"
-            },
-            "overrides": {
-              "type": "object",
-              "default": {},
-              "description": "Rule overrides"
-            }
-          }
-        },
-        "smile-ai.rules.codeStyle": {
-          "type": "object",
-          "title": "Code Style",
-          "properties": {
-            "indentSize": {
-              "type": "number",
-              "default": 4,
-              "description": "Indent size"
-            },
-            "useTabs": {
-              "type": "boolean",
-              "default": false,
-              "description": "Use tabs"
-            },
-            "maxLineLength": {
-              "type": "number",
-              "default": 80,
-              "description": "Maximum line length"
-            },
-            "quoteStyle": {
-              "type": "string",
-              "enum": [
-                "single",
-                "double"
-              ],
-              "default": "single",
-              "description": "Quote style"
-            },
-            "semicolons": {
-              "type": "boolean",
-              "default": true,
-              "description": "Use semicolons"
-            }
-          }
-        },
-        "smile-ai.rules.naming": {
-          "type": "object",
-          "title": "Naming",
-          "properties": {
-            "variables": {
-              "type": "string",
-              "enum": [
-                "camelCase",
-                "snake_case",
-                "PascalCase"
-              ],
-              "default": "camelCase",
-              "description": "Variable naming style"
-            },
-            "functions": {
-              "type": "string",
-              "enum": [
-                "camelCase",
-                "snake_case",
-                "PascalCase"
-              ],
-              "default": "camelCase",
-              "description": "Function naming style"
-            },
-            "classes": {
-              "type": "string",
-              "enum": [
-                "camelCase",
-                "snake_case",
-                "PascalCase"
-              ],
-              "default": "PascalCase",
-              "description": "Class naming style"
-            },
-            "interfaces": {
-              "type": "string",
-              "enum": [
-                "camelCase",
-                "snake_case",
-                "PascalCase"
-              ],
-              "default": "PascalCase",
-              "description": "Interface naming style"
-            },
-            "constants": {
-              "type": "string",
-              "enum": [
-                "camelCase",
-                "snake_case",
-                "PascalCase",
-                "UPPER_CASE"
-              ],
-              "default": "UPPER_CASE",
-              "description": "Constant naming style"
-            }
-          }
-        },
-        "smile-ai.rules.testing": {
-          "type": "object",
-          "title": "Test Rules",
-          "properties": {
-            "required": {
-              "type": "boolean",
-              "default": true,
-              "description": "Test requirement"
-            },
-            "coverage": {
-              "type": "object",
-              "properties": {
-                "statements": {
-                  "type": "number",
-                  "default": 80,
-                  "description": "Statement coverage percentage"
-                },
-                "branches": {
-                  "type": "number",
-                  "default": 70,
-                  "description": "Branch coverage percentage"
-                },
-                "functions": {
-                  "type": "number",
-                  "default": 80,
-                  "description": "Function coverage percentage"
-                },
-                "lines": {
-                  "type": "number",
-                  "default": 80,
-                  "description": "Line coverage percentage"
-                }
-              }
-            }
-          }
-        },
-        "smile-ai.rules.documentation": {
-          "type": "object",
-          "title": "Documentation",
-          "properties": {
-            "required": {
-              "type": "boolean",
-              "default": true,
-              "description": "Documentation requirement"
-            },
-            "style": {
-              "type": "string",
-              "enum": [
-                "JSDoc",
-                "TSDoc",
-                "docstring",
-                "custom"
-              ],
-              "default": "JSDoc",
-              "description": "Documentation style"
-            },
-            "requireParams": {
-              "type": "boolean",
-              "default": true,
-              "description": "Parameter documentation requirement"
-            },
-            "requireReturns": {
-              "type": "boolean",
-              "default": true,
-              "description": "Return value documentation requirement"
-            }
-          }
-        },
-        "smile-ai.lmstudio.endpoint": {
-          "type": "string",
-          "default": "http://localhost:1234/v1",
-          "description": "LM Studio API endpoint URL"
-        },
-        "smile-ai.lmstudio.models": {
-          "type": "array",
+          "description": "Configured AI models",
           "items": {
-            "type": "string"
-          },
-          "default": [
-            "local-model"
-          ],
-          "description": "List of available models in LM Studio"
+            "type": "object",
+            "required": [
+              "name",
+              "provider",
+              "modelName",
+              "apiEndpoint"
+            ],
+            "properties": {
+              "name": {
+                "type": "string",
+                "description": "Display name for the model"
+              },
+              "provider": {
+                "type": "string",
+                "enum": [
+                  "ollama",
+                  "lmstudio"
+                ],
+                "description": "AI provider type"
+              },
+              "modelName": {
+                "type": "string",
+                "description": "Name of the model to use"
+              },
+              "apiEndpoint": {
+                "type": "string",
+                "description": "API endpoint URL"
+              },
+              "maxTokens": {
+                "type": "number",
+                "default": 2048,
+                "description": "Maximum tokens for responses"
+              },
+              "temperature": {
+                "type": "number",
+                "default": 0.7,
+                "description": "Temperature for responses"
+              }
+            }
+          }
+        },
+        "smile-ai.activeModel": {
+          "type": "string",
+          "description": "Currently active AI model name"
+        },
+        "smile-ai.appearance": {
+          "type": "object",
+          "description": "Appearance settings",
+          "properties": {
+            "theme": {
+              "type": "string",
+              "enum": [
+                "system",
+                "light",
+                "dark"
+              ],
+              "default": "system",
+              "description": "Color theme for the AI Assistant"
+            },
+            "fontSize": {
+              "type": "number",
+              "default": 14,
+              "description": "Font size for the AI Assistant"
+            },
+            "fontFamily": {
+              "type": "string",
+              "default": "system-ui",
+              "description": "Font family for the AI Assistant"
+            }
+          }
+        },
+        "smile-ai.behavior": {
+          "type": "object",
+          "description": "Behavior settings",
+          "properties": {
+            "autoComplete": {
+              "type": "boolean",
+              "default": true,
+              "description": "Enable auto-completion suggestions"
+            },
+            "inlineCompletion": {
+              "type": "boolean",
+              "default": true,
+              "description": "Show inline completion suggestions"
+            },
+            "autoImport": {
+              "type": "boolean",
+              "default": true,
+              "description": "Automatically add imports for suggestions"
+            }
+          }
+        },
+        "smile-ai.shortcuts": {
+          "type": "object",
+          "description": "Keyboard shortcut settings",
+          "properties": {
+            "toggleAssistant": {
+              "type": "string",
+              "default": "ctrl+shift+space",
+              "description": "Toggle AI Assistant panel"
+            },
+            "acceptSuggestion": {
+              "type": "string",
+              "default": "tab",
+              "description": "Accept current suggestion"
+            },
+            "nextSuggestion": {
+              "type": "string",
+              "default": "alt+]",
+              "description": "Move to next suggestion"
+            },
+            "previousSuggestion": {
+              "type": "string",
+              "default": "alt+[",
+              "description": "Move to previous suggestion"
+            }
+          }
         }
       }
     }
@@ -866,11 +276,42 @@
     "watch-tests": "tsc -p . -w --outDir out",
     "pretest": "npm run compile-tests && npm run compile && npm run lint",
     "lint": "eslint src --ext ts",
-    "test": "vscode-test"
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "test:coverage": "jest --coverage",
+    "test:debug": "node --inspect-brk node_modules/.bin/jest --runInBand"
   },
-  "pnpm": {
-    "ignoredBuiltDependencies": [
-      "sqlite3"
-    ]
+  "devDependencies": {
+    "@types/diff": "^7.0.1",
+    "@types/glob": "^8.1.0",
+    "@types/jest": "^29.5.12",
+    "@types/marked": "^5.0.2",
+    "@types/mocha": "^10.0.6",
+    "@types/node": "20.x",
+    "@types/vscode": "^1.85.0",
+    "@typescript-eslint/eslint-plugin": "^6.15.0",
+    "@typescript-eslint/parser": "^6.15.0",
+    "@vscode/test-electron": "^2.3.8",
+    "eslint": "^8.56.0",
+    "glob": "^10.3.10",
+    "jest": "^29.7.0",
+    "jest-environment-node": "^29.7.0",
+    "mocha": "^10.2.0",
+    "ts-jest": "^29.1.2",
+    "ts-loader": "^9.5.1",
+    "typescript": "^5.3.3",
+    "webpack": "^5.89.0",
+    "webpack-cli": "^5.1.4"
+  },
+  "dependencies": {
+    "@types/uuid": "^10.0.0",
+    "axios": "^1.6.2",
+    "diff": "^5.1.0",
+    "marked": "^11.2.0",
+    "smile-ai": "file:",
+    "uuid": "^11.0.5",
+    "vscode-languageclient": "^9.0.1",
+    "vscode-languageserver": "^9.0.1",
+    "vscode-languageserver-textdocument": "^1.0.11"
   }
 }

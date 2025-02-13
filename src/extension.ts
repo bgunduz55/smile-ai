@@ -1,227 +1,438 @@
-// The module 'vscode' contains the VS Code extensibility API
-// Import the module and reference it with the alias vscode in your code below
 import * as vscode from 'vscode';
-import { ChatViewProvider } from './presentation/webview/ChatViewProvider';
-import { ComposerViewProvider } from './webview/composerViewProvider';
-import { SuggestionViewProvider } from './webview/suggestionViewProvider';
-import { RulesViewProvider } from './webview/rulesViewProvider';
-import { MainViewProvider } from './webview/mainViewProvider';
-import { SettingsViewProvider } from './presentation/webview/SettingsViewProvider';
-import { VSCodeChatRepository } from './infrastructure/repositories/VSCodeChatRepository';
-import { ChatService } from './application/services/ChatService';
-import { SettingsService } from './services/settingsService';
-import { RateLimiterService } from './services/rateLimiterService';
-import { ErrorHandlingService } from './services/errorHandlingService';
-import { AIServiceFactory } from './services/llm/aiServiceFactory';
-import { ModelProvider } from './models/settings';
+import { AIEngine } from './ai-engine/AIEngine';
+import { TaskManager } from './agent/TaskManager';
+import { TaskPlanner } from './agent/TaskPlanner';
+import { CodeAnalysisExecutor } from './agent/executors/CodeAnalysisExecutor';
+import { CodeModificationExecutor } from './agent/executors/CodeModificationExecutor';
+import { TestGenerationExecutor } from './agent/executors/TestGenerationExecutor';
+import { DocumentationExecutor } from './agent/executors/DocumentationExecutor';
+import { RefactoringExecutor } from './agent/executors/RefactoringExecutor';
+import { ExplanationExecutor } from './agent/executors/ExplanationExecutor';
+import { Task, TaskType } from './agent/types';
+import { ChatPanel } from './chat/ChatPanel';
+import { ComposerPanel } from './composer/ComposerPanel';
+import { CodebaseIndexer } from './utils/CodebaseIndexer';
+import { ModelManager } from './utils/ModelManager';
+import { ModelTreeProvider } from './views/ModelTreeProvider';
+import { FileContext } from './utils/FileAnalyzer';
 
-// Command identifiers
-export const COMMANDS = {
-	OPEN_CHAT: 'smile-ai.openChat',
-	START_COMPOSER: 'smile-ai.startComposer',
-	TOGGLE_CODE_COMPLETION: 'smile-ai.toggleCodeCompletion',
-	OPEN_SETTINGS: 'smile-ai.openSettings',
-	SWITCH_VIEW: 'smile-ai.switchView',
-	SELECT_PROVIDER: 'smile-ai.selectProvider',
-	SELECT_OLLAMA_MODEL: 'smile-ai.selectOllamaModel',
-	CREATE_RULE: 'smile-ai.createRule',
-	EDIT_RULE: 'smile-ai.editRule',
-	VIEW_RULES: 'smile-ai.viewRules'
-};
+// Extension sınıfı
+class SmileAIExtension {
+    private aiEngine!: AIEngine;
+    private taskManager!: TaskManager;
+    private taskPlanner!: TaskPlanner;
+    private executors!: Map<TaskType, any>;
+    private context: vscode.ExtensionContext;
+    private codebaseIndexer: CodebaseIndexer;
+    private modelManager: ModelManager;
+    private modelTreeProvider: ModelTreeProvider;
+    private statusBarItem: vscode.StatusBarItem;
 
-// This method is called when your extension is activated
-// Your extension is activated the very first time the command is executed
-export async function activate(context: vscode.ExtensionContext) {
-	console.log('Smile AI extension is being activated...');
+    constructor(context: vscode.ExtensionContext) {
+        this.context = context;
+        this.codebaseIndexer = CodebaseIndexer.getInstance();
+        this.modelManager = ModelManager.getInstance();
+        this.modelTreeProvider = new ModelTreeProvider(this.modelManager);
+        this.statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
+        
+        this.initializeComponents();
+        this.registerViews();
+        this.registerCommands();
+        this.startIndexing();
+    }
 
-	try {
-		// Initialize services
-		const settingsService = SettingsService.getInstance();
-		const rateLimiterService = RateLimiterService.getInstance(settingsService);
-		const errorHandlingService = new ErrorHandlingService(settingsService);
-		const aiServiceFactory = AIServiceFactory.getInstance(settingsService, rateLimiterService, errorHandlingService);
-		const chatRepository = VSCodeChatRepository.getInstance(context);
+    private async startIndexing() {
+        this.statusBarItem.text = "$(sync~spin) Smile AI: Indexing...";
+        this.statusBarItem.show();
 
-		// Initialize chat service
-		const chatService = ChatService.getInstance(
-			chatRepository,
-			aiServiceFactory,
-			settingsService,
-			rateLimiterService,
-			errorHandlingService
-		);
+        try {
+            await this.codebaseIndexer.indexWorkspace();
+            this.statusBarItem.text = "$(check) Smile AI: Ready";
+        } catch (error) {
+            this.statusBarItem.text = "$(error) Smile AI: Indexing Failed";
+            vscode.window.showErrorMessage('Codebase indexleme hatası: ' + error);
+        }
+    }
 
-		// Register webview providers
-		const suggestionProvider = new SuggestionViewProvider(context.extensionUri, chatService);
-		const rulesProvider = new RulesViewProvider(context.extensionUri, chatService);
-		const mainProvider = new MainViewProvider(
-			context.extensionUri,
-			settingsService,
-			rateLimiterService,
-			errorHandlingService,
-			context
-		);
-		const settingsProvider = new SettingsViewProvider(context.extensionUri, settingsService);
-		const composerProvider = new ComposerViewProvider(context.extensionUri);
-		const chatProvider = new ChatViewProvider(context.extensionUri, chatService);
+    private initializeComponents() {
+        // AI Engine'i yapılandır
+        const activeModel = this.modelManager.getActiveModel();
+        if (!activeModel) {
+            vscode.window.showWarningMessage('No active AI model configured. Please add and select a model.');
+            return;
+        }
 
-		// Register webview panels
-		context.subscriptions.push(
-			vscode.window.registerWebviewViewProvider(
-				SuggestionViewProvider.viewType,
-				suggestionProvider,
-				{
-					webviewOptions: {
-						retainContextWhenHidden: true
-					}
-				}
-			),
-			vscode.window.registerWebviewViewProvider(
-				RulesViewProvider.viewType,
-				rulesProvider,
-				{
-					webviewOptions: {
-						retainContextWhenHidden: true
-					}
-				}
-			),
-			vscode.window.registerWebviewViewProvider(
-				MainViewProvider.viewType,
-				mainProvider,
-				{
-					webviewOptions: {
-						retainContextWhenHidden: true
-					}
-				}
-			),
-			vscode.window.registerWebviewViewProvider(
-				SettingsViewProvider.viewType,
-				settingsProvider,
-				{
-					webviewOptions: {
-						retainContextWhenHidden: true
-					}
-				}
-			),
-			vscode.window.registerWebviewViewProvider(
-				ComposerViewProvider.viewType,
-				composerProvider,
-				{
-					webviewOptions: {
-						retainContextWhenHidden: true
-					}
-				}
-			),
-			vscode.window.registerWebviewViewProvider(
-				ChatViewProvider.viewType,
-				chatProvider,
-				{
-					webviewOptions: {
-						retainContextWhenHidden: true
-					}
-				}
-			)
-		);
+        this.aiEngine = new AIEngine({
+            provider: {
+                name: activeModel.provider,
+                modelName: activeModel.modelName,
+                apiEndpoint: activeModel.apiEndpoint
+            },
+            maxTokens: activeModel.maxTokens || 2048,
+            temperature: activeModel.temperature || 0.7
+        });
 
-		// Register commands
-		context.subscriptions.push(
-			vscode.commands.registerCommand('smile-ai.switchToChat', () => {
-				mainProvider.handleViewSwitch('chat');
-			}),
-			vscode.commands.registerCommand('smile-ai.switchToComposer', () => {
-				mainProvider.handleViewSwitch('composer');
-			}),
-			vscode.commands.registerCommand('smile-ai.switchToSuggestions', () => {
-				mainProvider.handleViewSwitch('suggestions');
-			}),
-			vscode.commands.registerCommand('smile-ai.switchToRules', () => {
-				mainProvider.handleViewSwitch('rules');
-			}),
-			vscode.commands.registerCommand('smile-ai.switchToSettings', () => {
-				mainProvider.handleViewSwitch('settings');
-			}),
-			vscode.commands.registerCommand('smile-ai.openChat', () => {
-				vscode.commands.executeCommand('workbench.view.extension.smile-ai-chat-view');
-			}),
-			vscode.commands.registerCommand('smile-ai.clearChat', async () => {
-				await chatService.clearSession();
-				vscode.window.showInformationMessage('Chat cleared successfully');
-			}),
-			vscode.commands.registerCommand('smile-ai.switchProvider', async () => {
-				const providers = await aiServiceFactory.getAvailableProviders();
-				const selectedProvider = await vscode.window.showQuickPick(
-					providers.map(provider => ({
-						label: formatProviderName(provider),
-						value: provider
-					})),
-					{
-						placeHolder: 'Select AI Provider'
-					}
-				);
+        // Task yönetim sistemini başlat
+        this.taskManager = new TaskManager();
+        this.taskPlanner = new TaskPlanner(this.aiEngine);
 
-				if (selectedProvider) {
-					try {
-						await chatService.switchProvider(selectedProvider.value);
-						vscode.window.showInformationMessage(`Switched to ${selectedProvider.label}`);
-					} catch (error) {
-						if (error instanceof Error) {
-							vscode.window.showErrorMessage(`Failed to switch provider: ${error.message}`);
-						} else {
-							vscode.window.showErrorMessage('Failed to switch provider: Unknown error');
-						}
-					}
-				}
-			})
-		);
+        // Executor'ları kaydet
+        this.executors = new Map();
+        this.executors.set(TaskType.CODE_ANALYSIS, new CodeAnalysisExecutor(this.aiEngine));
+        this.executors.set(TaskType.CODE_MODIFICATION, new CodeModificationExecutor(this.aiEngine));
+        this.executors.set(TaskType.TEST_GENERATION, new TestGenerationExecutor(this.aiEngine));
+        this.executors.set(TaskType.DOCUMENTATION, new DocumentationExecutor(this.aiEngine));
+        this.executors.set(TaskType.REFACTORING, new RefactoringExecutor(this.aiEngine));
+        this.executors.set(TaskType.EXPLANATION, new ExplanationExecutor(this.aiEngine));
 
-		// Status bar item for current provider
-		const providerStatusBarItem = vscode.window.createStatusBarItem(
-			vscode.StatusBarAlignment.Right,
-			100
-		);
-		providerStatusBarItem.command = 'smile-ai.switchProvider';
-		context.subscriptions.push(providerStatusBarItem);
+        // Workspace değişikliklerini dinle
+        vscode.workspace.onDidChangeWorkspaceFolders(() => {
+            this.startIndexing();
+        });
 
-		// Update status bar when provider changes
-		const updateStatusBar = () => {
-			const provider = aiServiceFactory.getCurrentProvider();
-			if (provider) {
-				providerStatusBarItem.text = `$(hubot) ${formatProviderName(provider)}`;
-				providerStatusBarItem.show();
-			}
-		};
+        // Model değişikliklerini dinle
+        vscode.workspace.onDidChangeConfiguration(e => {
+            if (e.affectsConfiguration('smile-ai.activeModel')) {
+                this.reinitializeAIEngine();
+            }
+        });
+    }
 
-		settingsService.onSettingsChanged(updateStatusBar);
-		updateStatusBar();
+    private async reinitializeAIEngine() {
+        const activeModel = this.modelManager.getActiveModel();
+        if (!activeModel) {
+            vscode.window.showWarningMessage('No active AI model configured. Please add and select a model.');
+            return;
+        }
 
-		console.log('Smile AI extension activated successfully');
-	} catch (error) {
-		console.error('Error activating Smile AI extension:', error);
-		throw error;
-	}
+        this.aiEngine = new AIEngine({
+            provider: {
+                name: activeModel.provider,
+                modelName: activeModel.modelName,
+                apiEndpoint: activeModel.apiEndpoint
+            },
+            maxTokens: activeModel.maxTokens || 2048,
+            temperature: activeModel.temperature || 0.7
+        });
+
+        // Executor'ları güncelle
+        this.executors.set(TaskType.CODE_ANALYSIS, new CodeAnalysisExecutor(this.aiEngine));
+        this.executors.set(TaskType.CODE_MODIFICATION, new CodeModificationExecutor(this.aiEngine));
+        this.executors.set(TaskType.TEST_GENERATION, new TestGenerationExecutor(this.aiEngine));
+        this.executors.set(TaskType.DOCUMENTATION, new DocumentationExecutor(this.aiEngine));
+        this.executors.set(TaskType.REFACTORING, new RefactoringExecutor(this.aiEngine));
+        this.executors.set(TaskType.EXPLANATION, new ExplanationExecutor(this.aiEngine));
+    }
+
+    private registerViews() {
+        // Model ağacı görünümünü kaydet
+        vscode.window.registerTreeDataProvider(
+            'smile-ai-models',
+            this.modelTreeProvider
+        );
+
+        // Chat ve Composer görünümlerini kaydet
+        const context = this.context;
+        const aiEngine = this.aiEngine;
+
+        this.context.subscriptions.push(
+            vscode.window.registerWebviewViewProvider(
+                'smile-ai-chat',
+                {
+                    resolveWebviewView(webviewView) {
+                        webviewView.webview.options = {
+                            enableScripts: true
+                        };
+                        ChatPanel.show(context, aiEngine);
+                    }
+                }
+            )
+        );
+
+        this.context.subscriptions.push(
+            vscode.window.registerWebviewViewProvider(
+                'smile-ai-composer',
+                {
+                    resolveWebviewView(webviewView) {
+                        webviewView.webview.options = {
+                            enableScripts: true
+                        };
+                        ComposerPanel.show(context, aiEngine);
+                    }
+                }
+            )
+        );
+    }
+
+    private registerCommands() {
+        // Model yönetimi komutları
+        this.context.subscriptions.push(
+            vscode.commands.registerCommand('smile-ai.addModel', () => {
+                this.modelManager.promptAddModel();
+            })
+        );
+
+        this.context.subscriptions.push(
+            vscode.commands.registerCommand('smile-ai.removeModel', async (item) => {
+                if (item?.model) {
+                    await this.modelManager.removeModel(item.model.name);
+                }
+            })
+        );
+
+        this.context.subscriptions.push(
+            vscode.commands.registerCommand('smile-ai.selectActiveModel', async (item) => {
+                if (item?.model) {
+                    await this.modelManager.setActiveModel(item.model.name);
+                } else {
+                    await this.modelManager.promptSelectActiveModel();
+                }
+            })
+        );
+
+        // Chat komutu
+        this.context.subscriptions.push(
+            vscode.commands.registerCommand('smile-ai.startChat', () => {
+                this.startChat();
+            })
+        );
+
+        // Composer komutu
+        this.context.subscriptions.push(
+            vscode.commands.registerCommand('smile-ai.startComposer', () => {
+                this.startComposer();
+            })
+        );
+
+        // Kod analizi komutu
+        this.context.subscriptions.push(
+            vscode.commands.registerCommand('smile-ai.analyzeCode', async () => {
+                await this.analyzeCode();
+            })
+        );
+
+        // Test üretme komutu
+        this.context.subscriptions.push(
+            vscode.commands.registerCommand('smile-ai.generateTests', async () => {
+                await this.generateTests();
+            })
+        );
+
+        // Kod refactoring komutu
+        this.context.subscriptions.push(
+            vscode.commands.registerCommand('smile-ai.refactorCode', async () => {
+                await this.refactorCode();
+            })
+        );
+
+        // Kod açıklama komutu
+        this.context.subscriptions.push(
+            vscode.commands.registerCommand('smile-ai.explainCode', async () => {
+                await this.explainCode();
+            })
+        );
+
+        // Yeniden indexleme komutu
+        this.context.subscriptions.push(
+            vscode.commands.registerCommand('smile-ai.reindexCodebase', async () => {
+                await this.startIndexing();
+            })
+        );
+    }
+
+    private async startChat() {
+        try {
+            // Aktif dosya bağlamını al
+            const editor = vscode.window.activeTextEditor;
+            let fileContext = undefined;
+            
+            if (editor) {
+                fileContext = this.codebaseIndexer.getFileContext(editor.document.uri);
+            }
+
+            // Chat panelini başlat
+            ChatPanel.show(this.context, this.aiEngine, fileContext);
+        } catch (error: any) {
+            vscode.window.showErrorMessage(`Chat başlatılırken hata: ${error.message}`);
+        }
+    }
+
+    private async startComposer() {
+        try {
+            // Aktif dosya bağlamını al
+            const editor = vscode.window.activeTextEditor;
+            let fileContext = undefined;
+            
+            if (editor) {
+                fileContext = this.codebaseIndexer.getFileContext(editor.document.uri);
+            }
+
+            // Composer panelini başlat
+            ComposerPanel.show(this.context, this.aiEngine);
+        } catch (error: any) {
+            vscode.window.showErrorMessage(`Composer başlatılırken hata: ${error.message}`);
+        }
+    }
+
+    private async analyzeCode() {
+        try {
+            const editor = vscode.window.activeTextEditor;
+            if (!editor) {
+                throw new Error('Aktif bir editör bulunamadı');
+            }
+
+            // Dosya bağlamını al
+            const fileContext: FileContext | undefined = this.codebaseIndexer.getFileContext(editor.document.uri);
+            
+            // Analiz görevi oluştur
+            const task = await this.taskPlanner.planTask('Analyze the current code file');
+            task.type = TaskType.CODE_ANALYSIS;
+            task.metadata = { fileContext: fileContext as FileContext, codeAnalysis: null as any };
+
+            // Görevi yöneticiye ekle
+            this.taskManager.addTask(task);
+
+            // İlgili executor'ı bul ve çalıştır
+            const executor = this.executors.get(task.type);
+            if (!executor) {
+                throw new Error(`${task.type} için executor bulunamadı`);
+            }
+
+            const result = await executor.execute(task);
+            if (!result.success) {
+                throw new Error(result.error);
+            }
+
+            vscode.window.showInformationMessage('Kod analizi tamamlandı!');
+        } catch (error: any) {
+            vscode.window.showErrorMessage(`Kod analizi sırasında hata: ${error.message}`);
+        }
+    }
+
+    private async generateTests() {
+        try {
+            const editor = vscode.window.activeTextEditor;
+            if (!editor) {
+                throw new Error('Aktif bir editör bulunamadı');
+            }
+
+            // Dosya bağlamını al
+            const fileContext: FileContext | undefined = this.codebaseIndexer.getFileContext(editor.document.uri);
+
+            // Test üretme görevi oluştur
+            const task = await this.taskPlanner.planTask('Generate tests for the current code file');
+            task.type = TaskType.TEST_GENERATION;
+            task.metadata = { fileContext: fileContext as FileContext, codeAnalysis: null as any };
+
+            // Görevi yöneticiye ekle
+            this.taskManager.addTask(task);
+
+            // İlgili executor'ı bul ve çalıştır
+            const executor = this.executors.get(task.type);
+            if (!executor) {
+                throw new Error(`${task.type} için executor bulunamadı`);
+            }
+
+            const result = await executor.execute(task);
+            if (!result.success) {
+                throw new Error(result.error);
+            }
+
+            vscode.window.showInformationMessage('Test üretimi tamamlandı!');
+        } catch (error: any) {
+            vscode.window.showErrorMessage(`Test üretimi sırasında hata: ${error.message}`);
+        }
+    }
+
+    private async refactorCode() {
+        try {
+            const editor = vscode.window.activeTextEditor;
+            if (!editor) {
+                throw new Error('Aktif bir editör bulunamadı');
+            }
+
+            // Dosya bağlamını al
+            const fileContext: FileContext | undefined = this.codebaseIndexer.getFileContext(editor.document.uri);
+
+            // Refactoring görevi oluştur
+            const task = await this.taskPlanner.planTask('Refactor the current code file');
+            task.type = TaskType.REFACTORING;
+            task.metadata = { fileContext: fileContext as FileContext, codeAnalysis: null as any };
+
+            // Görevi yöneticiye ekle
+            this.taskManager.addTask(task);
+
+            // İlgili executor'ı bul ve çalıştır
+            const executor = this.executors.get(task.type);
+            if (!executor) {
+                throw new Error(`${task.type} için executor bulunamadı`);
+            }
+
+            const result = await executor.execute(task);
+            if (!result.success) {
+                throw new Error(result.error);
+            }
+
+            vscode.window.showInformationMessage('Kod refactoring tamamlandı!');
+        } catch (error: any) {
+            vscode.window.showErrorMessage(`Kod refactoring sırasında hata: ${error.message}`);
+        }
+    }
+
+    private async explainCode() {
+        try {
+            const editor = vscode.window.activeTextEditor;
+            if (!editor) {
+                throw new Error('Aktif bir editör bulunamadı');
+            }
+
+            // Dosya bağlamını al
+            const fileContext: FileContext | undefined = this.codebaseIndexer.getFileContext(editor.document.uri);
+
+            // Açıklama görevi oluştur
+            const task = await this.taskPlanner.planTask('Explain the current code file');
+            task.type = TaskType.EXPLANATION;
+            task.metadata = { fileContext: fileContext as FileContext, codeAnalysis: null as any };
+
+            // Görevi yöneticiye ekle
+            this.taskManager.addTask(task);
+
+            // İlgili executor'ı bul ve çalıştır
+            const executor = this.executors.get(task.type);
+            if (!executor) {
+                throw new Error(`${task.type} için executor bulunamadı`);
+            }
+
+            const result = await executor.execute(task);
+            if (!result.success) {
+                throw new Error(result.error);
+            }
+
+            vscode.window.showInformationMessage('Kod açıklaması tamamlandı!');
+        } catch (error: any) {
+            vscode.window.showErrorMessage(`Kod açıklama sırasında hata: ${error.message}`);
+        }
+    }
+
+    public dispose() {
+        this.statusBarItem.dispose();
+        this.codebaseIndexer.dispose();
+    }
 }
 
-function formatProviderName(provider: ModelProvider): string {
-	switch (provider) {
-		case 'ollama': return 'Ollama (Local)';
-		case 'openai': return 'OpenAI';
-		case 'anthropic': return 'Anthropic Claude';
-		case 'lmstudio': return 'LM Studio (Local)';
-		case 'localai': return 'LocalAI (Local)';
-		case 'deepseek': return 'Deepseek Coder';
-		case 'qwen': return 'Qwen';
-		default: return provider;
-	}
+// Extension aktivasyon
+let extension: SmileAIExtension | undefined;
+
+export function activate(context: vscode.ExtensionContext) {
+    console.log('Smile AI aktif!');
+    extension = new SmileAIExtension(context);
 }
 
-// This method is called when your extension is deactivated
+// Extension deaktivasyon
 export function deactivate() {
-	console.log('Smile AI extension is being deactivated...');
-	try {
-		// Cleanup code here
-		console.log('Smile AI extension deactivated successfully');
-	} catch (error) {
-		console.error('Error deactivating Smile AI extension:', error);
-		throw error;
-	}
-}
+    if (extension) {
+        extension.dispose();
+    }
+    console.log('Smile AI deaktif!');
+    extension = undefined;
+} 

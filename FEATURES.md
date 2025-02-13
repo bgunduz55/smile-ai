@@ -1,237 +1,147 @@
-# Smile AI VSCode Extension - Özellikler ve Geliştirme Planı
+# Smile AI - Teknik Özellikler ve Geliştirme Planı
 
-## 1. AI Provider Entegrasyonları
-### Mevcut Özellikler
-- ✅ OpenAI API entegrasyonu
-- ✅ Anthropic Claude entegrasyonu
-- ✅ Basit Ollama entegrasyonu
+## 🎯 Temel Hedefler
 
-### Geliştirilecek Özellikler
-- [ ] Gelişmiş Ollama Entegrasyonu
-  - Model listesi görüntüleme
-  - Model parametrelerini yapılandırma
-  - Performans izleme
-  - Hata yönetimi
+1. **Yerel AI Bağımsızlığı**
+   - İnternet bağlantısı gerektirmeden çalışma
+   - Düşük kaynak tüketimi
+   - Hızlı yanıt süreleri
+   - Gizlilik odaklı yaklaşım
 
-- [ ] LM Studio Entegrasyonu
-  - API bağlantısı
-  - Model seçimi
-  - Parametre yapılandırması
-  - Performans izleme
+2. **Agent Yetenekleri**
+   - Karmaşık görevleri anlama ve planlama
+   - Çoklu adımlı işlemleri yönetme
+   - Bağlam farkındalığı
+   - Proaktif öneriler sunma
 
-- [ ] LocalAI Entegrasyonu
-  - REST API bağlantısı
-  - Model seçimi
-  - Docker desteği
-  - Hata yönetimi
+3. **Cursor-benzeri Deneyim**
+   - Zengin kod düzenleme yetenekleri
+   - Gerçek zamanlı önizleme
+   - Akıllı kod analizi
+   - Sezgisel kullanıcı arayüzü
 
-- [ ] Deepseek Qwen Entegrasyonu
-  - API entegrasyonu
-  - Model seçimi
-  - Parametre yönetimi
+## 🔄 İş Akışı
 
-## 2. Provider Yönetimi
-### Planlanan Özellikler
-- [ ] Provider Seçim Arayüzü
-  - Provider listesi
-  - Hızlı geçiş
-  - Durum göstergeleri
-  - Bağlantı testi
+### 1. Kullanıcı Etkileşimi
+```mermaid
+graph TD
+    A[Kullanıcı Komutu] --> B[Komut Analizi]
+    B --> C[Görev Planlama]
+    C --> D[Alt Görevlere Bölme]
+    D --> E[Yürütme]
+    E --> F[Önizleme]
+    F --> G[Onay]
+    G --> H[Uygulama]
+```
 
-- [ ] Yapılandırma Yönetimi
-  - API anahtarı yönetimi
-  - Endpoint yapılandırması
-  - Model parametreleri
-  - Önbellek ayarları
+### 2. AI İşlem Süreci
+```mermaid
+graph LR
+    A[Girdi] --> B[Bağlam Yönetimi]
+    B --> C[Model İşleme]
+    C --> D[Sonuç Optimizasyonu]
+    D --> E[Çıktı Formatı]
+```
 
-- [ ] Performans İzleme
-  - Yanıt süreleri
-  - Token kullanımı
-  - Hata oranları
-  - Maliyet takibi
+## 🛠️ Teknik Bileşenler
 
-## 3. Kod Analizi ve İndeksleme
-### Mevcut Özellikler
-- ✅ Temel dosya indeksleme
-- ✅ SQLite veritabanı entegrasyonu
-- ✅ Dosya değişikliği izleme
+### 1. Extension Core
+- VSCode Extension API entegrasyonu
+- Olay yönetimi
+- Durum yönetimi
+- Yapılandırma yönetimi
 
-### Geliştirilecek Özellikler
-- [ ] Semantic Kod Analizi
-  - AST (Abstract Syntax Tree) analizi
-  - Sembol çözümleme
-  - Tip analizi
-  - Bağımlılık grafiği
+### 2. AI Engine
+- Model yöneticisi
+  - Ollama entegrasyonu
+  - LM Studio entegrasyonu
+  - Model seçimi ve yapılandırması
+- Bağlam yöneticisi
+  - Kod bağlamı
+  - Proje bağlamı
+  - Kullanıcı tercihleri
+- Bellek yöneticisi
+  - Kısa dönem bellek
+  - Uzun dönem bellek
+  - Bellek optimizasyonu
 
-- [ ] Gelişmiş Kod Arama
-  - Semantic arama
-  - Regex desteği
-  - Fuzzy matching
-  - Kod yapısına göre arama
-
-- [ ] Proje Analizi
-  - Bağımlılık analizi
-  - Git geçmişi analizi
-  - Kod kalitesi metrikleri
-  - Güvenlik taraması
-
-## 4. Geliştirme Asistanı
-### Mevcut Özellikler
-- ✅ Temel kod tamamlama
-- ✅ Chat arayüzü
-- ✅ Kod üretme (Composer)
-
-### Geliştirilecek Özellikler
-- [ ] Test Senaryoları
-  - Otomatik test üretimi
-  - Test coverage analizi
-  - Test önerileri
-  - Test dokümantasyonu
-
-- [ ] Kod İyileştirme
-  - Refactoring önerileri
-  - Performans optimizasyonları
-  - Kod kalitesi önerileri
-  - Best practice kontrolleri
-
-- [ ] Güvenlik
-  - Güvenlik açığı taraması
-  - SAST (Static Application Security Testing)
-  - Bağımlılık güvenlik kontrolü
-  - Güvenlik önerileri
-
-- [ ] Dokümantasyon
-  - Otomatik dokümantasyon üretimi
-  - JSDoc/TSDoc desteği
-  - README üretimi
-  - API dokümantasyonu
-
-## 5. Kullanıcı Arayüzü
-### Mevcut Özellikler
-- ✅ Temel chat arayüzü
-- ✅ Composer arayüzü
-- ✅ VSCode tema entegrasyonu
-
-### Geliştirilecek Özellikler
-- [ ] Gelişmiş UI
-  - Özelleştirilebilir temalar
-  - Zengin markdown desteği
-  - Kod vurgulama
-  - Interaktif komponentler
-
-- [ ] Kısayollar ve Komutlar
-  - Özelleştirilebilir kısayollar
-  - Komut paleti entegrasyonu
-  - Bağlam menüleri
-  - Quick fixes
-
-- [ ] Bildirimler ve Göstergeler
-  - İlerleme göstergeleri
-  - Durum bildirimleri
-  - Aktivite göstergeleri
-  - Diagnostik göstergeler
-
-## 6. Entegrasyon ve Genişletilebilirlik
-### Planlanan Özellikler
-- [ ] Git Entegrasyonu
-  - GitHub/GitLab API entegrasyonu
-  - Commit/PR önerileri
-  - Code review asistanı
-  - Issue yönetimi
-
-- [ ] CI/CD Entegrasyonu
-  - GitHub Actions desteği
-  - GitLab CI desteği
-  - Jenkins entegrasyonu
-  - Deployment önerileri
-
-- [ ] API ve Eklenti Sistemi
-  - Public API
-  - Eklenti sistemi
-  - Event sistemi
-  - Webhook desteği
-
-## 7. Performans ve Güvenlik
-### Planlanan Özellikler
-- [ ] Performans Optimizasyonu
-  - Bellek yönetimi
-  - CPU kullanımı optimizasyonu
-  - I/O optimizasyonu
-  - Önbellekleme stratejileri
-
-- [ ] Güvenlik
+### 3. Agent System
+- Görev planlayıcı
+  - Görev analizi
+  - Alt görev oluşturma
+  - Önceliklendirme
+- Yürütme motoru
   - Kod analizi
-  - Güvenli depolama
-  - Kimlik doğrulama
-  - Yetkilendirme
-
-## 8. Çoklu Dil Desteği
-### Mevcut Özellikler
-- ✅ TypeScript/JavaScript desteği
-- ✅ Python temel desteği
-
-### Geliştirilecek Özellikler
-- [ ] Programlama Dilleri
-  - Java desteği
-  - C/C++ desteği
-  - Go desteği
-  - Rust desteği
-  - PHP desteği
-  - Ruby desteği
-
-- [ ] Dil Özellikleri
-  - Dil özelinde analiz
-  - Özel kod tamamlama
-  - Dil-spesifik öneriler
-  - Framework desteği
-
-## 9. Hata Ayıklama ve Loglama
-### Planlanan Özellikler
-- [ ] Loglama Sistemi
-  - Detaylı log seviyeleri
-  - Log rotasyonu
-  - Log analizi
-  - Performans logları
-
-- [ ] Telemetri
-  - Anonim kullanım istatistikleri
+  - Değişiklik yönetimi
+  - Hata kontrolü
+- Geri bildirim sistemi
+  - Başarı metrikler
   - Hata raporlama
-  - Performans metrikleri
-  - Kullanım analizi
+  - Performans izleme
 
-## 10. Dökümantasyon
-### Planlanan Özellikler
-- [ ] Kullanıcı Kılavuzu
-  - Kurulum rehberi
-  - Özellik rehberleri
-  - SSS
-  - Troubleshooting
+### 4. Editor Integration
+- Kod analiz servisi
+- Dokümantasyon servisi
+- Test servisi
+- Refactoring servisi
+- Diagnostik servisi
 
-- [ ] Geliştirici Dökümantasyonu
-  - API referansı
-  - Mimari dökümantasyon
-  - Katkı rehberi
-  - Örnek kodlar
+## 📋 Geliştirme Aşamaları
 
-## Öncelik ve Zaman Çizelgesi
+### Faz 1: Temel Altyapı
+- [ ] Extension iskeletinin oluşturulması
+- [ ] Local AI entegrasyonlarının implementasyonu
+- [ ] Temel komut sisteminin kurulması
+- [ ] Basit kod analizi ve düzenleme yetenekleri
 
-### Faz 1 (1-2 Ay)
-1. AI Provider Entegrasyonları geliştirmeleri
-2. Provider Yönetimi temel özellikleri
-3. Gelişmiş Kod Analizi
+### Faz 2: Agent Sistemi
+- [ ] Görev planlama sisteminin geliştirilmesi
+- [ ] Bağlam yönetim sisteminin implementasyonu
+- [ ] Alt görev oluşturma ve yönetim sistemi
+- [ ] Bellek optimizasyon sistemi
 
-### Faz 2 (2-3 Ay)
-1. Geliştirme Asistanı özellikleri
-2. UI İyileştirmeleri
-3. Performans optimizasyonları
+### Faz 3: Editör Entegrasyonu
+- [ ] Kod analiz servislerinin geliştirilmesi
+- [ ] Preview sisteminin implementasyonu
+- [ ] Çoklu dosya düzenleme yetenekleri
+- [ ] Gerçek zamanlı kod analizi
 
-### Faz 3 (3-4 Ay)
-1. Entegrasyon özellikleri
-2. Çoklu dil desteği
-3. Dökümantasyon ve öğretici içerik
+### Faz 4: Kullanıcı Deneyimi
+- [ ] UI/UX geliştirmeleri
+- [ ] Performans optimizasyonları
+- [ ] Hata yakalama ve raporlama
+- [ ] Dokümantasyon ve örnekler
 
-### Faz 4 (Sürekli)
-1. Güvenlik güncellemeleri
-2. Performans iyileştirmeleri
-3. Yeni özellik geliştirmeleri
-4. Topluluk geri bildirimleri 
+## 🔍 Teknik Gereksinimler
+
+### Minimum Sistem Gereksinimleri
+- VSCode: 1.85.0+
+- Node.js: 18.0.0+
+- RAM: 8GB+
+- Disk: 10GB+ (model boyutlarına bağlı)
+- İşlemci: 4+ çekirdek
+- GPU: İsteğe bağlı (önerilen)
+
+### Desteklenen AI Modeller
+- Ollama
+  - CodeLlama
+  - Llama2
+  - Mistral
+- LM Studio
+  - Özel modeller
+  - Uyumlu açık kaynak modeller
+
+## 📊 Performans Hedefleri
+
+- Yanıt süresi: <500ms (basit işlemler)
+- Bellek kullanımı: <500MB (extension)
+- CPU kullanımı: <%20 (ortalama)
+- Doğruluk oranı: >90% (kod önerileri)
+
+## 🔐 Güvenlik ve Gizlilik
+
+- Tüm işlemler yerel
+- Kod verisi dışarı aktarılmaz
+- Güvenli model yönetimi
+- Yapılandırılabilir izinler
+- Şifreleme desteği (gerektiğinde) 

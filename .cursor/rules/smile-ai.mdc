@@ -2,6 +2,10 @@
 description: Smile Ai Coding Assistant Extension For Vscode
 globs: 
 ---
+---
+description: Smile Ai Coding Assistant Extension For Vscode 
+globs: 
+---
 # Smile AI - VSCode Eklentisi Geliştirme Kuralları
 
 Bu doküman, Smile AI VSCode eklentisinin geliştirme sürecinde uyulması gereken kuralları ve standartları içerir.
@@ -41,10 +45,10 @@ Bu doküman, Smile AI VSCode eklentisinin geliştirme sürecinde uyulması gerek
 ## 📁 Proje Yapısı
 
 ### Dizin Yapısı
-- `src/services`: Servis sınıfları
-- `src/webview`: Webview sağlayıcıları
-- `src/models`: Veri modelleri
-- `src/utils`: Yardımcı fonksiyonlar
+- `src/services`: Servis sınıfları ve iş mantığı
+- `src/webview`: Webview sağlayıcıları ve UI bileşenleri
+- `src/models`: Veri modelleri, arayüzler ve tipler
+- `src/utils`: Yardımcı fonksiyonlar ve araçlar
 
 ### Dosya İsimlendirme
 - Servisler: `{name}Service.ts`
@@ -58,22 +62,37 @@ Bu doküman, Smile AI VSCode eklentisinin geliştirme sürecinde uyulması gerek
 1. **Ollama**
    - Tür: Yerel
    - Varsayılan Endpoint: http://localhost:11434
+   - Önerilen Modeller: codellama, deepseek-coder
 
 2. **OpenAI**
    - Tür: Bulut
    - API Anahtarı Gerekli
+   - Önerilen Modeller: gpt-4-turbo, gpt-3.5-turbo
 
 3. **Anthropic**
    - Tür: Bulut
    - API Anahtarı Gerekli
+   - Önerilen Modeller: claude-3-opus, claude-3-sonnet
 
 4. **LM Studio**
    - Tür: Yerel
    - Varsayılan Endpoint: http://localhost:1234
+   - Önerilen Modeller: codellama, wizardcoder
 
 5. **LocalAI**
    - Tür: Yerel
    - Varsayılan Endpoint: http://localhost:8080
+   - Önerilen Modeller: gguf formatında kod modelleri
+
+6. **Deepseek**
+   - Tür: Yerel
+   - Varsayılan Endpoint: http://localhost:8081
+   - Önerilen Modeller: deepseek-coder
+
+7. **Qwen**
+   - Tür: Yerel
+   - Varsayılan Endpoint: http://localhost:8082
+   - Önerilen Modeller: qwen-72b, qwen-14b
 
 ### Özellikler
 
@@ -81,22 +100,49 @@ Bu doküman, Smile AI VSCode eklentisinin geliştirme sürecinde uyulması gerek
 - Maksimum Token: 2048
 - Varsayılan Sıcaklık: 0.7
 - Streaming: Aktif
+- Mesaj Geçmişi: Sınırlı (son 10 mesaj)
+- Kod Vurgulama: Aktif
+- Markdown Desteği: Tam
 
 #### Kod Tamamlama
 - Tetikleyici Karakterler: . ( [ { < boşluk
 - Maksimum Token: 1024
 - Sıcaklık: 0.2
+- Bağlam Penceresi: 1000 token
+- Otomatik Import: Aktif
+
+#### Composer
+- Agent Tabanlı Geliştirme Asistanı
+- İşlem Sıralaması:
+  1. Görev Analizi
+  2. Alt Görevlere Bölme
+  3. Sıralı/Paralel Yürütme
+  4. Doğrulama ve Geri Bildirim
+- Özellikler:
+  - Kod Düzenleme
+  - Terminal Komutları
+  - Dosya İşlemleri
+  - Otomatik Uygulama
+  - Geri Alma/Yeniden Uygulama
+- Lokal Model Optimizasyonları:
+  - Küçük İş Parçaları
+  - Paralel İşlem Desteği
+  - Bellek Yönetimi
+  - Hata Toleransı
 
 #### Bağlam Farkındalığı
 - Açık Dosyaları Dahil Et
 - Seçimi Dahil Et
 - Pano İçeriğini Dahil Et
+- Git Değişikliklerini İzle
+- Workspace Sembollerini Tara
 
 ## 🎨 Kullanıcı Arayüzü
 
 ### Tema
 - VSCode temasını kullan
 - Özel değişkenler için VSCode tema değişkenlerini kullan
+- Tutarlı simge seti (Codicons)
 
 ### Bileşenler
 
@@ -110,12 +156,17 @@ Bu doküman, Smile AI VSCode eklentisinin geliştirme sürecinde uyulması gerek
   - Kod vurgulama
   - Markdown desteği
   - Emoji desteği
+  - Dosya ekleri
+  - Kod snippetleri
 
 #### Composer
-- Chat ile benzer arayüz.
-- Bu modelde agent şeklinde sıralı kod düzenlemeleri, terminal komutu execute, seçime göre auto apply, rollback, re-apply gibi işlemler olacak
-- Local küçük modellerde bunu sağlayabilmek için, işlemleri küçük iş parçalarına bölüp sırasıyla veya bazıları eşzamanlı işlemler yaptırmalıyız.
-- Cursor benzeri ama lokal alternatif dil modelleri ile çalışabilen bir development asistanı.
+- Chat ile benzer arayüz
+- İşlem Akışı Görünümü
+- Dosya Gezgini Entegrasyonu
+- Terminal Entegrasyonu
+- Değişiklik Önizlemesi
+- Geri Alma Geçmişi
+- İlerleme Göstergeleri
 
 #### Ayarlar
 - Bölümler:
@@ -128,18 +179,22 @@ Bu doküman, Smile AI VSCode eklentisinin geliştirme sürecinde uyulması gerek
   - API anahtarı yönetimi
   - Endpoint yapılandırması
   - Tema özelleştirme
+  - Kısayol düzenleme
 
 ### Kısayollar
 - Chat'i Aç: `Ctrl+Shift+A`
 - Ayarları Aç: `Ctrl+Shift+,`
 - Chat'i Temizle: `Ctrl+Shift+L`
 - Giriş Alanına Odaklan: `Ctrl+Shift+I`
+- Composer'ı Aç: `Ctrl+Shift+C`
 
 ## 📝 Dokümantasyon
 
 ### Kod Yorumları
 - JSDoc stili zorunlu
 - Tüm public API'ler için dokümantasyon gerekli
+- Karmaşık algoritmalar için açıklama
+- Tip tanımlamaları için detaylı açıklama
 
 ### README Bölümleri
 1. Giriş
@@ -155,6 +210,11 @@ Bu doküman, Smile AI VSCode eklentisinin geliştirme sürecinde uyulması gerek
 
 ### Test Çerçevesi
 - Jest kullanılacak
+- Test Tipleri:
+  - Birim Testler
+  - Entegrasyon Testleri
+  - E2E Testler
+  - UI Testleri
 
 ### Kapsama Hedefleri
 - İfadeler: %80
@@ -162,16 +222,18 @@ Bu doküman, Smile AI VSCode eklentisinin geliştirme sürecinde uyulması gerek
 - Fonksiyonlar: %80
 - Satırlar: %80
 
-### Test Türleri
-- Birim Testleri
-- Entegrasyon Testleri
-- Uçtan Uca Testler
+### Test Prensipleri
+- Her public API için test yazılmalı
+- Mock ve stub kullanımı
+- Asenkron işlemler için özel testler
+- UI bileşenleri için snapshot testleri
 
 ## 📦 Dağıtım
 
 ### Gereksinimler
-- VSCode: ^1.86.0
+- VSCode: ^1.80.0
 - Node.js: >=18.0.0
+- TypeScript: ^5.0.0
 
 ### Paketleme
 - Dahil Edilecekler:
@@ -186,4 +248,16 @@ Bu doküman, Smile AI VSCode eklentisinin geliştirme sürecinde uyulması gerek
   - test/**/*
   - node_modules/**/*
   - .vscode/**/*
-  - .git/**/* 
+  - .git/**/*
+
+### Sürüm Yönetimi
+- Semantic Versioning (MAJOR.MINOR.PATCH)
+- CHANGELOG güncellemesi
+- Git tag'leri
+- Release notları
+
+### Kalite Kontrol
+- Lint kontrolleri
+- Test başarısı
+- Paket boyutu optimizasyonu
+- Güvenlik taraması 
