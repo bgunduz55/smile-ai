@@ -92,7 +92,7 @@
         document.getElementById('settingsBtn').addEventListener('click', () => switchView('settings'));
 
         function handleKeyPress(e) {
-            if (e.key === 'Enter' && e.shiftKey) {
+            if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault();
                 sendMessage(e.target);
             }
@@ -203,7 +203,8 @@
         function toggleModel(modelName) {
             vscode.postMessage({
                 command: 'toggleModel',
-                modelName: modelName
+                modelName: modelName,
+                view: currentView
             });
         }
 

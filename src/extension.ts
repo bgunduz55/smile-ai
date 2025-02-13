@@ -9,8 +9,6 @@ import { DocumentationExecutor } from './agent/executors/DocumentationExecutor';
 import { RefactoringExecutor } from './agent/executors/RefactoringExecutor';
 import { ExplanationExecutor } from './agent/executors/ExplanationExecutor';
 import { Task, TaskType, TaskStatus, TaskPriority } from './agent/types';
-import { ChatPanel } from './chat/ChatPanel';
-import { ComposerPanel } from './composer/ComposerPanel';
 import { CodebaseIndexer } from './utils/CodebaseIndexer';
 import { ModelManager } from './utils/ModelManager';
 import { ModelTreeProvider } from './views/ModelTreeProvider';
@@ -168,19 +166,6 @@ class SmileAIExtension {
             })
         );
 
-        // Chat ve Composer komutları
-        this.context.subscriptions.push(
-            vscode.commands.registerCommand('smile-ai.openChat', () => {
-                this.startChat();
-            })
-        );
-
-        this.context.subscriptions.push(
-            vscode.commands.registerCommand('smile-ai.openComposer', () => {
-                this.startComposer();
-            })
-        );
-
         // Kod analizi komutu
         this.context.subscriptions.push(
             vscode.commands.registerCommand('smile-ai.analyzeCode', async () => {
@@ -215,40 +200,6 @@ class SmileAIExtension {
                 await this.startIndexing();
             })
         );
-    }
-
-    private async startChat() {
-        try {
-            // Aktif dosya bağlamını al
-            const editor = vscode.window.activeTextEditor;
-            let fileContext = undefined;
-            
-            if (editor) {
-                fileContext = this.codebaseIndexer.getFileContext(editor.document.uri);
-            }
-
-            // Chat panelini başlat
-            ChatPanel.show(this.context, this.aiEngine, fileContext);
-        } catch (error: any) {
-            vscode.window.showErrorMessage(`Chat başlatılırken hata: ${error.message}`);
-        }
-    }
-
-    private async startComposer() {
-        try {
-            // Aktif dosya bağlamını al
-            const editor = vscode.window.activeTextEditor;
-            let fileContext = undefined;
-            
-            if (editor) {
-                fileContext = this.codebaseIndexer.getFileContext(editor.document.uri);
-            }
-
-            // Composer panelini başlat
-            ComposerPanel.show(this.context, this.aiEngine);
-        } catch (error: any) {
-            vscode.window.showErrorMessage(`Composer başlatılırken hata: ${error.message}`);
-        }
     }
 
     private async analyzeCode() {

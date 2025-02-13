@@ -1,8 +1,5 @@
 import * as vscode from 'vscode';
-import * as fs from 'fs';
-import * as path from 'path';
 import { AIEngine } from '../ai-engine/AIEngine';
-import { AIMessage } from '../ai-engine/types';
 import { ModelManager } from '../utils/ModelManager';
 
 interface Message {
@@ -17,14 +14,46 @@ export class AIAssistantPanel {
     private messages: Message[] = [];
     private currentView: string = 'chat';
     private modelManager: ModelManager;
+    private aiEngine: AIEngine | undefined;
 
     private constructor(
         webviewView: vscode.WebviewView,
-        private readonly aiEngine: AIEngine,
-        private readonly context: vscode.ExtensionContext
+        private readonly context: vscode.ExtensionContext,
+        aiEngine: AIEngine
     ) {
         this.webviewView = webviewView;
         this.modelManager = ModelManager.getInstance();
+        
+        // Aktif modeli kontrol et ve AI Engine'i başlat
+        const activeModel = this.modelManager.getActiveModel();
+        if (activeModel) {
+            this.aiEngine = new AIEngine({
+                provider: {
+                    name: activeModel.provider,
+                    modelName: activeModel.modelName,
+                    apiEndpoint: activeModel.apiEndpoint
+                },
+                maxTokens: activeModel.maxTokens || 2048,
+                temperature: activeModel.temperature || 0.7
+            });
+        } else {
+            // Eğer aktif model yoksa, varsayılan olarak Ollama'yı dene
+            this.modelManager.promptAddModel().then(() => {
+                const model = this.modelManager.getActiveModel();
+                if (model) {
+                    this.aiEngine = new AIEngine({
+                        provider: {
+                            name: model.provider,
+                            modelName: model.modelName,
+                            apiEndpoint: model.apiEndpoint
+                        },
+                        maxTokens: model.maxTokens || 2048,
+                        temperature: model.temperature || 0.7
+                    });
+                }
+            });
+        }
+
         this.setupWebview();
     }
 
@@ -33,7 +62,7 @@ export class AIAssistantPanel {
         context: vscode.ExtensionContext,
         aiEngine: AIEngine
     ) {
-        AIAssistantPanel.currentPanel = new AIAssistantPanel(webviewView, aiEngine, context);
+        AIAssistantPanel.currentPanel = new AIAssistantPanel(webviewView, context, aiEngine);
     }
 
     private setupWebview() {
@@ -45,7 +74,9 @@ export class AIAssistantPanel {
         };
 
         // Webview içeriğini ayarla
-        this.webviewView.webview.html = this.getWebviewContent();
+        this.getWebviewContent().then(content => {
+            this.webviewView.webview.html = content;
+        });
 
         // Mesaj dinleyicisini ayarla
         this.webviewView.webview.onDidReceiveMessage(
@@ -74,14 +105,22 @@ export class AIAssistantPanel {
         this.updateSettings();
     }
 
-    private getWebviewContent(): string {
+    private async getWebviewContent(): Promise<string> {
         const styleUri = this.webviewView.webview.asWebviewUri(
             vscode.Uri.joinPath(this.context.extensionUri, 'media', 'assistant.css')
         );
 
         // HTML template'i oku
-        const htmlPath = path.join(this.context.extensionPath, 'media', 'assistant.html');
-        let html = fs.readFileSync(htmlPath, 'utf8');
+        const htmlPath = vscode.Uri.joinPath(this.context.extensionUri, 'media', 'assistant.html');
+        let html = '';
+        
+        try {
+            const uint8Array = await vscode.workspace.fs.readFile(htmlPath);
+            html = Buffer.from(uint8Array).toString('utf-8');
+        } catch (error) {
+            console.error('HTML template okuma hatası:', error);
+            html = '<html><body>Template yüklenemedi</body></html>';
+        }
 
         // Template değişkenlerini değiştir
         html = html.replace('{{styleUri}}', styleUri.toString());
@@ -91,27 +130,44 @@ export class AIAssistantPanel {
     }
 
     private async handleUserMessage(text: string) {
-        const message: Message = {
-            role: 'user',
-            content: text,
-            timestamp: Date.now()
-        };
-
-        this.messages.push(message);
-        this.updateMessages();
-
         try {
+            // Aktif model kontrolü
             const activeModel = this.modelManager.getActiveModel();
             if (!activeModel) {
-                throw new Error('Aktif model seçili değil');
+                throw new Error('Lütfen önce bir AI model seçin');
             }
 
+            // AI Engine kontrolü
+            if (!this.aiEngine) {
+                this.aiEngine = new AIEngine({
+                    provider: {
+                        name: activeModel.provider,
+                        modelName: activeModel.modelName,
+                        apiEndpoint: activeModel.apiEndpoint
+                    },
+                    maxTokens: activeModel.maxTokens || 2048,
+                    temperature: activeModel.temperature || 0.7
+                });
+            }
+
+            // Kullanıcı mesajını ekle
+            const message: Message = {
+                role: 'user',
+                content: text,
+                timestamp: Date.now()
+            };
+
+            this.messages.push(message);
+            this.updateMessages();
+
+            // AI yanıtını al
             const response = await this.aiEngine.generateResponse({
                 prompt: text,
                 maxTokens: activeModel.maxTokens || 2048,
                 temperature: activeModel.temperature || 0.7
             });
 
+            // AI yanıtını ekle
             const aiMessage: Message = {
                 role: 'assistant',
                 content: response.message,
@@ -120,10 +176,6 @@ export class AIAssistantPanel {
 
             this.messages.push(aiMessage);
             this.updateMessages();
-
-            if (this.currentView === 'composer' && response.codeChanges) {
-                this.updateComposerPreview(response.codeChanges[0]);
-            }
         } catch (error: any) {
             vscode.window.showErrorMessage(`AI yanıtı alınamadı: ${error.message}`);
         }
@@ -136,7 +188,26 @@ export class AIAssistantPanel {
 
     private async handleModelToggle(modelName: string) {
         try {
-            await this.modelManager.setActiveModel(modelName);
+            const currentModel = this.modelManager.getActiveModel();
+            if (currentModel?.name === modelName) {
+                await this.modelManager.setActiveModel(undefined);
+            } else {
+                await this.modelManager.setActiveModel(modelName);
+                
+                // AI Engine'i yeni modelle güncelle
+                const model = this.modelManager.getActiveModel();
+                if (model) {
+                    this.aiEngine = new AIEngine({
+                        provider: {
+                            name: model.provider,
+                            modelName: model.modelName,
+                            apiEndpoint: model.apiEndpoint
+                        },
+                        maxTokens: model.maxTokens || 2048,
+                        temperature: model.temperature || 0.7
+                    });
+                }
+            }
             this.updateModels();
         } catch (error: any) {
             vscode.window.showErrorMessage(`Model değiştirilemedi: ${error.message}`);
@@ -187,17 +258,6 @@ export class AIAssistantPanel {
         this.webviewView.webview.postMessage({
             type: 'viewChanged',
             view: this.currentView
-        });
-    }
-
-    private updateComposerPreview(codeChange: any) {
-        this.webviewView.webview.postMessage({
-            type: 'updateComposerPreview',
-            code: codeChange.newContent,
-            diff: {
-                original: codeChange.originalContent,
-                modified: codeChange.newContent
-            }
         });
     }
 } 

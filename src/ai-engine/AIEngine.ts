@@ -17,28 +17,6 @@ export class AIEngine {
         this.context = { messages: [] };
     }
 
-    public async chat(message: string): Promise<AIResponse> {
-        try {
-            const response = await axios.post(
-                `${this.config.provider.apiEndpoint}/api/chat`,
-                {
-                    model: this.config.provider.modelName,
-                    messages: [{ role: 'user', content: message }],
-                    max_tokens: this.config.maxTokens,
-                    temperature: this.config.temperature
-                }
-            );
-
-            return {
-                message: response.data.choices[0].message.content,
-                codeChanges: response.data.choices[0].code_changes
-            };
-        } catch (error: any) {
-            console.error('AI Engine Error:', error);
-            throw new Error(`AI Engine Error: ${error.message}`);
-        }
-    }
-
     public async generateResponse(request: AIRequest): Promise<AIResponse> {
         try {
             const messages = this.prepareMessages(request);
@@ -80,23 +58,63 @@ export class AIEngine {
         const { provider, maxTokens, temperature } = this.config;
 
         try {
-            const response = await axios.post(provider.apiEndpoint + '/api/generate', {
-                model: provider.modelName,
-                messages: messages.map(msg => ({
-                    role: msg.role,
-                    content: msg.content
-                })),
-                max_tokens: maxTokens,
-                temperature: temperature
+            let endpoint = '';
+            let requestBody = {};
+
+            if (provider.name === 'ollama') {
+                endpoint = `${provider.apiEndpoint}/api/chat`;
+                requestBody = {
+                    model: provider.modelName,
+                    messages: messages.map(msg => ({
+                        role: msg.role,
+                        content: msg.content
+                    })),
+                    stream: false
+                };
+            } else if (provider.name === 'lmstudio') {
+                endpoint = `${provider.apiEndpoint}/v1/chat/completions`;
+                requestBody = {
+                    model: provider.modelName,
+                    messages: messages.map(msg => ({
+                        role: msg.role,
+                        content: msg.content
+                    })),
+                    max_tokens: maxTokens,
+                    temperature: temperature,
+                    stream: false
+                };
+            } else {
+                throw new Error(`Unsupported provider: ${provider.name}`);
+            }
+
+            const response = await axios.post(endpoint, requestBody, {
+                headers: {
+                    'Content-Type': 'application/json'
+                }
             });
 
-            return {
-                message: response.data.choices[0].message.content,
-                codeChanges: response.data.choices[0].code_changes
-            };
-        } catch (error) {
+            if (provider.name === 'ollama') {
+                return {
+                    message: response.data.message.content,
+                    codeChanges: response.data.code_changes
+                };
+            } else if (provider.name === 'lmstudio') {
+                return {
+                    message: response.data.choices[0].message.content,
+                    codeChanges: response.data.choices[0].code_changes
+                };
+            } else {
+                throw new Error(`Unsupported provider: ${provider.name}`);
+            }
+        } catch (error: any) {
             console.error('Error calling AI provider:', error);
-            throw new Error('Failed to communicate with AI provider');
+            if (error.response) {
+                throw new Error(`AI provider error: ${error.response.data.error || error.response.statusText}`);
+            } else if (error.request) {
+                throw new Error('Failed to connect to AI provider. Please check if the service is running.');
+            } else {
+                throw new Error(`Failed to communicate with AI provider: ${error.message}`);
+            }
         }
     }
 

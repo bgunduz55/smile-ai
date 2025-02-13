@@ -139,7 +139,9 @@ export class ChatPanel {
     }
 
     private async _handleUserMessage(text: string) {
-        if (!this._currentSession) return;
+        if (!this._currentSession) {
+            this._currentSession = this._historyManager.createSession('New Chat');
+        }
 
         // Kullanıcı mesajını ekle
         await this._historyManager.addMessage(this._currentSession.id, {
@@ -147,27 +149,35 @@ export class ChatPanel {
             content: text
         });
 
-        // AI yanıtını al
-        const response = await this._aiEngine.chat(text);
+        try {
+            // AI yanıtını al
+            const response = await this._aiEngine.generateResponse({
+                prompt: text,
+                maxTokens: 2048,
+                temperature: 0.7
+            });
 
-        // AI yanıtını ekle
-        await this._historyManager.addMessage(this._currentSession.id, {
-            role: 'assistant',
-            content: response.message
-        });
+            // AI yanıtını ekle
+            await this._historyManager.addMessage(this._currentSession.id, {
+                role: 'assistant',
+                content: response.message
+            });
 
-        // Kod değişikliği varsa kaydet
-        if (response.codeChanges) {
-            for (const change of response.codeChanges) {
-                this._currentChange = this._codeChangeManager.createChange(
-                    change.file,
-                    change.originalContent,
-                    change.newContent
-                );
+            // Kod değişikliği varsa kaydet
+            if (response.codeChanges) {
+                for (const change of response.codeChanges) {
+                    this._currentChange = this._codeChangeManager.createChange(
+                        change.file,
+                        change.originalContent,
+                        change.newContent
+                    );
+                }
             }
-        }
 
-        this._updateWebview();
+            this._updateWebview();
+        } catch (error: any) {
+            vscode.window.showErrorMessage(`AI yanıtı alınamadı: ${error.message}`);
+        }
     }
 
     private _getHtmlForWebview(): string {
