@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src {{cspSource}}; script-src 'unsafe-inline';">
+    <link href="{{styleUri}}" rel="stylesheet">
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <button id="modelsBtn" class="header-button">
+                <span class="codicon codicon-package"></span>
+                Models
+            </button>
+            <button id="chatBtn" class="header-button active">
+                <span class="codicon codicon-comment-discussion"></span>
+                Chat
+            </button>
+            <button id="composerBtn" class="header-button">
+                <span class="codicon codicon-edit"></span>
+                Composer
+            </button>
+            <button id="settingsBtn" class="header-button">
+                <span class="codicon codicon-gear"></span>
+                Settings
+            </button>
+        </div>
+
+        <div class="content">
+            <div id="modelsView" class="view-panel">
+                <div class="models-list"></div>
+            </div>
+
+            <div id="chatView" class="view-panel active">
+                <div id="messageContainer" class="message-container"></div>
+                <div class="input-container">
+                    <textarea id="userInput" placeholder="Mesajınızı yazın... (Shift + Enter ile gönder)"></textarea>
+                    <button id="sendButton">Gönder</button>
+                </div>
+            </div>
+
+            <div id="composerView" class="view-panel">
+                <div class="composer-options">
+                    <label>
+                        <input type="checkbox" id="includeImports" checked>
+                        Import'ları dahil et
+                    </label>
+                    <label>
+                        <input type="checkbox" id="includeTypes" checked>
+                        Tip tanımlarını dahil et
+                    </label>
+                    <label>
+                        <input type="checkbox" id="includeTests" checked>
+                        Test kodunu dahil et
+                    </label>
+                </div>
+                <div id="composerPreview" class="composer-preview"></div>
+                <div class="input-container">
+                    <textarea id="composerInput" placeholder="Kod üretmek için talimatlarınızı yazın... (Shift + Enter ile gönder)"></textarea>
+                    <button id="generateButton">Üret</button>
+                </div>
+            </div>
+
+            <div id="settingsView" class="view-panel">
+                <div class="settings-list"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const vscode = acquireVsCodeApi();
+        const messageContainer = document.getElementById('messageContainer');
+        const userInput = document.getElementById('userInput');
+        const composerInput = document.getElementById('composerInput');
+        const sendButton = document.getElementById('sendButton');
+        const generateButton = document.getElementById('generateButton');
+        let currentView = 'chat';
+        let isViewTransitioning = false;
+
+        // Event Listeners
+        userInput.addEventListener('keydown', handleKeyPress);
+        composerInput.addEventListener('keydown', handleKeyPress);
+        sendButton.addEventListener('click', () => sendMessage(userInput));
+        generateButton.addEventListener('click', () => sendMessage(composerInput));
+        window.addEventListener('message', handleMessage);
+
+        // View switching buttons
+        document.getElementById('modelsBtn').addEventListener('click', () => switchView('models'));
+        document.getElementById('chatBtn').addEventListener('click', () => switchView('chat'));
+        document.getElementById('composerBtn').addEventListener('click', () => switchView('composer'));
+        document.getElementById('settingsBtn').addEventListener('click', () => switchView('settings'));
+
+        function handleKeyPress(e) {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                sendMessage(e.target);
+            }
+        }
+
+        function sendMessage(input) {
+            const text = input.value.trim();
+            if (!text) return;
+
+            vscode.postMessage({
+                command: 'sendMessage',
+                text: text,
+                view: currentView
+            });
+
+            input.value = '';
+            input.style.height = 'auto';
+        }
+
+        function switchView(view) {
+            if (isViewTransitioning || currentView === view) return;
+            isViewTransitioning = true;
+            
+            currentView = view;
+            
+            document.querySelectorAll('.header-button').forEach(btn => {
+                btn.classList.remove('active');
+            });
+            document.getElementById(view + 'Btn').classList.add('active');
+
+            document.querySelectorAll('.view-panel').forEach(panel => {
+                panel.classList.remove('active');
+            });
+            
+            const targetPanel = document.getElementById(view + 'View');
+            targetPanel.classList.add('active');
+
+            // Transition bitince flag'i resetle
+            setTimeout(() => {
+                isViewTransitioning = false;
+            }, 200); // CSS transition süresiyle aynı olmalı
+
+            vscode.postMessage({
+                command: 'viewChanged',
+                view: view
+            });
+        }
+
+        function handleMessage(event) {
+            const message = event.data;
+            switch (message.type) {
+                case 'updateModels':
+                    updateModelsList(message.models);
+                    break;
+                case 'updateMessages':
+                    updateMessages(message.messages);
+                    break;
+                case 'updateSettings':
+                    updateSettings(message.settings);
+                    break;
+                case 'viewChanged':
+                    switchView(message.view);
+                    break;
+            }
+        }
+
+        function updateModelsList(models) {
+            const modelsList = document.querySelector('.models-list');
+            modelsList.innerHTML = models.map(model => `
+                <div class="model-item">
+                    <label>
+                        <input type="checkbox" ${model.active ? 'checked' : ''} 
+                               onchange="toggleModel('${model.name}')">
+                        ${model.name} (${model.provider})
+                    </label>
+                </div>
+            `).join('');
+        }
+
+        function updateMessages(messages) {
+            messageContainer.innerHTML = messages.map(msg => `
+                <div class="message ${msg.role}-message">
+                    <div class="message-header">
+                        <span class="message-role">${msg.role === 'user' ? 'Siz' : 'AI'}</span>
+                        <span class="message-time">${new Date(msg.timestamp).toLocaleTimeString()}</span>
+                    </div>
+                    <div class="message-content">${msg.content}</div>
+                </div>
+            `).join('');
+            scrollToBottom();
+        }
+
+        function updateSettings(settings) {
+            const settingsList = document.querySelector('.settings-list');
+            settingsList.innerHTML = Object.entries(settings).map(([key, value]) => `
+                <div class="setting-item">
+                    <label>
+                        <span>${key}</span>
+                        <input type="${typeof value === 'boolean' ? 'checkbox' : 'text'}"
+                               value="${value}"
+                               ${typeof value === 'boolean' && value ? 'checked' : ''}
+                               onchange="updateSetting('${key}', this.value)">
+                    </label>
+                </div>
+            `).join('');
+        }
+
+        function toggleModel(modelName) {
+            vscode.postMessage({
+                command: 'toggleModel',
+                modelName: modelName,
+                view: currentView
+            });
+        }
+
+        function updateSetting(key, value) {
+            vscode.postMessage({
+                command: 'updateSetting',
+                key: key,
+                value: value
+            });
+        }
+
+        function scrollToBottom() {
+            messageContainer.scrollTop = messageContainer.scrollHeight;
+        }
+
+        // Textarea auto-resize
+        [userInput, composerInput].forEach(input => {
+            input.addEventListener('input', function() {
+                this.style.height = 'auto';
+                this.style.height = (this.scrollHeight) + 'px';
+            });
+        });
+    </script>
+</body>
+</html> 
