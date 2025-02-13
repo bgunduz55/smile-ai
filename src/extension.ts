@@ -8,13 +8,14 @@ import { TestGenerationExecutor } from './agent/executors/TestGenerationExecutor
 import { DocumentationExecutor } from './agent/executors/DocumentationExecutor';
 import { RefactoringExecutor } from './agent/executors/RefactoringExecutor';
 import { ExplanationExecutor } from './agent/executors/ExplanationExecutor';
-import { Task, TaskType } from './agent/types';
+import { Task, TaskType, TaskStatus, TaskPriority } from './agent/types';
 import { ChatPanel } from './chat/ChatPanel';
 import { ComposerPanel } from './composer/ComposerPanel';
 import { CodebaseIndexer } from './utils/CodebaseIndexer';
 import { ModelManager } from './utils/ModelManager';
 import { ModelTreeProvider } from './views/ModelTreeProvider';
 import { FileContext } from './utils/FileAnalyzer';
+import { AIAssistantPanel } from './views/AIAssistantPanel';
 
 // Extension sınıfı
 class SmileAIExtension {
@@ -125,39 +126,16 @@ class SmileAIExtension {
     }
 
     private registerViews() {
-        // Model ağacı görünümünü kaydet
-        vscode.window.registerTreeDataProvider(
-            'smile-ai-models',
-            this.modelTreeProvider
-        );
-
-        // Chat ve Composer görünümlerini kaydet
         const context = this.context;
         const aiEngine = this.aiEngine;
 
+        // AI Assistant panel'ini kaydet
         this.context.subscriptions.push(
             vscode.window.registerWebviewViewProvider(
-                'smile-ai-chat',
+                'smile-ai.assistant',
                 {
                     resolveWebviewView(webviewView) {
-                        webviewView.webview.options = {
-                            enableScripts: true
-                        };
-                        ChatPanel.show(context, aiEngine);
-                    }
-                }
-            )
-        );
-
-        this.context.subscriptions.push(
-            vscode.window.registerWebviewViewProvider(
-                'smile-ai-composer',
-                {
-                    resolveWebviewView(webviewView) {
-                        webviewView.webview.options = {
-                            enableScripts: true
-                        };
-                        ComposerPanel.show(context, aiEngine);
+                        AIAssistantPanel.show(webviewView, context, aiEngine);
                     }
                 }
             )
@@ -190,16 +168,15 @@ class SmileAIExtension {
             })
         );
 
-        // Chat komutu
+        // Chat ve Composer komutları
         this.context.subscriptions.push(
-            vscode.commands.registerCommand('smile-ai.startChat', () => {
+            vscode.commands.registerCommand('smile-ai.openChat', () => {
                 this.startChat();
             })
         );
 
-        // Composer komutu
         this.context.subscriptions.push(
-            vscode.commands.registerCommand('smile-ai.startComposer', () => {
+            vscode.commands.registerCommand('smile-ai.openComposer', () => {
                 this.startComposer();
             })
         );

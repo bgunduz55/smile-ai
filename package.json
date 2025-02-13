@@ -24,68 +24,32 @@
     "viewsContainers": {
       "activitybar": [
         {
-          "id": "smile-ai-sidebar",
+          "id": "smile-ai",
           "title": "Smile AI",
-          "icon": "resources/smile-ai-logo.png"
+          "icon": "media/icon.svg"
         }
       ]
     },
     "views": {
-      "smile-ai-sidebar": [
+      "smile-ai": [
         {
-          "id": "smile-ai-models",
-          "name": "AI Models",
-          "type": "tree",
-          "icon": "resources/model-icon.svg"
-        },
-        {
-          "id": "smile-ai-settings",
-          "name": "Settings",
-          "type": "tree",
-          "icon": "resources/settings-icon.svg"
-        },
-        {
-          "id": "smile-ai-assistant",
-          "name": "AI Assistant",
           "type": "webview",
-          "icon": "resources/assistant-icon.svg"
-        }
-      ]
-    },
-    "menus": {
-      "view/title": [
-        {
-          "command": "smile-ai.addModel",
-          "when": "view == smile-ai-models",
-          "group": "navigation"
-        },
-        {
-          "command": "smile-ai.refreshModels",
-          "when": "view == smile-ai-models",
-          "group": "navigation"
-        }
-      ],
-      "view/item/context": [
-        {
-          "command": "smile-ai.selectActiveModel",
-          "when": "view == smile-ai-models && viewItem == aiModel",
-          "group": "inline"
-        },
-        {
-          "command": "smile-ai.removeModel",
-          "when": "view == smile-ai-models && viewItem == aiModel",
-          "group": "inline"
+          "id": "smile-ai.assistant",
+          "name": "AI Assistant",
+          "icon": "media/icon.svg"
         }
       ]
     },
     "commands": [
       {
-        "command": "smile-ai.startChat",
-        "title": "Smile AI: Start Chat"
+        "command": "smile-ai.openChat",
+        "title": "Open Chat",
+        "category": "Smile AI"
       },
       {
-        "command": "smile-ai.startComposer",
-        "title": "Smile AI: Start Composer"
+        "command": "smile-ai.openComposer",
+        "title": "Open Composer",
+        "category": "Smile AI"
       },
       {
         "command": "smile-ai.analyzeCode",
@@ -109,17 +73,39 @@
       },
       {
         "command": "smile-ai.addModel",
-        "title": "Smile AI: Add AI Model"
+        "title": "Add AI Model",
+        "category": "Smile AI"
       },
       {
         "command": "smile-ai.removeModel",
-        "title": "Smile AI: Remove AI Model"
+        "title": "Remove AI Model",
+        "category": "Smile AI"
       },
       {
         "command": "smile-ai.selectActiveModel",
-        "title": "Smile AI: Select Active Model"
+        "title": "Select Active Model",
+        "category": "Smile AI"
       }
     ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "smile-ai.openChat",
+          "when": "view == smile-ai.assistant",
+          "group": "navigation"
+        },
+        {
+          "command": "smile-ai.openComposer",
+          "when": "view == smile-ai.assistant",
+          "group": "navigation"
+        },
+        {
+          "command": "smile-ai.addModel",
+          "when": "view == smile-ai.assistant",
+          "group": "navigation"
+        }
+      ]
+    },
     "configuration": {
       "title": "Smile AI",
       "properties": {

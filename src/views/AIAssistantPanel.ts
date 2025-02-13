@@ -1,12 +1,22 @@
 import * as vscode from 'vscode';
+import * as fs from 'fs';
+import * as path from 'path';
 import { AIEngine } from '../ai-engine/AIEngine';
-import { marked } from 'marked';
+import { AIMessage } from '../ai-engine/types';
+import { ModelManager } from '../utils/ModelManager';
+
+interface Message {
+    role: 'user' | 'assistant';
+    content: string;
+    timestamp: number;
+}
 
 export class AIAssistantPanel {
     private static currentPanel: AIAssistantPanel | undefined;
     private readonly webviewView: vscode.WebviewView;
-    private messages: any[] = [];
-    private currentMode: 'chat' | 'composer' = 'chat';
+    private messages: Message[] = [];
+    private currentView: string = 'chat';
+    private modelManager: ModelManager;
 
     private constructor(
         webviewView: vscode.WebviewView,
@@ -14,6 +24,7 @@ export class AIAssistantPanel {
         private readonly context: vscode.ExtensionContext
     ) {
         this.webviewView = webviewView;
+        this.modelManager = ModelManager.getInstance();
         this.setupWebview();
     }
 
@@ -43,179 +54,74 @@ export class AIAssistantPanel {
                     case 'sendMessage':
                         await this.handleUserMessage(message.text);
                         break;
-                    case 'switchMode':
-                        this.switchMode(message.mode);
+                    case 'viewChanged':
+                        this.handleViewChange(message.view);
                         break;
-                    case 'applyCode':
-                        await this.applyCode(message.code);
+                    case 'toggleModel':
+                        await this.handleModelToggle(message.modelName);
                         break;
-                    case 'previewDiff':
-                        await this.showDiffPreview(message.originalCode, message.newCode);
+                    case 'updateSetting':
+                        await this.handleSettingUpdate(message.key, message.value);
                         break;
                 }
             },
-            undefined
+            undefined,
+            this.context.subscriptions
         );
+
+        // İlk yükleme
+        this.updateModels();
+        this.updateSettings();
     }
 
-    private getWebviewContent() {
+    private getWebviewContent(): string {
         const styleUri = this.webviewView.webview.asWebviewUri(
             vscode.Uri.joinPath(this.context.extensionUri, 'media', 'assistant.css')
         );
 
-        return `<!DOCTYPE html>
-<html>
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <link href="${styleUri}" rel="stylesheet">
-    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
-</head>
-<body>
-    <div class="container">
-        <div class="mode-selector">
-            <button id="chatMode" class="mode-button active" onclick="switchMode('chat')">Chat</button>
-            <button id="composerMode" class="mode-button" onclick="switchMode('composer')">Composer</button>
-        </div>
+        // HTML template'i oku
+        const htmlPath = path.join(this.context.extensionPath, 'media', 'assistant.html');
+        let html = fs.readFileSync(htmlPath, 'utf8');
 
-        <div class="content">
-            <div id="chatContent" class="content-panel active">
-                <div id="messageContainer" class="message-container"></div>
-            </div>
+        // Template değişkenlerini değiştir
+        html = html.replace('{{styleUri}}', styleUri.toString());
+        html = html.replace('{{cspSource}}', this.webviewView.webview.cspSource);
 
-            <div id="composerContent" class="content-panel">
-                <div class="composer-options">
-                    <label>
-                        <input type="checkbox" id="includeImports" checked>
-                        Import'ları dahil et
-                    </label>
-                    <label>
-                        <input type="checkbox" id="includeTypes" checked>
-                        Tip tanımlarını dahil et
-                    </label>
-                    <label>
-                        <input type="checkbox" id="includeTests" checked>
-                        Test kodunu dahil et
-                    </label>
-                </div>
-                <div id="composerPreview" class="composer-preview"></div>
-            </div>
-        </div>
-
-        <div class="input-container">
-            <textarea id="userInput" placeholder="Mesajınızı yazın... (Shift + Enter ile gönder)"></textarea>
-            <button id="sendButton" onclick="sendMessage()">Gönder</button>
-        </div>
-    </div>
-
-    <script>
-        const vscode = acquireVsCodeApi();
-        const messageContainer = document.getElementById('messageContainer');
-        const userInput = document.getElementById('userInput');
-        const chatMode = document.getElementById('chatMode');
-        const composerMode = document.getElementById('composerMode');
-        const chatContent = document.getElementById('chatContent');
-        const composerContent = document.getElementById('composerContent');
-
-        // Enter tuşu kontrolü
-        userInput.addEventListener('keydown', (e) => {
-            if (e.key === 'Enter' && e.shiftKey) {
-                e.preventDefault();
-                sendMessage();
-            }
-        });
-
-        function sendMessage() {
-            const text = userInput.value.trim();
-            if (!text) return;
-
-            vscode.postMessage({
-                command: 'sendMessage',
-                text: text,
-                mode: getCurrentMode()
-            });
-
-            userInput.value = '';
-        }
-
-        function switchMode(mode) {
-            vscode.postMessage({
-                command: 'switchMode',
-                mode: mode
-            });
-
-            if (mode === 'chat') {
-                chatMode.classList.add('active');
-                composerMode.classList.remove('active');
-                chatContent.classList.add('active');
-                composerContent.classList.remove('active');
-            } else {
-                chatMode.classList.remove('active');
-                composerMode.classList.add('active');
-                chatContent.classList.remove('active');
-                composerContent.classList.add('active');
-            }
-        }
-
-        function getCurrentMode() {
-            return chatMode.classList.contains('active') ? 'chat' : 'composer';
-        }
-
-        function applyCode(code) {
-            vscode.postMessage({
-                command: 'applyCode',
-                code: code
-            });
-        }
-
-        function previewDiff(originalCode, newCode) {
-            vscode.postMessage({
-                command: 'previewDiff',
-                originalCode: originalCode,
-                newCode: newCode
-            });
-        }
-
-        // Otomatik scroll
-        function scrollToBottom() {
-            messageContainer.scrollTop = messageContainer.scrollHeight;
-        }
-
-        // Textarea otomatik yükseklik
-        userInput.addEventListener('input', function() {
-            this.style.height = 'auto';
-            this.style.height = (this.scrollHeight) + 'px';
-        });
-    </script>
-</body>
-</html>`;
+        return html;
     }
 
     private async handleUserMessage(text: string) {
-        // Kullanıcı mesajını ekle
-        this.addMessage({
+        const message: Message = {
             role: 'user',
             content: text,
             timestamp: Date.now()
-        });
+        };
+
+        this.messages.push(message);
+        this.updateMessages();
 
         try {
-            // AI yanıtını al
+            const activeModel = this.modelManager.getActiveModel();
+            if (!activeModel) {
+                throw new Error('Aktif model seçili değil');
+            }
+
             const response = await this.aiEngine.generateResponse({
                 prompt: text,
-                maxTokens: 2048,
-                temperature: 0.7
+                maxTokens: activeModel.maxTokens || 2048,
+                temperature: activeModel.temperature || 0.7
             });
 
-            // AI yanıtını ekle
-            this.addMessage({
+            const aiMessage: Message = {
                 role: 'assistant',
                 content: response.message,
                 timestamp: Date.now()
-            });
+            };
 
-            // Kod değişikliği varsa composer preview'ı güncelle
-            if (this.currentMode === 'composer' && response.codeChanges) {
+            this.messages.push(aiMessage);
+            this.updateMessages();
+
+            if (this.currentView === 'composer' && response.codeChanges) {
                 this.updateComposerPreview(response.codeChanges[0]);
             }
         } catch (error: any) {
@@ -223,64 +129,65 @@ export class AIAssistantPanel {
         }
     }
 
-    private addMessage(message: any) {
-        this.messages.push(message);
-        this.updateMessages();
+    private handleViewChange(view: string) {
+        this.currentView = view;
+        this.updateViewState();
+    }
+
+    private async handleModelToggle(modelName: string) {
+        try {
+            await this.modelManager.setActiveModel(modelName);
+            this.updateModels();
+        } catch (error: any) {
+            vscode.window.showErrorMessage(`Model değiştirilemedi: ${error.message}`);
+        }
+    }
+
+    private async handleSettingUpdate(key: string, value: any) {
+        const config = vscode.workspace.getConfiguration('smile-ai');
+        await config.update(key, value, vscode.ConfigurationTarget.Global);
+        this.updateSettings();
+    }
+
+    private updateModels() {
+        const models = this.modelManager.getModels();
+        const activeModel = this.modelManager.getActiveModel();
+
+        this.webviewView.webview.postMessage({
+            type: 'updateModels',
+            models: models.map(model => ({
+                ...model,
+                active: activeModel?.name === model.name
+            }))
+        });
     }
 
     private updateMessages() {
         this.webviewView.webview.postMessage({
             type: 'updateMessages',
-            messages: this.messages.map(msg => ({
-                ...msg,
-                content: marked(msg.content)
-            }))
+            messages: this.messages
         });
     }
 
-    private switchMode(mode: 'chat' | 'composer') {
-        this.currentMode = mode;
+    private updateSettings() {
+        const config = vscode.workspace.getConfiguration('smile-ai');
+        const settings = {
+            appearance: config.get('appearance'),
+            behavior: config.get('behavior'),
+            shortcuts: config.get('shortcuts')
+        };
+
         this.webviewView.webview.postMessage({
-            type: 'modeChanged',
-            mode: mode
+            type: 'updateSettings',
+            settings
         });
     }
 
-    private async applyCode(code: string) {
-        const editor = vscode.window.activeTextEditor;
-        if (!editor) {
-            vscode.window.showErrorMessage('Aktif bir editör bulunamadı');
-            return;
-        }
-
-        try {
-            await editor.edit(editBuilder => {
-                const document = editor.document;
-                const lastLine = document.lineAt(document.lineCount - 1);
-                const range = new vscode.Range(
-                    new vscode.Position(0, 0),
-                    lastLine.range.end
-                );
-
-                editBuilder.replace(range, code);
-            });
-
-            vscode.window.showInformationMessage('Kod başarıyla uygulandı!');
-        } catch (error: any) {
-            vscode.window.showErrorMessage(`Kod uygulanırken hata: ${error.message}`);
-        }
-    }
-
-    private async showDiffPreview(originalCode: string, newCode: string) {
-        const originalUri = vscode.Uri.parse('untitled:Original.ts');
-        const modifiedUri = vscode.Uri.parse('untitled:Modified.ts');
-
-        await vscode.commands.executeCommand('vscode.diff',
-            originalUri,
-            modifiedUri,
-            'Kod Değişiklikleri',
-            { preview: true }
-        );
+    private updateViewState() {
+        this.webviewView.webview.postMessage({
+            type: 'viewChanged',
+            view: this.currentView
+        });
     }
 
     private updateComposerPreview(codeChange: any) {

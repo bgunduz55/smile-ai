@@ -25,16 +25,108 @@ export class ModelManager {
         return ModelManager.instance;
     }
 
-    private loadModels() {
+    private async loadModels() {
         const config = vscode.workspace.getConfiguration('smile-ai');
         this.models = config.get<AIModel[]>('models') || [];
         const activeModelName = config.get<string>('activeModel');
+
+        // Ollama modellerini çek
+        await this.fetchOllamaModels();
         
+        // LM Studio modellerini çek (eğer erişilebilirse)
+        try {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 1000);
+            
+            const response = await fetch('http://localhost:1234/v1/models', { 
+                signal: controller.signal 
+            });
+            
+            clearTimeout(timeoutId);
+            
+            if (response.ok) {
+                await this.fetchLMStudioModels();
+            }
+        } catch (error) {
+            // LM Studio erişilemiyorsa sessizce devam et
+            console.log('LM Studio not available');
+        }
+
         if (activeModelName) {
             this.activeModel = this.models.find(m => m.name === activeModelName);
         } else if (this.models.length > 0) {
             this.activeModel = this.models[0];
             this.setActiveModel(this.models[0].name);
+        }
+    }
+
+    private async fetchOllamaModels() {
+        try {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 1000);
+            
+            const response = await fetch('http://localhost:11434/api/tags', {
+                signal: controller.signal
+            });
+            
+            clearTimeout(timeoutId);
+            
+            if (!response.ok) {
+                throw new Error('Ollama API returned error');
+            }
+            
+            const data = await response.json();
+            if (data.models) {
+                for (const model of data.models) {
+                    if (!this.models.some(m => m.name === model.name)) {
+                        await this.addModel({
+                            name: model.name,
+                            provider: 'ollama',
+                            modelName: model.name,
+                            apiEndpoint: 'http://localhost:11434',
+                            maxTokens: 2048,
+                            temperature: 0.7
+                        });
+                    }
+                }
+            }
+        } catch (error) {
+            console.log('Ollama not available');
+        }
+    }
+
+    private async fetchLMStudioModels() {
+        try {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 1000);
+            
+            const response = await fetch('http://localhost:1234/v1/models', {
+                signal: controller.signal
+            });
+            
+            clearTimeout(timeoutId);
+            
+            if (!response.ok) {
+                throw new Error('LM Studio API returned error');
+            }
+            
+            const data = await response.json();
+            if (data.data) {
+                for (const model of data.data) {
+                    if (!this.models.some(m => m.name === model.id)) {
+                        await this.addModel({
+                            name: model.id,
+                            provider: 'lmstudio',
+                            modelName: model.id,
+                            apiEndpoint: 'http://localhost:1234',
+                            maxTokens: 2048,
+                            temperature: 0.7
+                        });
+                    }
+                }
+            }
+        } catch (error) {
+            console.log('LM Studio not available');
         }
     }
 
