@@ -92,9 +92,18 @@
         document.getElementById('settingsBtn').addEventListener('click', () => switchView('settings'));
 
         function handleKeyPress(e) {
-            if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault();
-                sendMessage(e.target);
+            if (e.key === 'Enter') {
+                if (e.ctrlKey) {
+                    // Ctrl+Enter: Yeniden indexle ve mesajı gönder
+                    vscode.postMessage({
+                        command: 'reindex'
+                    });
+                    setTimeout(() => sendMessage(e.target), 100);
+                } else if (!e.shiftKey) {
+                    // Sadece Enter: Normal mesaj gönderme
+                    e.preventDefault();
+                    sendMessage(e.target);
+                }
             }
         }
 

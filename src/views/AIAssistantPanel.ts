@@ -1,11 +1,18 @@
 import * as vscode from 'vscode';
 import { AIEngine } from '../ai-engine/AIEngine';
 import { ModelManager } from '../utils/ModelManager';
+import { CodebaseIndexer } from '../utils/CodebaseIndexer';
+import { FileAnalyzer } from '../utils/FileAnalyzer';
 
 interface Message {
     role: 'user' | 'assistant';
     content: string;
     timestamp: number;
+    context?: {
+        file?: string;
+        selection?: string;
+        codebase?: any;
+    };
 }
 
 export class AIAssistantPanel {
@@ -15,6 +22,9 @@ export class AIAssistantPanel {
     private currentView: string = 'chat';
     private modelManager: ModelManager;
     private aiEngine: AIEngine | undefined;
+    private codebaseIndexer: CodebaseIndexer;
+    private fileAnalyzer: FileAnalyzer;
+    private isIndexing: boolean = false;
 
     private constructor(
         webviewView: vscode.WebviewView,
@@ -23,6 +33,8 @@ export class AIAssistantPanel {
     ) {
         this.webviewView = webviewView;
         this.modelManager = ModelManager.getInstance();
+        this.codebaseIndexer = CodebaseIndexer.getInstance();
+        this.fileAnalyzer = FileAnalyzer.getInstance();
         
         // Aktif modeli kontrol et ve AI Engine'i başlat
         const activeModel = this.modelManager.getActiveModel();
@@ -54,6 +66,12 @@ export class AIAssistantPanel {
             });
         }
 
+        // Workspace değişikliklerini dinle
+        vscode.workspace.onDidChangeTextDocument(this.handleDocumentChange, this);
+        vscode.window.onDidChangeActiveTextEditor(this.handleEditorChange, this);
+
+        // İlk indexlemeyi başlat
+        this.indexCodebase();
         this.setupWebview();
     }
 
@@ -94,6 +112,9 @@ export class AIAssistantPanel {
                     case 'updateSetting':
                         await this.handleSettingUpdate(message.key, message.value);
                         break;
+                    case 'reindex':
+                        await this.indexCodebase();
+                        break;
                 }
             },
             undefined,
@@ -129,6 +150,67 @@ export class AIAssistantPanel {
         return html;
     }
 
+    private async indexCodebase() {
+        if (this.isIndexing) return;
+        
+        this.isIndexing = true;
+        try {
+            await this.codebaseIndexer.indexWorkspace();
+            this.webviewView.webview.postMessage({
+                type: 'indexingComplete'
+            });
+        } catch (error) {
+            console.error('Indexing error:', error);
+        } finally {
+            this.isIndexing = false;
+        }
+    }
+
+    private async handleDocumentChange(event: vscode.TextDocumentChangeEvent) {
+        if (event.document === vscode.window.activeTextEditor?.document) {
+            const fileContext = await this.fileAnalyzer.analyzeFile(event.document.uri);
+            this.webviewView.webview.postMessage({
+                type: 'contextUpdate',
+                context: {
+                    file: event.document.fileName,
+                    fileContext
+                }
+            });
+        }
+    }
+
+    private async handleEditorChange(editor: vscode.TextEditor | undefined) {
+        if (editor) {
+            const fileContext = await this.fileAnalyzer.analyzeFile(editor.document.uri);
+            this.webviewView.webview.postMessage({
+                type: 'contextUpdate',
+                context: {
+                    file: editor.document.fileName,
+                    fileContext
+                }
+            });
+        }
+    }
+
+    private async getCurrentContext(): Promise<any> {
+        const editor = vscode.window.activeTextEditor;
+        if (!editor) return {};
+
+        const document = editor.document;
+        const selection = editor.selection;
+        const selectedText = document.getText(selection);
+
+        const fileContext = await this.fileAnalyzer.analyzeFile(document.uri);
+        const projectContext = this.codebaseIndexer.getProjectStructure();
+
+        return {
+            file: document.fileName,
+            selection: selectedText,
+            fileContext,
+            projectContext
+        };
+    }
+
     private async handleUserMessage(text: string) {
         try {
             // Aktif model kontrolü
@@ -150,19 +232,34 @@ export class AIAssistantPanel {
                 });
             }
 
+            // Bağlam bilgisini al
+            const context = await this.getCurrentContext();
+
             // Kullanıcı mesajını ekle
             const message: Message = {
                 role: 'user',
                 content: text,
-                timestamp: Date.now()
+                timestamp: Date.now(),
+                context
             };
 
             this.messages.push(message);
             this.updateMessages();
 
+            // Sistem promptunu hazırla
+            let systemPrompt = `You are a coding assistant with access to the following context:
+File: ${context.file || 'No active file'}
+Selection: ${context.selection ? 'Selected text exists' : 'No selection'}
+Project Structure: Available
+Language: ${context.fileContext?.language || 'Unknown'}
+Framework: ${context.fileContext?.framework || 'Unknown'}
+
+Please provide assistance based on this context. If you need to reference code, use the context provided.`;
+
             // AI yanıtını al
             const response = await this.aiEngine.generateResponse({
                 prompt: text,
+                systemPrompt,
                 maxTokens: activeModel.maxTokens || 2048,
                 temperature: activeModel.temperature || 0.7
             });
@@ -171,7 +268,8 @@ export class AIAssistantPanel {
             const aiMessage: Message = {
                 role: 'assistant',
                 content: response.message,
-                timestamp: Date.now()
+                timestamp: Date.now(),
+                context
             };
 
             this.messages.push(aiMessage);
