@@ -3,8 +3,9 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src {{cspSource}}; script-src 'unsafe-inline'; connect-src http://localhost:11434 http://localhost:1234;">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src {{cspSource}}; script-src 'unsafe-inline' https://cdn.jsdelivr.net; connect-src http://localhost:11434 http://localhost:1234;">
     <link href="{{styleUri}}" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 </head>
 <body>
     <div class="container">
@@ -145,18 +146,21 @@
     <script>
         const vscode = acquireVsCodeApi();
         const messageContainer = document.getElementById('messageContainer');
+        const composerPreview = document.getElementById('composerPreview');
         const userInput = document.getElementById('userInput');
         const composerInput = document.getElementById('composerInput');
         const sendButton = document.getElementById('sendButton');
         const generateButton = document.getElementById('generateButton');
         let currentView = 'chat';
         let isViewTransitioning = false;
+        let chatMessages = [];
+        let composerMessages = [];
 
         // Event Listeners
         userInput.addEventListener('keydown', handleKeyPress);
         composerInput.addEventListener('keydown', handleKeyPress);
-        sendButton.addEventListener('click', () => sendMessage(userInput));
-        generateButton.addEventListener('click', () => sendMessage(composerInput));
+        sendButton.addEventListener('click', () => sendMessage(userInput, 'chat'));
+        generateButton.addEventListener('click', () => sendMessage(composerInput, 'composer'));
         window.addEventListener('message', handleMessage);
 
         // View switching buttons
@@ -177,23 +181,41 @@
                     vscode.postMessage({
                         command: 'reindex'
                     });
-                    setTimeout(() => sendMessage(e.target), 100);
+                    setTimeout(() => sendMessage(e.target, e.target === userInput ? 'chat' : 'composer'), 100);
                 } else if (!e.shiftKey) {
                     // Sadece Enter: Normal mesaj gönderme
                     e.preventDefault();
-                    sendMessage(e.target);
+                    sendMessage(e.target, e.target === userInput ? 'chat' : 'composer');
                 }
             }
         }
 
-        function sendMessage(input) {
+        function sendMessage(input, view) {
             const text = input.value.trim();
             if (!text) return;
 
+            // Mesajı hemen yerel olarak ekle
+            const message = {
+                role: 'user',
+                content: text,
+                timestamp: Date.now()
+            };
+
+            // Mesajı sadece ilgili view'a ekle
+            if (view === 'chat') {
+                chatMessages.push(message);
+                updateChatMessages();
+            } else if (view === 'composer') {
+                composerMessages.push(message);
+                updateComposerMessages();
+            }
+
+            // Mesajı extension'a gönder
             vscode.postMessage({
                 command: 'sendMessage',
                 text: text,
-                view: currentView
+                view: view,
+                timestamp: message.timestamp // Timestamp'i de gönder
             });
 
             input.value = '';
@@ -230,12 +252,25 @@
 
         function handleMessage(event) {
             const message = event.data;
+            console.log('Received message:', message); // Debug log
+
             switch (message.type) {
                 case 'updateSettings':
                     updateSettings(message.settings);
                     break;
                 case 'updateMessages':
-                    updateMessages(message.messages);
+                    console.log('Updating messages for view:', message.view); // Debug log
+                    // Eğer view belirtilmemişse, mesajları her iki view'a da ekle
+                    if (!message.view || message.view === 'chat') {
+                        chatMessages = message.messages || [];
+                        console.log('Chat messages:', chatMessages); // Debug log
+                        updateChatMessages();
+                    }
+                    if (!message.view || message.view === 'composer') {
+                        composerMessages = message.messages || [];
+                        console.log('Composer messages:', composerMessages); // Debug log
+                        updateComposerMessages();
+                    }
                     break;
                 case 'updateModelList':
                     updateModelOptions(message.models);
@@ -258,17 +293,54 @@
             document.getElementById('autoImport').checked = settings.behavior?.autoImport ?? true;
         }
 
-        function updateMessages(messages) {
-            messageContainer.innerHTML = messages.map(msg => `
-                <div class="message ${msg.role}-message">
-                    <div class="message-header">
-                        <span class="message-role">${msg.role === 'user' ? 'Siz' : 'AI'}</span>
-                        <span class="message-time">${new Date(msg.timestamp).toLocaleTimeString()}</span>
+        function updateChatMessages() {
+            console.log('Rendering chat messages:', chatMessages); // Debug log
+            if (!Array.isArray(chatMessages)) {
+                console.error('chatMessages is not an array:', chatMessages);
+                return;
+            }
+
+            messageContainer.innerHTML = chatMessages.map(msg => {
+                console.log('Processing chat message:', msg); // Debug log
+                return `
+                    <div class="message ${msg.role}-message">
+                        <div class="message-header">
+                            <span class="message-role">${msg.role === 'user' ? 'Siz' : 'AI'}</span>
+                            <span class="message-time">${new Date(msg.timestamp).toLocaleTimeString()}</span>
+                        </div>
+                        <div class="message-content">${marked.parse(msg.content || '')}</div>
                     </div>
-                    <div class="message-content">${msg.content}</div>
-                </div>
-            `).join('');
-            scrollToBottom();
+                `;
+            }).join('');
+            scrollToBottom(messageContainer);
+        }
+
+        function updateComposerMessages() {
+            console.log('Rendering composer messages:', composerMessages); // Debug log
+            if (!Array.isArray(composerMessages)) {
+                console.error('composerMessages is not an array:', composerMessages);
+                return;
+            }
+
+            composerPreview.innerHTML = composerMessages.map(msg => {
+                console.log('Processing composer message:', msg); // Debug log
+                return `
+                    <div class="message ${msg.role}-message">
+                        <div class="message-header">
+                            <span class="message-role">${msg.role === 'user' ? 'İstek' : 'Yanıt'}</span>
+                            <span class="message-time">${new Date(msg.timestamp).toLocaleTimeString()}</span>
+                        </div>
+                        <div class="message-content">${marked.parse(msg.content || '')}</div>
+                        ${msg.role === 'assistant' ? `
+                            <div class="message-actions">
+                                <button onclick="applyCode(${msg.timestamp})">Uygula</button>
+                                <button onclick="copyCode(${msg.timestamp})">Kopyala</button>
+                            </div>
+                        ` : ''}
+                    </div>
+                `;
+            }).join('');
+            scrollToBottom(composerPreview);
         }
 
         function updateModelList() {
@@ -349,8 +421,8 @@
             });
         }
 
-        function scrollToBottom() {
-            messageContainer.scrollTop = messageContainer.scrollHeight;
+        function scrollToBottom(container) {
+            container.scrollTop = container.scrollHeight;
         }
 
         // Textarea auto-resize
@@ -363,6 +435,26 @@
 
         // İlk yükleme
         updateModelList();
+
+        function applyCode(timestamp) {
+            const message = composerMessages.find(m => m.timestamp === timestamp);
+            if (message) {
+                vscode.postMessage({
+                    command: 'applyCode',
+                    code: message.content
+                });
+            }
+        }
+
+        function copyCode(timestamp) {
+            const message = composerMessages.find(m => m.timestamp === timestamp);
+            if (message) {
+                vscode.postMessage({
+                    command: 'copyCode',
+                    code: message.content
+                });
+            }
+        }
     </script>
 </body>
 </html> 
