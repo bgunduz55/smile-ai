@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
-import { CodeAnalysis } from './CodeAnalyzer';
+import { CodeAnalyzer, CodeAnalysis } from './CodeAnalyzer';
 
 export interface FileContext {
     path: string;
@@ -11,7 +11,16 @@ export interface FileContext {
     projectType?: ProjectType;
     dependencies?: string[];
     imports?: string[];
+    exports?: string[];
     analysis?: CodeAnalysis;
+    ast?: any;
+    metadata?: {
+        size: number;
+        lastModified: number;
+        gitHistory?: any;
+        coverage?: number;
+        complexity?: number;
+    };
 }
 
 export enum FileType {
@@ -33,12 +42,86 @@ export enum ProjectType {
     UNKNOWN = 'UNKNOWN'
 }
 
+interface LanguageConfig {
+    extensions: string[];
+    frameworks: {
+        name: string;
+        patterns: string[];
+    }[];
+    importPatterns: RegExp[];
+    exportPatterns: RegExp[];
+    testPatterns: string[];
+}
+
 export class FileAnalyzer {
     private static instance: FileAnalyzer;
+    private codeAnalyzer: CodeAnalyzer;
     private projectContext: Map<string, FileContext>;
+    private languageConfigs: Map<string, LanguageConfig>;
 
     private constructor() {
         this.projectContext = new Map();
+        this.languageConfigs = new Map();
+        this.codeAnalyzer = CodeAnalyzer.getInstance();
+        this.initializeLanguageConfigs();
+    }
+
+    private initializeLanguageConfigs() {
+        this.languageConfigs = new Map([
+            ['typescript', {
+                extensions: ['.ts', '.tsx'],
+                frameworks: [
+                    { name: 'react', patterns: ['react', 'jsx', 'tsx'] },
+                    { name: 'angular', patterns: ['@angular', 'ngModule'] },
+                    { name: 'vue', patterns: ['vue', 'createApp'] },
+                    { name: 'nest', patterns: ['@nestjs', '@Injectable'] }
+                ],
+                importPatterns: [
+                    /import\s+.*?from\s+['"](.+?)['"]/g,
+                    /require\(['"](.+?)['"]\)/g
+                ],
+                exportPatterns: [
+                    /export\s+(?:default\s+)?(?:class|interface|function|const|let|var)\s+(\w+)/g,
+                    /export\s+{\s*(.+?)\s*}/g
+                ],
+                testPatterns: ['.test.ts', '.spec.ts', '__tests__']
+            }],
+            ['javascript', {
+                extensions: ['.js', '.jsx'],
+                frameworks: [
+                    { name: 'react', patterns: ['react', 'jsx'] },
+                    { name: 'vue', patterns: ['vue', 'createApp'] },
+                    { name: 'express', patterns: ['express()', 'app.use'] }
+                ],
+                importPatterns: [
+                    /import\s+.*?from\s+['"](.+?)['"]/g,
+                    /require\(['"](.+?)['"]\)/g
+                ],
+                exportPatterns: [
+                    /module\.exports\s*=\s*/g,
+                    /exports\.\w+\s*=\s*/g
+                ],
+                testPatterns: ['.test.js', '.spec.js', '__tests__']
+            }],
+            ['python', {
+                extensions: ['.py', '.pyw'],
+                frameworks: [
+                    { name: 'django', patterns: ['django', 'urls.py'] },
+                    { name: 'flask', patterns: ['flask', 'Flask'] },
+                    { name: 'fastapi', patterns: ['fastapi', 'FastAPI'] }
+                ],
+                importPatterns: [
+                    /import\s+(\w+)/g,
+                    /from\s+(\w+)\s+import/g
+                ],
+                exportPatterns: [
+                    /^def\s+\w+/gm,
+                    /^class\s+\w+/gm
+                ],
+                testPatterns: ['test_', '_test.py', 'tests/']
+            }],
+            // Diğer diller için benzer konfigürasyonlar...
+        ]);
     }
 
     public static getInstance(): FileAnalyzer {
@@ -59,16 +142,29 @@ export class FileAnalyzer {
 
         const document = await vscode.workspace.openTextDocument(uri);
         const content = document.getText();
+        const stats = await vscode.workspace.fs.stat(uri);
+
+        const language = this.detectLanguage(extension, content);
+        const languageConfig = this.languageConfigs.get(language);
 
         const context: FileContext = {
             path: filePath,
             content,
-            language: this.detectLanguage(extension, content),
-            fileType: this.detectFileType(fileName, extension, content),
-            framework: this.detectFramework(content),
-            dependencies: this.detectDependencies(content),
-            imports: this.extractImports(content)
+            language,
+            fileType: this.detectFileType(fileName, extension, content, languageConfig),
+            framework: this.detectFramework(content, languageConfig),
+            dependencies: this.detectDependencies(content, languageConfig),
+            imports: this.extractImports(content, languageConfig),
+            exports: this.extractExports(content, languageConfig),
+            metadata: {
+                size: stats.size,
+                lastModified: stats.mtime,
+                complexity: this.calculateComplexity(content)
+            }
         };
+
+        // AST oluştur
+        context.ast = await this.parseAST(document);
 
         // Projenin tipini belirle
         context.projectType = await this.detectProjectType(uri);
@@ -80,114 +176,122 @@ export class FileAnalyzer {
     }
 
     private detectLanguage(extension: string, content: string): string {
-        // Dosya uzantısına göre dil tespiti
-        const languageMap: Record<string, string> = {
-            '.ts': 'typescript',
-            '.js': 'javascript',
-            '.py': 'python',
-            '.java': 'java',
-            '.cs': 'csharp',
-            '.cpp': 'cpp',
-            '.html': 'html',
-            '.css': 'css',
-            '.scss': 'scss',
-            '.json': 'json',
-            '.md': 'markdown'
-        };
-
-        return languageMap[extension.toLowerCase()] || 'plaintext';
+        for (const [language, config] of this.languageConfigs) {
+            if (config.extensions.includes(extension.toLowerCase())) {
+                return language;
+            }
+        }
+        return 'plaintext';
     }
 
-    private detectFileType(fileName: string, extension: string, content: string): FileType {
+    private detectFileType(
+        fileName: string,
+        extension: string,
+        content: string,
+        config?: LanguageConfig
+    ): FileType {
         // Test dosyaları
-        if (fileName.includes('.test.') || fileName.includes('.spec.') || 
-            fileName.endsWith('Test.ts') || fileName.endsWith('Tests.cs')) {
+        if (config?.testPatterns.some(pattern => 
+            fileName.includes(pattern) || content.includes(pattern)
+        )) {
             return FileType.TEST;
         }
 
         // Konfigürasyon dosyaları
-        if (fileName.includes('config') || extension === '.json' || 
-            extension === '.yml' || extension === '.yaml') {
+        if (fileName.includes('config') || 
+            ['.json', '.yml', '.yaml', '.env'].includes(extension)) {
             return FileType.CONFIG;
         }
 
         // Dokümantasyon
-        if (extension === '.md' || extension === '.txt') {
+        if (['.md', '.txt', '.rst', '.doc'].includes(extension)) {
             return FileType.DOCUMENTATION;
         }
 
         // Stil dosyaları
-        if (extension === '.css' || extension === '.scss' || extension === '.less') {
+        if (['.css', '.scss', '.less', '.sass'].includes(extension)) {
             return FileType.STYLE;
         }
 
         // Kaynak dosyaları
-        if (['.png', '.jpg', '.svg', '.gif'].includes(extension)) {
+        if (['.png', '.jpg', '.svg', '.gif', '.ico'].includes(extension)) {
             return FileType.RESOURCE;
         }
 
-        // Varsayılan olarak kaynak kod
         return FileType.SOURCE;
     }
 
-    private detectFramework(content: string): string | undefined {
-        const frameworks = {
-            react: ['react', 'jsx', 'tsx'],
-            angular: ['@angular', 'ngModule'],
-            vue: ['Vue', 'createApp'],
-            express: ['express()', 'app.use'],
-            django: ['django', 'urls.py'],
-            spring: ['@SpringBootApplication', '@Autowired'],
-            dotnet: ['Microsoft.AspNetCore', 'IConfiguration']
-        };
+    private detectFramework(content: string, config?: LanguageConfig): string | undefined {
+        if (!config) return undefined;
 
-        for (const [framework, patterns] of Object.entries(frameworks)) {
-            if (patterns.some(pattern => content.includes(pattern))) {
-                return framework;
+        for (const framework of config.frameworks) {
+            if (framework.patterns.some(pattern => content.includes(pattern))) {
+                return framework.name;
             }
         }
 
         return undefined;
     }
 
-    private detectDependencies(content: string): string[] {
-        const dependencies: string[] = [];
+    private detectDependencies(content: string, config?: LanguageConfig): string[] {
+        const dependencies: Set<string> = new Set();
         
-        // Import/require ifadelerini analiz et
-        const importRegex = /import\s+.*?from\s+['"](.+?)['"]/g;
-        const requireRegex = /require\(['"](.+?)['"]\)/g;
-        
-        let match;
-        while ((match = importRegex.exec(content)) !== null) {
-            dependencies.push(match[1]);
-        }
-        while ((match = requireRegex.exec(content)) !== null) {
-            dependencies.push(match[1]);
-        }
+        if (!config) return [];
 
-        return [...new Set(dependencies)];
-    }
-
-    private extractImports(content: string): string[] {
-        const imports: string[] = [];
-        
-        // Farklı dillerdeki import/using/require ifadelerini yakala
-        const patterns = [
-            /import\s+.*?from\s+['"](.+?)['"]/g,  // ES6 imports
-            /require\(['"](.+?)['"]\)/g,           // CommonJS
-            /using\s+([\w.]+);/g,                 // C#
-            /import\s+([\w.]+);/g,                // Java
-            /from\s+(['"].*?['"])/g,              // Python
-        ];
-
-        patterns.forEach(pattern => {
+        for (const pattern of config.importPatterns) {
             let match;
             while ((match = pattern.exec(content)) !== null) {
-                imports.push(match[1]);
+                dependencies.add(match[1]);
             }
-        });
+        }
 
-        return [...new Set(imports)];
+        return Array.from(dependencies);
+    }
+
+    private extractImports(content: string, config?: LanguageConfig): string[] {
+        const imports: Set<string> = new Set();
+        
+        if (!config) return [];
+
+        for (const pattern of config.importPatterns) {
+            let match;
+            while ((match = pattern.exec(content)) !== null) {
+                imports.add(match[1]);
+            }
+        }
+
+        return Array.from(imports);
+    }
+
+    private extractExports(content: string, config?: LanguageConfig): string[] {
+        const exports: Set<string> = new Set();
+        
+        if (!config) return [];
+
+        for (const pattern of config.exportPatterns) {
+            let match;
+            while ((match = pattern.exec(content)) !== null) {
+                exports.add(match[1]);
+            }
+        }
+
+        return Array.from(exports);
+    }
+
+    private async parseAST(document: vscode.TextDocument): Promise<any> {
+        // Dile göre uygun AST parser'ı kullan
+        const language = document.languageId;
+        // TODO: Implement AST parsing for different languages
+        return null;
+    }
+
+    private calculateComplexity(content: string): number {
+        // Basit bir karmaşıklık hesaplaması
+        const lines = content.split('\n').length;
+        const conditionals = (content.match(/if|else|switch|case|for|while|do/g) || []).length;
+        const functions = (content.match(/function|=>|\bdef\b|\bclass\b/g) || []).length;
+        
+        return Math.round((lines + conditionals * 2 + functions * 3) / 10);
     }
 
     private async detectProjectType(uri: vscode.Uri): Promise<ProjectType> {

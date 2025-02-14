@@ -9,10 +9,6 @@
 <body>
     <div class="container">
         <div class="header">
-            <button id="modelsBtn" class="header-button">
-                <span class="codicon codicon-package"></span>
-                Models
-            </button>
             <button id="chatBtn" class="header-button active">
                 <span class="codicon codicon-comment-discussion"></span>
                 Chat
@@ -28,14 +24,10 @@
         </div>
 
         <div class="content">
-            <div id="modelsView" class="view-panel">
-                <div class="models-list"></div>
-            </div>
-
             <div id="chatView" class="view-panel active">
                 <div id="messageContainer" class="message-container"></div>
                 <div class="input-container">
-                    <textarea id="userInput" placeholder="Mesajınızı yazın... (Shift + Enter ile gönder)"></textarea>
+                    <textarea id="userInput" placeholder="Mesajınızı yazın... (Enter ile gönder, Ctrl+Enter ile yeniden indexle)"></textarea>
                     <button id="sendButton">Gönder</button>
                 </div>
             </div>
@@ -57,13 +49,95 @@
                 </div>
                 <div id="composerPreview" class="composer-preview"></div>
                 <div class="input-container">
-                    <textarea id="composerInput" placeholder="Kod üretmek için talimatlarınızı yazın... (Shift + Enter ile gönder)"></textarea>
+                    <textarea id="composerInput" placeholder="Kod üretmek için talimatlarınızı yazın... (Enter ile gönder)"></textarea>
                     <button id="generateButton">Üret</button>
                 </div>
             </div>
 
             <div id="settingsView" class="view-panel">
-                <div class="settings-list"></div>
+                <div class="settings-container">
+                    <div class="settings-section">
+                        <h3>AI Model Ayarları</h3>
+                        <div class="model-settings">
+                            <div class="model-selector">
+                                <label>AI Provider</label>
+                                <select id="aiProvider">
+                                    <option value="ollama">Ollama</option>
+                                    <option value="lmstudio">LM Studio</option>
+                                </select>
+                            </div>
+                            <div class="model-selector">
+                                <label>Model</label>
+                                <select id="modelName"></select>
+                            </div>
+                            <div class="model-config">
+                                <label>API Endpoint</label>
+                                <input type="text" id="apiEndpoint" placeholder="http://localhost:11434">
+                            </div>
+                            <div class="model-config">
+                                <label>Max Tokens</label>
+                                <input type="number" id="maxTokens" value="2048">
+                            </div>
+                            <div class="model-config">
+                                <label>Temperature</label>
+                                <input type="range" id="temperature" min="0" max="1" step="0.1" value="0.7">
+                                <span id="temperatureValue">0.7</span>
+                            </div>
+                            <button id="saveModel" class="primary-button">Kaydet</button>
+                            <button id="testConnection" class="secondary-button">Bağlantıyı Test Et</button>
+                        </div>
+                    </div>
+
+                    <div class="settings-section">
+                        <h3>Görünüm Ayarları</h3>
+                        <div class="appearance-settings">
+                            <div class="setting-item">
+                                <label>Tema</label>
+                                <select id="theme">
+                                    <option value="system">Sistem</option>
+                                    <option value="light">Açık</option>
+                                    <option value="dark">Koyu</option>
+                                </select>
+                            </div>
+                            <div class="setting-item">
+                                <label>Font Boyutu</label>
+                                <input type="number" id="fontSize" value="14">
+                            </div>
+                            <div class="setting-item">
+                                <label>Font Ailesi</label>
+                                <select id="fontFamily">
+                                    <option value="system-ui">Sistem</option>
+                                    <option value="monospace">Monospace</option>
+                                    <option value="sans-serif">Sans Serif</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="settings-section">
+                        <h3>Davranış Ayarları</h3>
+                        <div class="behavior-settings">
+                            <div class="setting-item">
+                                <label>
+                                    <input type="checkbox" id="autoComplete" checked>
+                                    Otomatik Tamamlama
+                                </label>
+                            </div>
+                            <div class="setting-item">
+                                <label>
+                                    <input type="checkbox" id="inlineCompletion" checked>
+                                    Satır İçi Tamamlama
+                                </label>
+                            </div>
+                            <div class="setting-item">
+                                <label>
+                                    <input type="checkbox" id="autoImport" checked>
+                                    Otomatik Import
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+                </div>
             </div>
         </div>
     </div>
@@ -86,10 +160,15 @@
         window.addEventListener('message', handleMessage);
 
         // View switching buttons
-        document.getElementById('modelsBtn').addEventListener('click', () => switchView('models'));
         document.getElementById('chatBtn').addEventListener('click', () => switchView('chat'));
         document.getElementById('composerBtn').addEventListener('click', () => switchView('composer'));
         document.getElementById('settingsBtn').addEventListener('click', () => switchView('settings'));
+
+        // Model settings listeners
+        document.getElementById('aiProvider').addEventListener('change', updateModelList);
+        document.getElementById('temperature').addEventListener('input', updateTemperatureValue);
+        document.getElementById('saveModel').addEventListener('click', saveModelSettings);
+        document.getElementById('testConnection').addEventListener('click', testModelConnection);
 
         function handleKeyPress(e) {
             if (e.key === 'Enter') {
@@ -139,10 +218,9 @@
             const targetPanel = document.getElementById(view + 'View');
             targetPanel.classList.add('active');
 
-            // Transition bitince flag'i resetle
             setTimeout(() => {
                 isViewTransitioning = false;
-            }, 200); // CSS transition süresiyle aynı olmalı
+            }, 200);
 
             vscode.postMessage({
                 command: 'viewChanged',
@@ -153,14 +231,14 @@
         function handleMessage(event) {
             const message = event.data;
             switch (message.type) {
-                case 'updateModels':
-                    updateModelsList(message.models);
+                case 'updateSettings':
+                    updateSettings(message.settings);
                     break;
                 case 'updateMessages':
                     updateMessages(message.messages);
                     break;
-                case 'updateSettings':
-                    updateSettings(message.settings);
+                case 'updateModelList':
+                    updateModelOptions(message.models);
                     break;
                 case 'viewChanged':
                     switchView(message.view);
@@ -168,17 +246,16 @@
             }
         }
 
-        function updateModelsList(models) {
-            const modelsList = document.querySelector('.models-list');
-            modelsList.innerHTML = models.map(model => `
-                <div class="model-item">
-                    <label>
-                        <input type="checkbox" ${model.active ? 'checked' : ''} 
-                               onchange="toggleModel('${model.name}')">
-                        ${model.name} (${model.provider})
-                    </label>
-                </div>
-            `).join('');
+        function updateSettings(settings) {
+            // Tema ayarları
+            document.getElementById('theme').value = settings.appearance?.theme || 'system';
+            document.getElementById('fontSize').value = settings.appearance?.fontSize || 14;
+            document.getElementById('fontFamily').value = settings.appearance?.fontFamily || 'system-ui';
+
+            // Davranış ayarları
+            document.getElementById('autoComplete').checked = settings.behavior?.autoComplete ?? true;
+            document.getElementById('inlineCompletion').checked = settings.behavior?.inlineCompletion ?? true;
+            document.getElementById('autoImport').checked = settings.behavior?.autoImport ?? true;
         }
 
         function updateMessages(messages) {
@@ -194,34 +271,81 @@
             scrollToBottom();
         }
 
-        function updateSettings(settings) {
-            const settingsList = document.querySelector('.settings-list');
-            settingsList.innerHTML = Object.entries(settings).map(([key, value]) => `
-                <div class="setting-item">
-                    <label>
-                        <span>${key}</span>
-                        <input type="${typeof value === 'boolean' ? 'checkbox' : 'text'}"
-                               value="${value}"
-                               ${typeof value === 'boolean' && value ? 'checked' : ''}
-                               onchange="updateSetting('${key}', this.value)">
-                    </label>
-                </div>
-            `).join('');
+        function updateModelList() {
+            const provider = document.getElementById('aiProvider').value;
+            const modelSelect = document.getElementById('modelName');
+            modelSelect.innerHTML = '<option value="">Yükleniyor...</option>';
+
+            // Provider değiştiğinde endpoint'i güncelle
+            if (provider === 'ollama') {
+                document.getElementById('apiEndpoint').value = 'http://localhost:11434';
+                // Ollama modellerini kontrol et
+                fetch('http://localhost:11434/api/tags')
+                    .then(response => response.json())
+                    .then(data => {
+                        modelSelect.innerHTML = '';
+                        if (data.models) {
+                            data.models.forEach(model => {
+                                const option = document.createElement('option');
+                                option.value = model.name;
+                                option.textContent = model.name;
+                                modelSelect.appendChild(option);
+                            });
+                        }
+                    })
+                    .catch(() => {
+                        modelSelect.innerHTML = '<option value="">Ollama bağlantısı başarısız</option>';
+                    });
+            } else {
+                document.getElementById('apiEndpoint').value = 'http://localhost:1234';
+                // LM Studio modellerini kontrol et
+                fetch('http://localhost:1234/v1/models')
+                    .then(response => response.json())
+                    .then(data => {
+                        modelSelect.innerHTML = '';
+                        if (data.data) {
+                            data.data.forEach(model => {
+                                const option = document.createElement('option');
+                                option.value = model.id;
+                                option.textContent = model.id;
+                                modelSelect.appendChild(option);
+                            });
+                        }
+                    })
+                    .catch(() => {
+                        modelSelect.innerHTML = '<option value="">LM Studio bağlantısı başarısız</option>';
+                    });
+            }
         }
 
-        function toggleModel(modelName) {
+        function updateTemperatureValue() {
+            const value = document.getElementById('temperature').value;
+            document.getElementById('temperatureValue').textContent = value;
+        }
+
+        function saveModelSettings() {
+            const settings = {
+                provider: document.getElementById('aiProvider').value,
+                modelName: document.getElementById('modelName').value,
+                apiEndpoint: document.getElementById('apiEndpoint').value,
+                maxTokens: parseInt(document.getElementById('maxTokens').value),
+                temperature: parseFloat(document.getElementById('temperature').value)
+            };
+
             vscode.postMessage({
-                command: 'toggleModel',
-                modelName: modelName,
-                view: currentView
+                command: 'saveModelSettings',
+                settings
             });
         }
 
-        function updateSetting(key, value) {
+        function testModelConnection() {
             vscode.postMessage({
-                command: 'updateSetting',
-                key: key,
-                value: value
+                command: 'testModelConnection',
+                settings: {
+                    provider: document.getElementById('aiProvider').value,
+                    modelName: document.getElementById('modelName').value,
+                    apiEndpoint: document.getElementById('apiEndpoint').value
+                }
             });
         }
 
@@ -236,6 +360,9 @@
                 this.style.height = (this.scrollHeight) + 'px';
             });
         });
+
+        // İlk yükleme
+        updateModelList();
     </script>
 </body>
 </html> 

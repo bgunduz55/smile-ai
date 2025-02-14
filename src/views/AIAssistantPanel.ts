@@ -106,8 +106,11 @@ export class AIAssistantPanel {
                     case 'viewChanged':
                         this.handleViewChange(message.view);
                         break;
-                    case 'toggleModel':
-                        await this.handleModelToggle(message.modelName);
+                    case 'saveModelSettings':
+                        await this.handleModelSettings(message.settings);
+                        break;
+                    case 'testModelConnection':
+                        await this.testModelConnection(message.settings);
                         break;
                     case 'updateSetting':
                         await this.handleSettingUpdate(message.key, message.value);
@@ -316,6 +319,66 @@ Please provide assistance based on this context. If you need to reference code, 
         const config = vscode.workspace.getConfiguration('smile-ai');
         await config.update(key, value, vscode.ConfigurationTarget.Global);
         this.updateSettings();
+    }
+
+    private async handleModelSettings(settings: any) {
+        try {
+            // Model ayarlarını kaydet
+            const config = vscode.workspace.getConfiguration('smile-ai');
+            await config.update('models', [
+                {
+                    name: settings.modelName,
+                    provider: settings.provider,
+                    modelName: settings.modelName,
+                    apiEndpoint: settings.apiEndpoint,
+                    maxTokens: settings.maxTokens,
+                    temperature: settings.temperature
+                }
+            ], vscode.ConfigurationTarget.Global);
+
+            // Aktif model olarak ayarla
+            await config.update('activeModel', settings.modelName, vscode.ConfigurationTarget.Global);
+
+            // AI Engine'i güncelle
+            this.aiEngine = new AIEngine({
+                provider: {
+                    name: settings.provider,
+                    modelName: settings.modelName,
+                    apiEndpoint: settings.apiEndpoint
+                },
+                maxTokens: settings.maxTokens,
+                temperature: settings.temperature
+            });
+
+            vscode.window.showInformationMessage('Model ayarları kaydedildi');
+        } catch (error: any) {
+            vscode.window.showErrorMessage(`Model ayarları kaydedilemedi: ${error.message}`);
+        }
+    }
+
+    private async testModelConnection(settings: any) {
+        try {
+            const testEngine = new AIEngine({
+                provider: {
+                    name: settings.provider,
+                    modelName: settings.modelName,
+                    apiEndpoint: settings.apiEndpoint
+                },
+                maxTokens: 100,
+                temperature: 0.7
+            });
+
+            const response = await testEngine.generateResponse({
+                prompt: 'Test message',
+                maxTokens: 10
+            });
+
+            if (response) {
+                vscode.window.showInformationMessage('Model bağlantısı başarılı!');
+            }
+        } catch (error: any) {
+            vscode.window.showErrorMessage(`Model bağlantı hatası: ${error.message}`);
+        }
     }
 
     private updateModels() {

@@ -7,6 +7,9 @@ interface IndexedFile extends FileContext {
     uri: vscode.Uri;
     lastModified: number;
     symbols: CodeSymbol[];
+    dependencies: string[];
+    references: CodeReference[];
+    ast?: any;
 }
 
 interface CodeSymbol {
@@ -14,6 +17,22 @@ interface CodeSymbol {
     kind: vscode.SymbolKind;
     location: vscode.Location;
     containerName?: string;
+    children?: CodeSymbol[];
+}
+
+interface CodeReference {
+    symbol: string;
+    location: vscode.Location;
+    type: 'definition' | 'reference' | 'implementation';
+}
+
+interface SearchResult {
+    file: string;
+    matches: {
+        line: number;
+        content: string;
+        symbol?: string;
+    }[];
 }
 
 export class CodebaseIndexer {
@@ -24,6 +43,7 @@ export class CodebaseIndexer {
     private isIndexing: boolean;
     private lastIndexTime: number;
     private watcher: vscode.FileSystemWatcher | undefined;
+    private supportedLanguages: Set<string>;
 
     private constructor() {
         this.fileAnalyzer = FileAnalyzer.getInstance();
@@ -31,6 +51,33 @@ export class CodebaseIndexer {
         this.indexedFiles = new Map();
         this.isIndexing = false;
         this.lastIndexTime = 0;
+        this.supportedLanguages = new Set([
+            'typescript', 'javascript', 'python', 'java', 'csharp',
+            'cpp', 'c', 'go', 'rust', 'php', 'ruby', 'swift'
+        ]);
+
+        this.setupWatchers();
+    }
+
+    private setupWatchers() {
+        // Dosya değişikliklerini izle
+        this.watcher = vscode.workspace.createFileSystemWatcher(
+            '**/*.*',
+            false, // create
+            false, // change
+            false  // delete
+        );
+
+        this.watcher.onDidCreate(uri => this.handleFileChange(uri));
+        this.watcher.onDidChange(uri => this.handleFileChange(uri));
+        this.watcher.onDidDelete(uri => this.handleFileDelete(uri));
+
+        // Editör değişikliklerini izle
+        vscode.window.onDidChangeActiveTextEditor(editor => {
+            if (editor) {
+                this.handleFileChange(editor.document.uri);
+            }
+        });
     }
 
     public static getInstance(): CodebaseIndexer {
@@ -40,69 +87,53 @@ export class CodebaseIndexer {
         return CodebaseIndexer.instance;
     }
 
-    private setupFileWatcher() {
-        if (this.watcher) {
-            return;
-        }
-
-        // Dosya değişikliklerini izle
-        this.watcher = vscode.workspace.createFileSystemWatcher(
-            '**/*.{ts,tsx,js,jsx,json,md}',
-            false, // create
-            false, // change
-            false  // delete
-        );
-
-        this.watcher.onDidCreate(uri => this.handleFileChange(uri));
-        this.watcher.onDidChange(uri => this.handleFileChange(uri));
-        this.watcher.onDidDelete(uri => this.handleFileDelete(uri));
-    }
-
-    private async handleFileChange(uri: vscode.Uri) {
-        try {
-            // Dosyayı yeniden indexle
-            await this.indexFile(uri);
-            
-            // Bağımlı dosyaları bul ve güncelle
-            const dependencies = await this.findDependentFiles(uri);
-            for (const dep of dependencies) {
-                await this.indexFile(dep);
-            }
-        } catch (error) {
-            console.error(`File change handling error: ${error}`);
-        }
-    }
-
-    private handleFileDelete(uri: vscode.Uri) {
-        // Index'ten dosyayı kaldır
-        this.indexedFiles.delete(uri.fsPath);
-    }
-
     public async indexWorkspace() {
         if (this.isIndexing) return;
         this.isIndexing = true;
 
         try {
-            // File watcher'ı başlat
-            this.setupFileWatcher();
-
-            // Tüm workspace dosyalarını bul
-            const files = await vscode.workspace.findFiles(
-                '**/*.{ts,tsx,js,jsx,json,md}',
-                '**/node_modules/**'
-            );
+            // Tüm desteklenen dillerdeki dosyaları bul
+            const files = await this.findAllSupportedFiles();
 
             // Her dosyayı indexle
             for (const file of files) {
                 await this.indexFile(file);
             }
 
+            // Referansları ve bağımlılıkları analiz et
+            await this.analyzeReferences();
+
             this.lastIndexTime = Date.now();
         } catch (error) {
-            console.error(`Workspace indexing error: ${error}`);
+            console.error('Workspace indexing error:', error);
         } finally {
             this.isIndexing = false;
         }
+    }
+
+    private async findAllSupportedFiles(): Promise<vscode.Uri[]> {
+        const patterns = [
+            '**/*.{ts,tsx,js,jsx}',   // TypeScript/JavaScript
+            '**/*.{py,pyw}',          // Python
+            '**/*.{java,kt}',         // Java/Kotlin
+            '**/*.{cs,vb}',           // C#/VB.NET
+            '**/*.{cpp,hpp,c,h}',     // C++/C
+            '**/*.{go}',              // Go
+            '**/*.{rs}',              // Rust
+            '**/*.{php}',             // PHP
+            '**/*.{rb}',              // Ruby
+            '**/*.{swift}'            // Swift
+        ];
+
+        const excludePattern = '**/node_modules/**';
+        const files: vscode.Uri[] = [];
+
+        for (const pattern of patterns) {
+            const found = await vscode.workspace.findFiles(pattern, excludePattern);
+            files.push(...found);
+        }
+
+        return files;
     }
 
     private async indexFile(uri: vscode.Uri): Promise<void> {
@@ -115,6 +146,12 @@ export class CodebaseIndexer {
             
             // Sembolleri çıkar
             const symbols = await this.extractSymbols(document);
+            
+            // AST oluştur
+            const ast = await this.parseAST(document);
+
+            // Bağımlılıkları bul
+            const dependencies = await this.findDependencies(document);
 
             // Index'e ekle
             const indexedFile: IndexedFile = {
@@ -122,12 +159,14 @@ export class CodebaseIndexer {
                 uri,
                 lastModified: Date.now(),
                 symbols,
-                analysis
+                dependencies,
+                references: [],
+                ast
             };
 
             this.indexedFiles.set(uri.fsPath, indexedFile);
         } catch (error) {
-            console.error(`File indexing error: ${error}`);
+            console.error(`File indexing error for ${uri.fsPath}:`, error);
         }
     }
 
@@ -145,65 +184,108 @@ export class CodebaseIndexer {
         }));
     }
 
-    private async findDependentFiles(uri: vscode.Uri): Promise<vscode.Uri[]> {
-        const dependents: vscode.Uri[] = [];
-        const targetPath = uri.fsPath;
+    private async parseAST(document: vscode.TextDocument): Promise<any> {
+        // Dile göre uygun AST parser'ı kullan
+        const language = document.languageId;
+        // TODO: Implement AST parsing for different languages
+        return null;
+    }
 
-        for (const [filePath, file] of this.indexedFiles) {
-            if (file.dependencies?.some(dep => {
-                const depPath = path.resolve(path.dirname(filePath), dep);
-                return depPath === targetPath;
-            })) {
-                dependents.push(file.uri);
+    private async findDependencies(document: vscode.TextDocument): Promise<string[]> {
+        const content = document.getText();
+        const dependencies: Set<string> = new Set();
+
+        // Dile göre import/require pattern'larını kontrol et
+        const patterns = {
+            typescript: [/import.*from\s+['"](.+?)['"]/g, /require\(['"](.+?)['"]\)/g],
+            javascript: [/import.*from\s+['"](.+?)['"]/g, /require\(['"](.+?)['"]\)/g],
+            python: [/import\s+(\w+)/g, /from\s+(\w+)\s+import/g],
+            java: [/import\s+([\w.]+);/g],
+            csharp: [/using\s+([\w.]+);/g]
+        };
+
+        const currentPatterns = patterns[document.languageId as keyof typeof patterns] || [];
+        
+        for (const pattern of currentPatterns) {
+            let match;
+            while ((match = pattern.exec(content)) !== null) {
+                dependencies.add(match[1]);
             }
         }
 
-        return dependents;
+        return Array.from(dependencies);
     }
 
-    public getFileContext(uri: vscode.Uri): FileContext | undefined {
-        const indexedFile = this.indexedFiles.get(uri.fsPath);
-        if (!indexedFile) return undefined;
+    private async analyzeReferences() {
+        for (const [filePath, file] of this.indexedFiles) {
+            const references: CodeReference[] = [];
 
-        // FileContext arayüzüne uygun alanları döndür
-        const { uri: _, lastModified: __, symbols: ___, ...fileContext } = indexedFile;
-        return fileContext;
+            // Sembol referanslarını bul
+            for (const symbol of file.symbols) {
+                const locations = await vscode.commands.executeCommand<vscode.Location[]>(
+                    'vscode.executeReferenceProvider',
+                    file.uri,
+                    symbol.location.range.start
+                );
+
+                if (locations) {
+                    references.push(...locations.map(loc => ({
+                        symbol: symbol.name,
+                        location: loc,
+                        type: 'reference' as const
+                    })));
+                }
+            }
+
+            file.references = references;
+            this.indexedFiles.set(filePath, file);
+        }
     }
 
-    public searchSymbols(query: string): CodeSymbol[] {
-        const results: CodeSymbol[] = [];
-        
-        for (const file of this.indexedFiles.values()) {
-            const matches = file.symbols.filter(symbol => 
-                symbol.name.toLowerCase().includes(query.toLowerCase())
-            );
-            results.push(...matches);
+    public async searchCode(query: string): Promise<SearchResult[]> {
+        const results: SearchResult[] = [];
+
+        for (const [filePath, file] of this.indexedFiles) {
+            const document = await vscode.workspace.openTextDocument(file.uri);
+            const content = document.getText();
+            const lines = content.split('\n');
+            const matches: SearchResult['matches'] = [];
+
+            // Metin araması
+            lines.forEach((line, index) => {
+                if (line.toLowerCase().includes(query.toLowerCase())) {
+                    matches.push({
+                        line: index + 1,
+                        content: line.trim()
+                    });
+                }
+            });
+
+            // Sembol araması
+            file.symbols.forEach(symbol => {
+                if (symbol.name.toLowerCase().includes(query.toLowerCase())) {
+                    const line = document.lineAt(symbol.location.range.start.line);
+                    matches.push({
+                        line: line.lineNumber + 1,
+                        content: line.text.trim(),
+                        symbol: symbol.name
+                    });
+                }
+            });
+
+            if (matches.length > 0) {
+                results.push({
+                    file: filePath,
+                    matches
+                });
+            }
         }
 
         return results;
     }
 
-    public findReferences(symbolName: string): vscode.Location[] {
-        const references: vscode.Location[] = [];
-
-        for (const file of this.indexedFiles.values()) {
-            // Sembol kullanımlarını bul
-            const regex = new RegExp(`\\b${symbolName}\\b`, 'g');
-            let match;
-            
-            while ((match = regex.exec(file.content)) !== null) {
-                const position = file.content.substr(0, match.index).split('\n');
-                const line = position.length - 1;
-                const character = position[position.length - 1].length;
-
-                references.push(new vscode.Location(
-                    file.uri,
-                    new vscode.Position(line, character)
-                ));
-            }
-        }
-
-        return references;
+    public getFileContext(uri: vscode.Uri): FileContext | undefined {
+        return this.indexedFiles.get(uri.fsPath);
     }
 
     public getProjectStructure(): any {
@@ -222,7 +304,8 @@ export class CodebaseIndexer {
 
             current._file = {
                 symbols: file.symbols,
-                dependencies: file.dependencies
+                dependencies: file.dependencies,
+                references: file.references
             };
         }
 
@@ -234,5 +317,14 @@ export class CodebaseIndexer {
             this.watcher.dispose();
         }
         this.indexedFiles.clear();
+    }
+
+    private async handleFileChange(uri: vscode.Uri) {
+        await this.indexFile(uri);
+        await this.analyzeReferences();
+    }
+
+    private handleFileDelete(uri: vscode.Uri) {
+        this.indexedFiles.delete(uri.fsPath);
     }
 } 
