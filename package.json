@@ -26,7 +26,7 @@
         {
           "id": "smile-ai",
           "title": "Smile AI",
-          "icon": "media/icon.svg"
+          "icon": "resources/smile-ai-logo.png"
         }
       ]
     },
@@ -36,7 +36,7 @@
           "type": "webview",
           "id": "smile-ai.assistant",
           "name": "AI Assistant",
-          "icon": "media/icon.svg"
+          "icon": "resources/smile-ai-logo.png"
         }
       ]
     },
