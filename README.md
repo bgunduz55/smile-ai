@@ -1,6 +1,6 @@
 # Smile AI - Local AI Powered Coding Assistant
 
-![Smile AI Logo](resources/smile-ai-logo.png)
+<!-- ![Smile AI Logo](resources/smile-ai-logo.png) -->
 
 ## 🎯 Vision
 

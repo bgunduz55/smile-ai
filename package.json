@@ -3,7 +3,8 @@
   "displayName": "Smile AI",
   "description": "Local AI powered coding assistant with agent capabilities",
   "version": "0.0.1",
-  "publisher": "bgund",
+  "publisher": "bgunduz55",
+  "icon": "resources/smile-ai-logo.png",
   "repository": {
     "type": "git",
     "url": "https://github.com/bgunduz55/smile-ai"
@@ -26,7 +27,7 @@
         {
           "id": "smile-ai",
           "title": "Smile AI",
-          "icon": "media/icon.svg"
+          "icon": "resources/smile-ai-logo.png"
         }
       ]
     },
@@ -36,7 +37,7 @@
           "type": "webview",
           "id": "smile-ai.assistant",
           "name": "AI Assistant",
-          "icon": "media/icon.svg"
+          "icon": "resources/smile-ai-logo.png"
         }
       ]
     },

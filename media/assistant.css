@@ -492,4 +492,106 @@ body {
     width: 18px;
     height: 18px;
     margin: 0;
+}
+
+.settings-container {
+    padding: 20px;
+    overflow-y: auto;
+    height: 100%;
+}
+
+.settings-section {
+    background-color: var(--secondary-color);
+    border-radius: 8px;
+    padding: 20px;
+    margin-bottom: 20px;
+}
+
+.settings-section h3 {
+    margin: 0 0 15px 0;
+    color: var(--primary-color);
+    font-size: 16px;
+}
+
+.model-settings,
+.appearance-settings,
+.behavior-settings {
+    display: flex;
+    flex-direction: column;
+    gap: 15px;
+}
+
+.model-selector,
+.model-config,
+.setting-item {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+}
+
+.model-selector label,
+.model-config label,
+.setting-item label {
+    font-size: 14px;
+    color: var(--text-color);
+    opacity: 0.9;
+}
+
+.model-selector select,
+.model-config input,
+.setting-item select,
+.setting-item input[type="text"],
+.setting-item input[type="number"] {
+    padding: 8px 12px;
+    background-color: var(--background-color);
+    color: var(--text-color);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    font-size: 14px;
+    width: 100%;
+}
+
+.model-config input[type="range"] {
+    padding: 0;
+}
+
+.primary-button,
+.secondary-button {
+    padding: 8px 16px;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 14px;
+    transition: all 0.2s ease;
+}
+
+.primary-button {
+    background-color: var(--primary-color);
+    color: white;
+}
+
+.secondary-button {
+    background-color: transparent;
+    border: 1px solid var(--primary-color);
+    color: var(--primary-color);
+}
+
+.primary-button:hover {
+    opacity: 0.9;
+}
+
+.secondary-button:hover {
+    background-color: var(--primary-color);
+    color: white;
+}
+
+#temperatureValue {
+    font-size: 14px;
+    color: var(--text-color);
+    opacity: 0.9;
+    margin-left: 8px;
+}
+
+.setting-item input[type="checkbox"] {
+    margin-right: 8px;
 } 

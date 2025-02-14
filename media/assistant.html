@@ -3,16 +3,13 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src {{cspSource}}; script-src 'unsafe-inline';">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src {{cspSource}}; script-src 'unsafe-inline' https://cdn.jsdelivr.net; connect-src http://localhost:11434 http://localhost:1234;">
     <link href="{{styleUri}}" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 </head>
 <body>
     <div class="container">
         <div class="header">
-            <button id="modelsBtn" class="header-button">
-                <span class="codicon codicon-package"></span>
-                Models
-            </button>
             <button id="chatBtn" class="header-button active">
                 <span class="codicon codicon-comment-discussion"></span>
                 Chat
@@ -28,14 +25,10 @@
         </div>
 
         <div class="content">
-            <div id="modelsView" class="view-panel">
-                <div class="models-list"></div>
-            </div>
-
             <div id="chatView" class="view-panel active">
                 <div id="messageContainer" class="message-container"></div>
                 <div class="input-container">
-                    <textarea id="userInput" placeholder="Mesajınızı yazın... (Shift + Enter ile gönder)"></textarea>
+                    <textarea id="userInput" placeholder="Mesajınızı yazın... (Enter ile gönder, Ctrl+Enter ile yeniden indexle)"></textarea>
                     <button id="sendButton">Gönder</button>
                 </div>
             </div>
@@ -57,13 +50,95 @@
                 </div>
                 <div id="composerPreview" class="composer-preview"></div>
                 <div class="input-container">
-                    <textarea id="composerInput" placeholder="Kod üretmek için talimatlarınızı yazın... (Shift + Enter ile gönder)"></textarea>
+                    <textarea id="composerInput" placeholder="Kod üretmek için talimatlarınızı yazın... (Enter ile gönder)"></textarea>
                     <button id="generateButton">Üret</button>
                 </div>
             </div>
 
             <div id="settingsView" class="view-panel">
-                <div class="settings-list"></div>
+                <div class="settings-container">
+                    <div class="settings-section">
+                        <h3>AI Model Ayarları</h3>
+                        <div class="model-settings">
+                            <div class="model-selector">
+                                <label>AI Provider</label>
+                                <select id="aiProvider">
+                                    <option value="ollama">Ollama</option>
+                                    <option value="lmstudio">LM Studio</option>
+                                </select>
+                            </div>
+                            <div class="model-selector">
+                                <label>Model</label>
+                                <select id="modelName"></select>
+                            </div>
+                            <div class="model-config">
+                                <label>API Endpoint</label>
+                                <input type="text" id="apiEndpoint" placeholder="http://localhost:11434">
+                            </div>
+                            <div class="model-config">
+                                <label>Max Tokens</label>
+                                <input type="number" id="maxTokens" value="2048">
+                            </div>
+                            <div class="model-config">
+                                <label>Temperature</label>
+                                <input type="range" id="temperature" min="0" max="1" step="0.1" value="0.7">
+                                <span id="temperatureValue">0.7</span>
+                            </div>
+                            <button id="saveModel" class="primary-button">Kaydet</button>
+                            <button id="testConnection" class="secondary-button">Bağlantıyı Test Et</button>
+                        </div>
+                    </div>
+
+                    <div class="settings-section">
+                        <h3>Görünüm Ayarları</h3>
+                        <div class="appearance-settings">
+                            <div class="setting-item">
+                                <label>Tema</label>
+                                <select id="theme">
+                                    <option value="system">Sistem</option>
+                                    <option value="light">Açık</option>
+                                    <option value="dark">Koyu</option>
+                                </select>
+                            </div>
+                            <div class="setting-item">
+                                <label>Font Boyutu</label>
+                                <input type="number" id="fontSize" value="14">
+                            </div>
+                            <div class="setting-item">
+                                <label>Font Ailesi</label>
+                                <select id="fontFamily">
+                                    <option value="system-ui">Sistem</option>
+                                    <option value="monospace">Monospace</option>
+                                    <option value="sans-serif">Sans Serif</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="settings-section">
+                        <h3>Davranış Ayarları</h3>
+                        <div class="behavior-settings">
+                            <div class="setting-item">
+                                <label>
+                                    <input type="checkbox" id="autoComplete" checked>
+                                    Otomatik Tamamlama
+                                </label>
+                            </div>
+                            <div class="setting-item">
+                                <label>
+                                    <input type="checkbox" id="inlineCompletion" checked>
+                                    Satır İçi Tamamlama
+                                </label>
+                            </div>
+                            <div class="setting-item">
+                                <label>
+                                    <input type="checkbox" id="autoImport" checked>
+                                    Otomatik Import
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+                </div>
             </div>
         </div>
     </div>
@@ -71,41 +146,76 @@
     <script>
         const vscode = acquireVsCodeApi();
         const messageContainer = document.getElementById('messageContainer');
+        const composerPreview = document.getElementById('composerPreview');
         const userInput = document.getElementById('userInput');
         const composerInput = document.getElementById('composerInput');
         const sendButton = document.getElementById('sendButton');
         const generateButton = document.getElementById('generateButton');
         let currentView = 'chat';
         let isViewTransitioning = false;
+        let chatMessages = [];
+        let composerMessages = [];
 
         // Event Listeners
         userInput.addEventListener('keydown', handleKeyPress);
         composerInput.addEventListener('keydown', handleKeyPress);
-        sendButton.addEventListener('click', () => sendMessage(userInput));
-        generateButton.addEventListener('click', () => sendMessage(composerInput));
+        sendButton.addEventListener('click', () => sendMessage(userInput, 'chat'));
+        generateButton.addEventListener('click', () => sendMessage(composerInput, 'composer'));
         window.addEventListener('message', handleMessage);
 
         // View switching buttons
-        document.getElementById('modelsBtn').addEventListener('click', () => switchView('models'));
         document.getElementById('chatBtn').addEventListener('click', () => switchView('chat'));
         document.getElementById('composerBtn').addEventListener('click', () => switchView('composer'));
         document.getElementById('settingsBtn').addEventListener('click', () => switchView('settings'));
 
+        // Model settings listeners
+        document.getElementById('aiProvider').addEventListener('change', updateModelList);
+        document.getElementById('temperature').addEventListener('input', updateTemperatureValue);
+        document.getElementById('saveModel').addEventListener('click', saveModelSettings);
+        document.getElementById('testConnection').addEventListener('click', testModelConnection);
+
         function handleKeyPress(e) {
-            if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault();
-                sendMessage(e.target);
+            if (e.key === 'Enter') {
+                if (e.ctrlKey) {
+                    // Ctrl+Enter: Yeniden indexle ve mesajı gönder
+                    vscode.postMessage({
+                        command: 'reindex'
+                    });
+                    setTimeout(() => sendMessage(e.target, e.target === userInput ? 'chat' : 'composer'), 100);
+                } else if (!e.shiftKey) {
+                    // Sadece Enter: Normal mesaj gönderme
+                    e.preventDefault();
+                    sendMessage(e.target, e.target === userInput ? 'chat' : 'composer');
+                }
             }
         }
 
-        function sendMessage(input) {
+        function sendMessage(input, view) {
             const text = input.value.trim();
             if (!text) return;
 
+            // Mesajı hemen yerel olarak ekle
+            const message = {
+                role: 'user',
+                content: text,
+                timestamp: Date.now()
+            };
+
+            // Mesajı sadece ilgili view'a ekle
+            if (view === 'chat') {
+                chatMessages.push(message);
+                updateChatMessages();
+            } else if (view === 'composer') {
+                composerMessages.push(message);
+                updateComposerMessages();
+            }
+
+            // Mesajı extension'a gönder
             vscode.postMessage({
                 command: 'sendMessage',
                 text: text,
-                view: currentView
+                view: view,
+                timestamp: message.timestamp // Timestamp'i de gönder
             });
 
             input.value = '';
@@ -130,10 +240,9 @@
             const targetPanel = document.getElementById(view + 'View');
             targetPanel.classList.add('active');
 
-            // Transition bitince flag'i resetle
             setTimeout(() => {
                 isViewTransitioning = false;
-            }, 200); // CSS transition süresiyle aynı olmalı
+            }, 200);
 
             vscode.postMessage({
                 command: 'viewChanged',
@@ -143,15 +252,28 @@
 
         function handleMessage(event) {
             const message = event.data;
+            console.log('Received message:', message); // Debug log
+
             switch (message.type) {
-                case 'updateModels':
-                    updateModelsList(message.models);
-                    break;
-                case 'updateMessages':
-                    updateMessages(message.messages);
-                    break;
                 case 'updateSettings':
                     updateSettings(message.settings);
+                    break;
+                case 'updateMessages':
+                    console.log('Updating messages for view:', message.view); // Debug log
+                    // Eğer view belirtilmemişse, mesajları her iki view'a da ekle
+                    if (!message.view || message.view === 'chat') {
+                        chatMessages = message.messages || [];
+                        console.log('Chat messages:', chatMessages); // Debug log
+                        updateChatMessages();
+                    }
+                    if (!message.view || message.view === 'composer') {
+                        composerMessages = message.messages || [];
+                        console.log('Composer messages:', composerMessages); // Debug log
+                        updateComposerMessages();
+                    }
+                    break;
+                case 'updateModelList':
+                    updateModelOptions(message.models);
                     break;
                 case 'viewChanged':
                     switchView(message.view);
@@ -159,65 +281,148 @@
             }
         }
 
-        function updateModelsList(models) {
-            const modelsList = document.querySelector('.models-list');
-            modelsList.innerHTML = models.map(model => `
-                <div class="model-item">
-                    <label>
-                        <input type="checkbox" ${model.active ? 'checked' : ''} 
-                               onchange="toggleModel('${model.name}')">
-                        ${model.name} (${model.provider})
-                    </label>
-                </div>
-            `).join('');
-        }
-
-        function updateMessages(messages) {
-            messageContainer.innerHTML = messages.map(msg => `
-                <div class="message ${msg.role}-message">
-                    <div class="message-header">
-                        <span class="message-role">${msg.role === 'user' ? 'Siz' : 'AI'}</span>
-                        <span class="message-time">${new Date(msg.timestamp).toLocaleTimeString()}</span>
-                    </div>
-                    <div class="message-content">${msg.content}</div>
-                </div>
-            `).join('');
-            scrollToBottom();
-        }
-
         function updateSettings(settings) {
-            const settingsList = document.querySelector('.settings-list');
-            settingsList.innerHTML = Object.entries(settings).map(([key, value]) => `
-                <div class="setting-item">
-                    <label>
-                        <span>${key}</span>
-                        <input type="${typeof value === 'boolean' ? 'checkbox' : 'text'}"
-                               value="${value}"
-                               ${typeof value === 'boolean' && value ? 'checked' : ''}
-                               onchange="updateSetting('${key}', this.value)">
-                    </label>
-                </div>
-            `).join('');
+            // Tema ayarları
+            document.getElementById('theme').value = settings.appearance?.theme || 'system';
+            document.getElementById('fontSize').value = settings.appearance?.fontSize || 14;
+            document.getElementById('fontFamily').value = settings.appearance?.fontFamily || 'system-ui';
+
+            // Davranış ayarları
+            document.getElementById('autoComplete').checked = settings.behavior?.autoComplete ?? true;
+            document.getElementById('inlineCompletion').checked = settings.behavior?.inlineCompletion ?? true;
+            document.getElementById('autoImport').checked = settings.behavior?.autoImport ?? true;
         }
 
-        function toggleModel(modelName) {
+        function updateChatMessages() {
+            console.log('Rendering chat messages:', chatMessages); // Debug log
+            if (!Array.isArray(chatMessages)) {
+                console.error('chatMessages is not an array:', chatMessages);
+                return;
+            }
+
+            messageContainer.innerHTML = chatMessages.map(msg => {
+                console.log('Processing chat message:', msg); // Debug log
+                return `
+                    <div class="message ${msg.role}-message">
+                        <div class="message-header">
+                            <span class="message-role">${msg.role === 'user' ? 'Siz' : 'AI'}</span>
+                            <span class="message-time">${new Date(msg.timestamp).toLocaleTimeString()}</span>
+                        </div>
+                        <div class="message-content">${marked.parse(msg.content || '')}</div>
+                    </div>
+                `;
+            }).join('');
+            scrollToBottom(messageContainer);
+        }
+
+        function updateComposerMessages() {
+            console.log('Rendering composer messages:', composerMessages); // Debug log
+            if (!Array.isArray(composerMessages)) {
+                console.error('composerMessages is not an array:', composerMessages);
+                return;
+            }
+
+            composerPreview.innerHTML = composerMessages.map(msg => {
+                console.log('Processing composer message:', msg); // Debug log
+                return `
+                    <div class="message ${msg.role}-message">
+                        <div class="message-header">
+                            <span class="message-role">${msg.role === 'user' ? 'İstek' : 'Yanıt'}</span>
+                            <span class="message-time">${new Date(msg.timestamp).toLocaleTimeString()}</span>
+                        </div>
+                        <div class="message-content">${marked.parse(msg.content || '')}</div>
+                        ${msg.role === 'assistant' ? `
+                            <div class="message-actions">
+                                <button onclick="applyCode(${msg.timestamp})">Uygula</button>
+                                <button onclick="copyCode(${msg.timestamp})">Kopyala</button>
+                            </div>
+                        ` : ''}
+                    </div>
+                `;
+            }).join('');
+            scrollToBottom(composerPreview);
+        }
+
+        function updateModelList() {
+            const provider = document.getElementById('aiProvider').value;
+            const modelSelect = document.getElementById('modelName');
+            modelSelect.innerHTML = '<option value="">Yükleniyor...</option>';
+
+            // Provider değiştiğinde endpoint'i güncelle
+            if (provider === 'ollama') {
+                document.getElementById('apiEndpoint').value = 'http://localhost:11434';
+                // Ollama modellerini kontrol et
+                fetch('http://localhost:11434/api/tags')
+                    .then(response => response.json())
+                    .then(data => {
+                        modelSelect.innerHTML = '';
+                        if (data.models) {
+                            data.models.forEach(model => {
+                                const option = document.createElement('option');
+                                option.value = model.name;
+                                option.textContent = model.name;
+                                modelSelect.appendChild(option);
+                            });
+                        }
+                    })
+                    .catch(() => {
+                        modelSelect.innerHTML = '<option value="">Ollama bağlantısı başarısız</option>';
+                    });
+            } else {
+                document.getElementById('apiEndpoint').value = 'http://localhost:1234';
+                // LM Studio modellerini kontrol et
+                fetch('http://localhost:1234/v1/models')
+                    .then(response => response.json())
+                    .then(data => {
+                        modelSelect.innerHTML = '';
+                        if (data.data) {
+                            data.data.forEach(model => {
+                                const option = document.createElement('option');
+                                option.value = model.id;
+                                option.textContent = model.id;
+                                modelSelect.appendChild(option);
+                            });
+                        }
+                    })
+                    .catch(() => {
+                        modelSelect.innerHTML = '<option value="">LM Studio bağlantısı başarısız</option>';
+                    });
+            }
+        }
+
+        function updateTemperatureValue() {
+            const value = document.getElementById('temperature').value;
+            document.getElementById('temperatureValue').textContent = value;
+        }
+
+        function saveModelSettings() {
+            const settings = {
+                provider: document.getElementById('aiProvider').value,
+                modelName: document.getElementById('modelName').value,
+                apiEndpoint: document.getElementById('apiEndpoint').value,
+                maxTokens: parseInt(document.getElementById('maxTokens').value),
+                temperature: parseFloat(document.getElementById('temperature').value)
+            };
+
             vscode.postMessage({
-                command: 'toggleModel',
-                modelName: modelName,
-                view: currentView
+                command: 'saveModelSettings',
+                settings
             });
         }
 
-        function updateSetting(key, value) {
+        function testModelConnection() {
             vscode.postMessage({
-                command: 'updateSetting',
-                key: key,
-                value: value
+                command: 'testModelConnection',
+                settings: {
+                    provider: document.getElementById('aiProvider').value,
+                    modelName: document.getElementById('modelName').value,
+                    apiEndpoint: document.getElementById('apiEndpoint').value
+                }
             });
         }
 
-        function scrollToBottom() {
-            messageContainer.scrollTop = messageContainer.scrollHeight;
+        function scrollToBottom(container) {
+            container.scrollTop = container.scrollHeight;
         }
 
         // Textarea auto-resize
@@ -227,6 +432,29 @@
                 this.style.height = (this.scrollHeight) + 'px';
             });
         });
+
+        // İlk yükleme
+        updateModelList();
+
+        function applyCode(timestamp) {
+            const message = composerMessages.find(m => m.timestamp === timestamp);
+            if (message) {
+                vscode.postMessage({
+                    command: 'applyCode',
+                    code: message.content
+                });
+            }
+        }
+
+        function copyCode(timestamp) {
+            const message = composerMessages.find(m => m.timestamp === timestamp);
+            if (message) {
+                vscode.postMessage({
+                    command: 'copyCode',
+                    code: message.content
+                });
+            }
+        }
     </script>
 </body>
 </html> 
