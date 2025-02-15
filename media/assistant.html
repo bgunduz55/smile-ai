@@ -27,9 +27,16 @@
         <div class="content">
             <div id="chatView" class="view-panel active">
                 <div id="messageContainer" class="message-container"></div>
-                <div class="input-container">
-                    <textarea id="userInput" placeholder="Mesajınızı yazın... (Enter ile gönder, Ctrl+Enter ile yeniden indexle)"></textarea>
-                    <button id="sendButton">Gönder</button>
+                <div class="bottom-container">
+                    <div class="session-controls">
+                        <select id="sessionSelect" class="session-select">
+                            <option value="">Geçmiş oturumlar...</option>
+                        </select>
+                    </div>
+                    <div class="input-container">
+                        <textarea id="userInput" placeholder="Mesajınızı yazın... (Enter ile gönder, Ctrl+Enter ile yeniden indexle)"></textarea>
+                        <button id="sendButton">Gönder</button>
+                    </div>
                 </div>
             </div>
 
@@ -49,9 +56,16 @@
                     </label>
                 </div>
                 <div id="composerPreview" class="composer-preview"></div>
-                <div class="input-container">
-                    <textarea id="composerInput" placeholder="Kod üretmek için talimatlarınızı yazın... (Enter ile gönder)"></textarea>
-                    <button id="generateButton">Üret</button>
+                <div class="bottom-container">
+                    <div class="session-controls">
+                        <select id="composerSessionSelect" class="session-select">
+                            <option value="">Geçmiş oturumlar...</option>
+                        </select>
+                    </div>
+                    <div class="input-container">
+                        <textarea id="composerInput" placeholder="Kod üretmek için talimatlarınızı yazın... (Enter ile gönder)"></textarea>
+                        <button id="generateButton">Üret</button>
+                    </div>
                 </div>
             </div>
 
@@ -174,6 +188,26 @@
         document.getElementById('saveModel').addEventListener('click', saveModelSettings);
         document.getElementById('testConnection').addEventListener('click', testModelConnection);
 
+        // Session management
+        const newSessionBtn = document.getElementById('newSessionBtn');
+        const sessionSelect = document.getElementById('sessionSelect');
+
+        newSessionBtn.addEventListener('click', () => {
+            vscode.postMessage({
+                command: 'createNewSession'
+            });
+        });
+
+        sessionSelect.addEventListener('change', (e) => {
+            const sessionId = e.target.value;
+            if (sessionId) {
+                vscode.postMessage({
+                    command: 'switchSession',
+                    sessionId: sessionId
+                });
+            }
+        });
+
         function handleKeyPress(e) {
             if (e.key === 'Enter') {
                 if (e.ctrlKey) {
@@ -194,28 +228,10 @@
             const text = input.value.trim();
             if (!text) return;
 
-            // Mesajı hemen yerel olarak ekle
-            const message = {
-                role: 'user',
-                content: text,
-                timestamp: Date.now()
-            };
-
-            // Mesajı sadece ilgili view'a ekle
-            if (view === 'chat') {
-                chatMessages.push(message);
-                updateChatMessages();
-            } else if (view === 'composer') {
-                composerMessages.push(message);
-                updateComposerMessages();
-            }
-
-            // Mesajı extension'a gönder
             vscode.postMessage({
                 command: 'sendMessage',
                 text: text,
-                view: view,
-                timestamp: message.timestamp // Timestamp'i de gönder
+                view: view
             });
 
             input.value = '';
@@ -240,6 +256,13 @@
             const targetPanel = document.getElementById(view + 'View');
             targetPanel.classList.add('active');
 
+            // Mesajları güncelle
+            if (view === 'chat') {
+                updateChatMessages();
+            } else if (view === 'composer') {
+                updateComposerMessages();
+            }
+
             setTimeout(() => {
                 isViewTransitioning = false;
             }, 200);
@@ -252,95 +275,59 @@
 
         function handleMessage(event) {
             const message = event.data;
-            console.log('Received message:', message); // Debug log
 
             switch (message.type) {
-                case 'updateSettings':
-                    updateSettings(message.settings);
-                    break;
                 case 'updateMessages':
-                    console.log('Updating messages for view:', message.view); // Debug log
-                    // Eğer view belirtilmemişse, mesajları her iki view'a da ekle
-                    if (!message.view || message.view === 'chat') {
-                        chatMessages = message.messages || [];
-                        console.log('Chat messages:', chatMessages); // Debug log
-                        updateChatMessages();
-                    }
-                    if (!message.view || message.view === 'composer') {
-                        composerMessages = message.messages || [];
-                        console.log('Composer messages:', composerMessages); // Debug log
-                        updateComposerMessages();
+                    if (message.view === 'chat') {
+                        chatMessages = message.messages;
+                        if (currentView === 'chat') {
+                            updateChatMessages();
+                        }
+                    } else if (message.view === 'composer') {
+                        composerMessages = message.messages;
+                        if (currentView === 'composer') {
+                            updateComposerMessages();
+                        }
                     }
                     break;
-                case 'updateModelList':
-                    updateModelOptions(message.models);
+                case 'updateSessions':
+                    updateSessionList(message.sessions);
                     break;
-                case 'viewChanged':
-                    switchView(message.view);
+                case 'scrollToBottom':
+                    const container = document.getElementById(message.containerId);
+                    if (container) {
+                        container.scrollTop = container.scrollHeight;
+                    }
                     break;
             }
-        }
-
-        function updateSettings(settings) {
-            // Tema ayarları
-            document.getElementById('theme').value = settings.appearance?.theme || 'system';
-            document.getElementById('fontSize').value = settings.appearance?.fontSize || 14;
-            document.getElementById('fontFamily').value = settings.appearance?.fontFamily || 'system-ui';
-
-            // Davranış ayarları
-            document.getElementById('autoComplete').checked = settings.behavior?.autoComplete ?? true;
-            document.getElementById('inlineCompletion').checked = settings.behavior?.inlineCompletion ?? true;
-            document.getElementById('autoImport').checked = settings.behavior?.autoImport ?? true;
         }
 
         function updateChatMessages() {
-            console.log('Rendering chat messages:', chatMessages); // Debug log
-            if (!Array.isArray(chatMessages)) {
-                console.error('chatMessages is not an array:', chatMessages);
-                return;
-            }
-
-            messageContainer.innerHTML = chatMessages.map(msg => {
-                console.log('Processing chat message:', msg); // Debug log
-                return `
-                    <div class="message ${msg.role}-message">
-                        <div class="message-header">
-                            <span class="message-role">${msg.role === 'user' ? 'Siz' : 'AI'}</span>
-                            <span class="message-time">${new Date(msg.timestamp).toLocaleTimeString()}</span>
-                        </div>
-                        <div class="message-content">${marked.parse(msg.content || '')}</div>
-                    </div>
-                `;
-            }).join('');
-            scrollToBottom(messageContainer);
+            messageContainer.innerHTML = chatMessages.map(msg => renderMessage(msg)).join('');
+            messageContainer.scrollTop = messageContainer.scrollHeight;
         }
 
         function updateComposerMessages() {
-            console.log('Rendering composer messages:', composerMessages); // Debug log
-            if (!Array.isArray(composerMessages)) {
-                console.error('composerMessages is not an array:', composerMessages);
-                return;
-            }
+            composerPreview.innerHTML = composerMessages.map(msg => renderMessage(msg)).join('');
+            composerPreview.scrollTop = composerPreview.scrollHeight;
+        }
 
-            composerPreview.innerHTML = composerMessages.map(msg => {
-                console.log('Processing composer message:', msg); // Debug log
-                return `
-                    <div class="message ${msg.role}-message">
-                        <div class="message-header">
-                            <span class="message-role">${msg.role === 'user' ? 'İstek' : 'Yanıt'}</span>
-                            <span class="message-time">${new Date(msg.timestamp).toLocaleTimeString()}</span>
-                        </div>
-                        <div class="message-content">${marked.parse(msg.content || '')}</div>
-                        ${msg.role === 'assistant' ? `
-                            <div class="message-actions">
-                                <button onclick="applyCode(${msg.timestamp})">Uygula</button>
-                                <button onclick="copyCode(${msg.timestamp})">Kopyala</button>
-                            </div>
-                        ` : ''}
+        function renderMessage(message) {
+            const timestamp = message.timestamp ? new Date(message.timestamp).toLocaleTimeString() : '';
+            const isUser = message.role === 'user';
+            const className = isUser ? 'user-message' : 'assistant-message';
+
+            return `
+                <div class="message ${className}">
+                    <div class="message-header">
+                        <span class="message-role">${isUser ? 'Siz' : 'Assistant'}</span>
+                        <span class="message-time">${timestamp}</span>
                     </div>
-                `;
-            }).join('');
-            scrollToBottom(composerPreview);
+                    <div class="message-content">
+                        ${marked.parse(message.content)}
+                    </div>
+                </div>
+            `;
         }
 
         function updateModelList() {
@@ -421,8 +408,17 @@
             });
         }
 
-        function scrollToBottom(container) {
-            container.scrollTop = container.scrollHeight;
+        function updateSessionList(sessions) {
+            const chatSelect = document.getElementById('sessionSelect');
+            const composerSelect = document.getElementById('composerSessionSelect');
+            
+            // Chat oturumlarını güncelle
+            chatSelect.innerHTML = '<option value="">Geçmiş sohbetler...</option>' +
+                sessions.chatSessions.map(session => `<option value="${session.id}">${session.title}</option>`).join('');
+            
+            // Composer oturumlarını güncelle
+            composerSelect.innerHTML = '<option value="">Geçmiş kod oturumları...</option>' +
+                sessions.composerSessions.map(session => `<option value="${session.id}">${session.title}</option>`).join('');
         }
 
         // Textarea auto-resize

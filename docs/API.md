@@ -238,41 +238,6 @@ interface CodeSuggestion {
 
 ## 🖥️ UI API
 
-### ChatPanel Sınıfı
-
-```typescript
-class ChatPanel {
-    static currentPanel: ChatPanel | undefined;
-    static show(context: vscode.ExtensionContext, aiEngine: AIEngine): void;
-    
-    // Panel yönetimi
-    private updateContent(): void;
-    private clearChat(): void;
-    
-    // Mesaj işleme
-    private async handleUserMessage(text: string): Promise<void>;
-    private renderMessage(message: AIMessage): string;
-}
-```
-
-### ComposerPanel Sınıfı
-
-```typescript
-class ComposerPanel {
-    static currentPanel: ComposerPanel | undefined;
-    static show(context: vscode.ExtensionContext, aiEngine: AIEngine): void;
-    
-    // Kod üretimi ve düzenleme
-    private async handleCodeGeneration(prompt: string, context: any): Promise<void>;
-    private async applyGeneratedCode(code: string): Promise<void>;
-    private async handleCodeModification(code: string, instructions: string): Promise<void>;
-    
-    // UI yönetimi
-    private updateContent(): void;
-    private showDiffPreview(originalCode: string, newCode: string): Promise<void>;
-}
-```
-
 ### Olay Dinleyicileri
 
 ```typescript
