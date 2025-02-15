@@ -93,4 +93,13 @@ export class ChatHistoryManager {
         session.lastUpdated = Date.now();
         await this.saveSessions();
     }
+
+    public async updateSessionTitle(sessionId: string, newTitle: string): Promise<void> {
+        const session = this.sessions.get(sessionId);
+        if (!session) return;
+
+        session.title = newTitle;
+        session.lastUpdated = Date.now();
+        await this.saveSessions();
+    }
 } 
