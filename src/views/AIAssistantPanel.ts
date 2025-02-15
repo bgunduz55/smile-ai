@@ -141,6 +141,7 @@ export class AIAssistantPanel {
         // İlk yükleme
         this.updateModels();
         this.updateSettings();
+        this.updateSessionList();
     }
 
     private async getWebviewContent(): Promise<string> {
@@ -341,8 +342,10 @@ export class AIAssistantPanel {
         this.currentView = view;
         if (view === 'chat') {
             this.updateMessages('chat', this.chatMessages);
+            this.updateSessionList();
         } else if (view === 'composer') {
             this.updateMessages('composer', this.composerMessages);
+            this.updateSessionList();
         }
     }
 
@@ -486,11 +489,24 @@ export class AIAssistantPanel {
         const sessions = await this.chatHistoryManager.getSessions();
         if (sessions.size > 0) {
             const sessionsArray = Array.from(sessions.values());
-            const lastSession = sessionsArray
-                .sort((a: ChatSession, b: ChatSession) => b.lastUpdated - a.lastUpdated)[0];
-            this.currentChatSession = lastSession;
-            this.chatMessages = lastSession.messages as Message[];
+            const lastChatSession = sessionsArray
+                .filter(s => s.id.startsWith('chat_'))
+                .sort((a, b) => b.lastUpdated - a.lastUpdated)[0];
+            const lastComposerSession = sessionsArray
+                .filter(s => s.id.startsWith('composer_'))
+                .sort((a, b) => b.lastUpdated - a.lastUpdated)[0];
+
+            if (lastChatSession) {
+                this.currentChatSession = lastChatSession;
+                this.chatMessages = lastChatSession.messages as Message[];
+            }
+            if (lastComposerSession) {
+                this.currentComposerSession = lastComposerSession;
+                this.composerMessages = lastComposerSession.messages as Message[];
+            }
+
             this.updateMessages('chat', this.chatMessages);
+            this.updateSessionList();
         }
     }
 
@@ -541,8 +557,10 @@ export class AIAssistantPanel {
 
         this.webviewView.webview.postMessage({
             type: 'updateSessions',
-            chatSessions,
-            composerSessions
+            sessions: {
+                chatSessions: chatSessions.sort((a, b) => b.lastUpdated - a.lastUpdated),
+                composerSessions: composerSessions.sort((a, b) => b.lastUpdated - a.lastUpdated)
+            }
         });
     }
 } 
