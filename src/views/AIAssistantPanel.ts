@@ -18,7 +18,8 @@ interface Message {
 export class AIAssistantPanel {
     private static currentPanel: AIAssistantPanel | undefined;
     private readonly webviewView: vscode.WebviewView;
-    private messages: Message[] = [];
+    private chatMessages: Message[] = [];
+    private composerMessages: Message[] = [];
     private currentView: string = 'chat';
     private modelManager: ModelManager;
     private aiEngine: AIEngine | undefined;
@@ -246,23 +247,18 @@ export class AIAssistantPanel {
                 context
             };
 
-            this.messages.push(message);
+            // Mesajı ilgili panele ekle
+            if (this.currentView === 'chat') {
+                this.chatMessages.push(message);
+            } else if (this.currentView === 'composer') {
+                this.composerMessages.push(message);
+            }
+
             this.updateMessages();
-
-            // Sistem promptunu hazırla
-            let systemPrompt = `You are a coding assistant with access to the following context:
-File: ${context.file || 'No active file'}
-Selection: ${context.selection ? 'Selected text exists' : 'No selection'}
-Project Structure: Available
-Language: ${context.fileContext?.language || 'Unknown'}
-Framework: ${context.fileContext?.framework || 'Unknown'}
-
-Please provide assistance based on this context. If you need to reference code, use the context provided.`;
 
             // AI yanıtını al
             const response = await this.aiEngine.generateResponse({
                 prompt: text,
-                systemPrompt,
                 maxTokens: activeModel.maxTokens || 2048,
                 temperature: activeModel.temperature || 0.7
             });
@@ -271,20 +267,27 @@ Please provide assistance based on this context. If you need to reference code, 
             const aiMessage: Message = {
                 role: 'assistant',
                 content: response.message,
-                timestamp: Date.now(),
-                context
+                timestamp: Date.now()
             };
 
-            this.messages.push(aiMessage);
+            // AI yanıtını ilgili panele ekle
+            if (this.currentView === 'chat') {
+                this.chatMessages.push(aiMessage);
+            } else if (this.currentView === 'composer') {
+                this.composerMessages.push(aiMessage);
+            }
+
             this.updateMessages();
+
         } catch (error: any) {
-            vscode.window.showErrorMessage(`AI yanıtı alınamadı: ${error.message}`);
+            vscode.window.showErrorMessage(`Hata: ${error.message}`);
+            console.error(error);
         }
     }
 
     private handleViewChange(view: string) {
         this.currentView = view;
-        this.updateViewState();
+        this.updateMessages();
     }
 
     private async handleModelToggle(modelName: string) {
@@ -395,9 +398,11 @@ Please provide assistance based on this context. If you need to reference code, 
     }
 
     private updateMessages() {
+        const messages = this.currentView === 'chat' ? this.chatMessages : this.composerMessages;
         this.webviewView.webview.postMessage({
             type: 'updateMessages',
-            messages: this.messages
+            messages: messages,
+            view: this.currentView
         });
     }
 
