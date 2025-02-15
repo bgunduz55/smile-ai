@@ -3,8 +3,10 @@ import { AIEngine } from '../ai-engine/AIEngine';
 import { ModelManager } from '../utils/ModelManager';
 import { CodebaseIndexer } from '../utils/CodebaseIndexer';
 import { FileAnalyzer } from '../utils/FileAnalyzer';
+import { ChatHistoryManager, ChatSession } from '../utils/ChatHistoryManager';
+import { AIMessage } from '../ai-engine/types';
 
-interface Message {
+interface Message extends AIMessage {
     role: 'user' | 'assistant';
     content: string;
     timestamp: number;
@@ -26,6 +28,9 @@ export class AIAssistantPanel {
     private codebaseIndexer: CodebaseIndexer;
     private fileAnalyzer: FileAnalyzer;
     private isIndexing: boolean = false;
+    private chatHistoryManager: ChatHistoryManager;
+    private currentChatSession: ChatSession | undefined;
+    private currentComposerSession: ChatSession | undefined;
 
     private constructor(
         webviewView: vscode.WebviewView,
@@ -36,6 +41,7 @@ export class AIAssistantPanel {
         this.modelManager = ModelManager.getInstance();
         this.codebaseIndexer = CodebaseIndexer.getInstance();
         this.fileAnalyzer = FileAnalyzer.getInstance();
+        this.chatHistoryManager = ChatHistoryManager.getInstance(context);
         
         // Aktif modeli kontrol et ve AI Engine'i başlat
         const activeModel = this.modelManager.getActiveModel();
@@ -74,6 +80,7 @@ export class AIAssistantPanel {
         // İlk indexlemeyi başlat
         this.indexCodebase();
         this.setupWebview();
+        this.loadLastSession();
     }
 
     public static show(
@@ -118,6 +125,12 @@ export class AIAssistantPanel {
                         break;
                     case 'reindex':
                         await this.indexCodebase();
+                        break;
+                    case 'createNewSession':
+                        await this.createNewSession();
+                        break;
+                    case 'switchSession':
+                        await this.switchSession(message.sessionId);
                         break;
                 }
             },
@@ -217,13 +230,11 @@ export class AIAssistantPanel {
 
     private async handleUserMessage(text: string) {
         try {
-            // Aktif model kontrolü
             const activeModel = this.modelManager.getActiveModel();
             if (!activeModel) {
                 throw new Error('Lütfen önce bir AI model seçin');
             }
 
-            // AI Engine kontrolü
             if (!this.aiEngine) {
                 this.aiEngine = new AIEngine({
                     provider: {
@@ -236,48 +247,82 @@ export class AIAssistantPanel {
                 });
             }
 
-            // Bağlam bilgisini al
             const context = await this.getCurrentContext();
+            const currentView = this.currentView;
 
-            // Kullanıcı mesajını ekle
-            const message: Message = {
+            // View'a göre oturum kontrolü
+            if (currentView === 'chat' && !this.currentChatSession) {
+                const session: ChatSession = {
+                    id: `chat_${Date.now()}`,
+                    title: text.split('\n')[0].substring(0, 50),
+                    messages: [],
+                    created: Date.now(),
+                    lastUpdated: Date.now()
+                };
+                await this.chatHistoryManager.addSession(session);
+                this.currentChatSession = session;
+                this.updateSessionList();
+            } else if (currentView === 'composer' && !this.currentComposerSession) {
+                const session: ChatSession = {
+                    id: `composer_${Date.now()}`,
+                    title: text.split('\n')[0].substring(0, 50),
+                    messages: [],
+                    created: Date.now(),
+                    lastUpdated: Date.now()
+                };
+                await this.chatHistoryManager.addSession(session);
+                this.currentComposerSession = session;
+                this.updateSessionList();
+            }
+
+            const userMessage: Message = {
                 role: 'user',
                 content: text,
                 timestamp: Date.now(),
                 context
             };
 
-            // Mesajı ilgili panele ekle
-            if (this.currentView === 'chat') {
-                this.chatMessages.push(message);
-            } else if (this.currentView === 'composer') {
-                this.composerMessages.push(message);
+            if (currentView === 'chat') {
+                this.chatMessages.push(userMessage);
+                this.updateMessages('chat', this.chatMessages);
+                if (this.currentChatSession) {
+                    await this.chatHistoryManager.addMessage(this.currentChatSession.id, userMessage as AIMessage);
+                }
+            } else if (currentView === 'composer') {
+                this.composerMessages.push(userMessage);
+                this.updateMessages('composer', this.composerMessages);
+                if (this.currentComposerSession) {
+                    await this.chatHistoryManager.addMessage(this.currentComposerSession.id, userMessage as AIMessage);
+                }
             }
 
-            this.updateMessages();
-
-            // AI yanıtını al
             const response = await this.aiEngine.generateResponse({
                 prompt: text,
                 maxTokens: activeModel.maxTokens || 2048,
                 temperature: activeModel.temperature || 0.7
             });
 
-            // AI yanıtını ekle
             const aiMessage: Message = {
                 role: 'assistant',
                 content: response.message,
                 timestamp: Date.now()
             };
 
-            // AI yanıtını ilgili panele ekle
-            if (this.currentView === 'chat') {
+            if (currentView === 'chat') {
                 this.chatMessages.push(aiMessage);
-            } else if (this.currentView === 'composer') {
+                this.updateMessages('chat', this.chatMessages);
+                if (this.currentChatSession) {
+                    await this.chatHistoryManager.addMessage(this.currentChatSession.id, aiMessage as AIMessage);
+                }
+                this.scrollToBottom('messageContainer');
+            } else if (currentView === 'composer') {
                 this.composerMessages.push(aiMessage);
+                this.updateMessages('composer', this.composerMessages);
+                if (this.currentComposerSession) {
+                    await this.chatHistoryManager.addMessage(this.currentComposerSession.id, aiMessage as AIMessage);
+                }
+                this.scrollToBottom('composerPreview');
             }
-
-            this.updateMessages();
 
         } catch (error: any) {
             vscode.window.showErrorMessage(`Hata: ${error.message}`);
@@ -285,9 +330,20 @@ export class AIAssistantPanel {
         }
     }
 
+    private scrollToBottom(containerId: string) {
+        this.webviewView.webview.postMessage({
+            type: 'scrollToBottom',
+            containerId
+        });
+    }
+
     private handleViewChange(view: string) {
         this.currentView = view;
-        this.updateMessages();
+        if (view === 'chat') {
+            this.updateMessages('chat', this.chatMessages);
+        } else if (view === 'composer') {
+            this.updateMessages('composer', this.composerMessages);
+        }
     }
 
     private async handleModelToggle(modelName: string) {
@@ -397,12 +453,11 @@ export class AIAssistantPanel {
         });
     }
 
-    private updateMessages() {
-        const messages = this.currentView === 'chat' ? this.chatMessages : this.composerMessages;
+    private updateMessages(view: string, messages: Message[]) {
         this.webviewView.webview.postMessage({
             type: 'updateMessages',
             messages: messages,
-            view: this.currentView
+            view: view
         });
     }
 
@@ -424,6 +479,68 @@ export class AIAssistantPanel {
         this.webviewView.webview.postMessage({
             type: 'viewChanged',
             view: this.currentView
+        });
+    }
+
+    private async loadLastSession() {
+        const sessions = await this.chatHistoryManager.getSessions();
+        if (sessions.size > 0) {
+            const sessionsArray = Array.from(sessions.values());
+            const lastSession = sessionsArray
+                .sort((a: ChatSession, b: ChatSession) => b.lastUpdated - a.lastUpdated)[0];
+            this.currentChatSession = lastSession;
+            this.chatMessages = lastSession.messages as Message[];
+            this.updateMessages('chat', this.chatMessages);
+        }
+    }
+
+    private async createNewSession() {
+        const title = await vscode.window.showInputBox({
+            prompt: 'Yeni oturum için başlık girin',
+            placeHolder: 'Örn: Proje Planlaması'
+        });
+
+        if (title) {
+            const session: ChatSession = {
+                id: Date.now().toString(),
+                title,
+                messages: [],
+                created: Date.now(),
+                lastUpdated: Date.now()
+            };
+
+            await this.chatHistoryManager.addSession(session);
+            this.currentChatSession = session;
+            this.chatMessages = [];
+            this.updateMessages('chat', this.chatMessages);
+            this.updateSessionList();
+        }
+    }
+
+    private async switchSession(sessionId: string) {
+        const session = await this.chatHistoryManager.getSession(sessionId);
+        if (!session) return;
+
+        if (sessionId.startsWith('chat_')) {
+            this.currentChatSession = session;
+            this.chatMessages = session.messages as Message[];
+            this.updateMessages('chat', this.chatMessages);
+        } else if (sessionId.startsWith('composer_')) {
+            this.currentComposerSession = session;
+            this.composerMessages = session.messages as Message[];
+            this.updateMessages('composer', this.composerMessages);
+        }
+    }
+
+    private async updateSessionList() {
+        const sessions = await this.chatHistoryManager.getSessions();
+        const chatSessions = Array.from(sessions.values()).filter(s => s.id.startsWith('chat_'));
+        const composerSessions = Array.from(sessions.values()).filter(s => s.id.startsWith('composer_'));
+
+        this.webviewView.webview.postMessage({
+            type: 'updateSessions',
+            chatSessions,
+            composerSessions
         });
     }
 } 

@@ -10,34 +10,60 @@ export interface ChatSession {
 }
 
 export class ChatHistoryManager {
+    private sessions: Map<string, ChatSession> = new Map();
     private static instance: ChatHistoryManager;
-    private sessions: Map<string, ChatSession>;
-    private context: vscode.ExtensionContext;
 
-    private constructor(context: vscode.ExtensionContext) {
-        this.context = context;
-        this.sessions = new Map();
+    constructor(private context: vscode.ExtensionContext) {
         this.loadSessions();
     }
 
-    public static getInstance(context: vscode.ExtensionContext): ChatHistoryManager {
-        if (!ChatHistoryManager.instance) {
+    public static getInstance(context?: vscode.ExtensionContext): ChatHistoryManager {
+        if (!ChatHistoryManager.instance && context) {
             ChatHistoryManager.instance = new ChatHistoryManager(context);
         }
         return ChatHistoryManager.instance;
     }
 
     private async loadSessions() {
-        const savedSessions = await this.context.globalState.get<ChatSession[]>('chatSessions', []);
-        savedSessions.forEach(session => {
-            this.sessions.set(session.id, session);
-        });
+        const sessionsData = this.context.globalState.get<{ [key: string]: ChatSession }>('chatSessions', {});
+        this.sessions = new Map(Object.entries(sessionsData));
     }
 
     private async saveSessions() {
-        await this.context.globalState.update('chatSessions', 
-            Array.from(this.sessions.values())
-        );
+        const sessionsData = Object.fromEntries(this.sessions.entries());
+        await this.context.globalState.update('chatSessions', sessionsData);
+    }
+
+    public async getSessions(): Promise<Map<string, ChatSession>> {
+        return this.sessions;
+    }
+
+    public async getSession(id: string): Promise<ChatSession | undefined> {
+        return this.sessions.get(id);
+    }
+
+    public async addSession(session: ChatSession): Promise<void> {
+        this.sessions.set(session.id, session);
+        await this.saveSessions();
+    }
+
+    public async deleteSession(id: string): Promise<void> {
+        this.sessions.delete(id);
+        await this.saveSessions();
+    }
+
+    public async addMessage(sessionId: string, message: AIMessage): Promise<void> {
+        const session = this.sessions.get(sessionId);
+        if (!session) return;
+
+        session.messages.push(message);
+        session.lastUpdated = Date.now();
+        await this.saveSessions();
+    }
+
+    public async clearSessions(): Promise<void> {
+        this.sessions.clear();
+        await this.saveSessions();
     }
 
     public createSession(title: string): ChatSession {
@@ -54,36 +80,9 @@ export class ChatHistoryManager {
         return session;
     }
 
-    public getSession(id: string): ChatSession | undefined {
-        return this.sessions.get(id);
-    }
-
     public getAllSessions(): ChatSession[] {
         return Array.from(this.sessions.values())
             .sort((a, b) => b.lastUpdated - a.lastUpdated);
-    }
-
-    public async addMessage(sessionId: string, message: AIMessage): Promise<void> {
-        const session = this.sessions.get(sessionId);
-        if (!session) return;
-
-        session.messages.push(message);
-        session.lastUpdated = Date.now();
-        await this.saveSessions();
-    }
-
-    public async clearSession(sessionId: string): Promise<void> {
-        const session = this.sessions.get(sessionId);
-        if (!session) return;
-
-        session.messages = [];
-        session.lastUpdated = Date.now();
-        await this.saveSessions();
-    }
-
-    public async deleteSession(sessionId: string): Promise<void> {
-        this.sessions.delete(sessionId);
-        await this.saveSessions();
     }
 
     public async renameSession(sessionId: string, newTitle: string): Promise<void> {

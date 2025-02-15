@@ -27,9 +27,16 @@
         <div class="content">
             <div id="chatView" class="view-panel active">
                 <div id="messageContainer" class="message-container"></div>
-                <div class="input-container">
-                    <textarea id="userInput" placeholder="Mesajınızı yazın... (Enter ile gönder, Ctrl+Enter ile yeniden indexle)"></textarea>
-                    <button id="sendButton">Gönder</button>
+                <div class="bottom-container">
+                    <div class="session-controls">
+                        <select id="sessionSelect" class="session-select">
+                            <option value="">Geçmiş oturumlar...</option>
+                        </select>
+                    </div>
+                    <div class="input-container">
+                        <textarea id="userInput" placeholder="Mesajınızı yazın... (Enter ile gönder, Ctrl+Enter ile yeniden indexle)"></textarea>
+                        <button id="sendButton">Gönder</button>
+                    </div>
                 </div>
             </div>
 
@@ -49,9 +56,16 @@
                     </label>
                 </div>
                 <div id="composerPreview" class="composer-preview"></div>
-                <div class="input-container">
-                    <textarea id="composerInput" placeholder="Kod üretmek için talimatlarınızı yazın... (Enter ile gönder)"></textarea>
-                    <button id="generateButton">Üret</button>
+                <div class="bottom-container">
+                    <div class="session-controls">
+                        <select id="composerSessionSelect" class="session-select">
+                            <option value="">Geçmiş oturumlar...</option>
+                        </select>
+                    </div>
+                    <div class="input-container">
+                        <textarea id="composerInput" placeholder="Kod üretmek için talimatlarınızı yazın... (Enter ile gönder)"></textarea>
+                        <button id="generateButton">Üret</button>
+                    </div>
                 </div>
             </div>
 
@@ -174,6 +188,26 @@
         document.getElementById('saveModel').addEventListener('click', saveModelSettings);
         document.getElementById('testConnection').addEventListener('click', testModelConnection);
 
+        // Session management
+        const newSessionBtn = document.getElementById('newSessionBtn');
+        const sessionSelect = document.getElementById('sessionSelect');
+
+        newSessionBtn.addEventListener('click', () => {
+            vscode.postMessage({
+                command: 'createNewSession'
+            });
+        });
+
+        sessionSelect.addEventListener('change', (e) => {
+            const sessionId = e.target.value;
+            if (sessionId) {
+                vscode.postMessage({
+                    command: 'switchSession',
+                    sessionId: sessionId
+                });
+            }
+        });
+
         function handleKeyPress(e) {
             if (e.key === 'Enter') {
                 if (e.ctrlKey) {
@@ -254,6 +288,15 @@
                         if (currentView === 'composer') {
                             updateComposerMessages();
                         }
+                    }
+                    break;
+                case 'updateSessions':
+                    updateSessionList(message.sessions);
+                    break;
+                case 'scrollToBottom':
+                    const container = document.getElementById(message.containerId);
+                    if (container) {
+                        container.scrollTop = container.scrollHeight;
                     }
                     break;
             }
@@ -363,6 +406,19 @@
                     apiEndpoint: document.getElementById('apiEndpoint').value
                 }
             });
+        }
+
+        function updateSessionList(sessions) {
+            const chatSelect = document.getElementById('sessionSelect');
+            const composerSelect = document.getElementById('composerSessionSelect');
+            
+            // Chat oturumlarını güncelle
+            chatSelect.innerHTML = '<option value="">Geçmiş sohbetler...</option>' +
+                sessions.chatSessions.map(session => `<option value="${session.id}">${session.title}</option>`).join('');
+            
+            // Composer oturumlarını güncelle
+            composerSelect.innerHTML = '<option value="">Geçmiş kod oturumları...</option>' +
+                sessions.composerSessions.map(session => `<option value="${session.id}">${session.title}</option>`).join('');
         }
 
         // Textarea auto-resize

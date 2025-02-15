@@ -19,11 +19,7 @@ export interface AIRequest {
 
 export interface AIResponse {
     message: string;
-    codeChanges?: Array<{
-        file: string;
-        originalContent: string;
-        newContent: string;
-    }>;
+    codeChanges?: any;
 }
 
 export interface AIContext {
@@ -34,7 +30,12 @@ export interface AIContext {
 export interface AIMessage {
     role: 'user' | 'assistant' | 'system';
     content: string;
-    timestamp?: number;
+    timestamp: number;
+    context?: {
+        file?: string;
+        selection?: string;
+        codebase?: any;
+    };
 }
 
 export interface AIResult {
