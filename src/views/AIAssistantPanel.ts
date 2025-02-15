@@ -127,7 +127,7 @@ export class AIAssistantPanel {
                         await this.indexCodebase();
                         break;
                     case 'createNewSession':
-                        await this.createNewSession();
+                        await this.createNewSession(message.view);
                         break;
                     case 'switchSession':
                         await this.switchSession(message.sessionId);
@@ -141,6 +141,7 @@ export class AIAssistantPanel {
         // İlk yükleme
         this.updateModels();
         this.updateSettings();
+        this.updateSessionList();
     }
 
     private async getWebviewContent(): Promise<string> {
@@ -250,28 +251,40 @@ export class AIAssistantPanel {
             const context = await this.getCurrentContext();
             const currentView = this.currentView;
 
-            // View'a göre oturum kontrolü
-            if (currentView === 'chat' && !this.currentChatSession) {
-                const session: ChatSession = {
-                    id: `chat_${Date.now()}`,
-                    title: text.split('\n')[0].substring(0, 50),
-                    messages: [],
-                    created: Date.now(),
-                    lastUpdated: Date.now()
-                };
-                await this.chatHistoryManager.addSession(session);
-                this.currentChatSession = session;
+            // View'a göre oturum kontrolü ve başlık güncelleme
+            if (currentView === 'chat') {
+                if (!this.currentChatSession) {
+                    const session: ChatSession = {
+                        id: `chat_${Date.now()}`,
+                        title: text.length > 50 ? text.substring(0, 47) + '...' : text,
+                        messages: [],
+                        created: Date.now(),
+                        lastUpdated: Date.now()
+                    };
+                    await this.chatHistoryManager.addSession(session);
+                    this.currentChatSession = session;
+                } else {
+                    // Mevcut oturumun başlığını güncelle
+                    this.currentChatSession.title = text.length > 50 ? text.substring(0, 47) + '...' : text;
+                    await this.chatHistoryManager.updateSessionTitle(this.currentChatSession.id, this.currentChatSession.title);
+                }
                 this.updateSessionList();
-            } else if (currentView === 'composer' && !this.currentComposerSession) {
-                const session: ChatSession = {
-                    id: `composer_${Date.now()}`,
-                    title: text.split('\n')[0].substring(0, 50),
-                    messages: [],
-                    created: Date.now(),
-                    lastUpdated: Date.now()
-                };
-                await this.chatHistoryManager.addSession(session);
-                this.currentComposerSession = session;
+            } else if (currentView === 'composer') {
+                if (!this.currentComposerSession) {
+                    const session: ChatSession = {
+                        id: `composer_${Date.now()}`,
+                        title: text.length > 50 ? text.substring(0, 47) + '...' : text,
+                        messages: [],
+                        created: Date.now(),
+                        lastUpdated: Date.now()
+                    };
+                    await this.chatHistoryManager.addSession(session);
+                    this.currentComposerSession = session;
+                } else {
+                    // Mevcut oturumun başlığını güncelle
+                    this.currentComposerSession.title = text.length > 50 ? text.substring(0, 47) + '...' : text;
+                    await this.chatHistoryManager.updateSessionTitle(this.currentComposerSession.id, this.currentComposerSession.title);
+                }
                 this.updateSessionList();
             }
 
@@ -341,8 +354,10 @@ export class AIAssistantPanel {
         this.currentView = view;
         if (view === 'chat') {
             this.updateMessages('chat', this.chatMessages);
+            this.updateSessionList();
         } else if (view === 'composer') {
             this.updateMessages('composer', this.composerMessages);
+            this.updateSessionList();
         }
     }
 
@@ -486,35 +501,49 @@ export class AIAssistantPanel {
         const sessions = await this.chatHistoryManager.getSessions();
         if (sessions.size > 0) {
             const sessionsArray = Array.from(sessions.values());
-            const lastSession = sessionsArray
-                .sort((a: ChatSession, b: ChatSession) => b.lastUpdated - a.lastUpdated)[0];
-            this.currentChatSession = lastSession;
-            this.chatMessages = lastSession.messages as Message[];
-            this.updateMessages('chat', this.chatMessages);
-        }
-    }
+            const lastChatSession = sessionsArray
+                .filter(s => s.id.startsWith('chat_'))
+                .sort((a, b) => b.lastUpdated - a.lastUpdated)[0];
+            const lastComposerSession = sessionsArray
+                .filter(s => s.id.startsWith('composer_'))
+                .sort((a, b) => b.lastUpdated - a.lastUpdated)[0];
 
-    private async createNewSession() {
-        const title = await vscode.window.showInputBox({
-            prompt: 'Yeni oturum için başlık girin',
-            placeHolder: 'Örn: Proje Planlaması'
-        });
+            if (lastChatSession) {
+                this.currentChatSession = lastChatSession;
+                this.chatMessages = lastChatSession.messages as Message[];
+            }
+            if (lastComposerSession) {
+                this.currentComposerSession = lastComposerSession;
+                this.composerMessages = lastComposerSession.messages as Message[];
+            }
 
-        if (title) {
-            const session: ChatSession = {
-                id: Date.now().toString(),
-                title,
-                messages: [],
-                created: Date.now(),
-                lastUpdated: Date.now()
-            };
-
-            await this.chatHistoryManager.addSession(session);
-            this.currentChatSession = session;
-            this.chatMessages = [];
             this.updateMessages('chat', this.chatMessages);
             this.updateSessionList();
         }
+    }
+
+    private async createNewSession(view: string) {
+        const session: ChatSession = {
+            id: `${view}_${Date.now()}`,
+            title: view === 'chat' ? 'Yeni sohbet' : 'Yeni kod oturumu',
+            messages: [],
+            created: Date.now(),
+            lastUpdated: Date.now()
+        };
+
+        await this.chatHistoryManager.addSession(session);
+        
+        if (view === 'chat') {
+            this.currentChatSession = session;
+            this.chatMessages = [];
+            this.updateMessages('chat', this.chatMessages);
+        } else if (view === 'composer') {
+            this.currentComposerSession = session;
+            this.composerMessages = [];
+            this.updateMessages('composer', this.composerMessages);
+        }
+        
+        this.updateSessionList();
     }
 
     private async switchSession(sessionId: string) {
@@ -539,8 +568,10 @@ export class AIAssistantPanel {
 
         this.webviewView.webview.postMessage({
             type: 'updateSessions',
-            chatSessions,
-            composerSessions
+            sessions: {
+                chatSessions: chatSessions.sort((a, b) => b.lastUpdated - a.lastUpdated),
+                composerSessions: composerSessions.sort((a, b) => b.lastUpdated - a.lastUpdated)
+            }
         });
     }
 } 

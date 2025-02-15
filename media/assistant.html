@@ -10,29 +10,39 @@
 <body>
     <div class="container">
         <div class="header">
-            <button id="chatBtn" class="header-button active">
-                <span class="codicon codicon-comment-discussion"></span>
-                Chat
-            </button>
-            <button id="composerBtn" class="header-button">
-                <span class="codicon codicon-edit"></span>
-                Composer
-            </button>
-            <button id="settingsBtn" class="header-button">
-                <span class="codicon codicon-gear"></span>
-                Settings
-            </button>
+            <div class="header-left">
+                <button id="chatBtn" class="header-button active">
+                    <span class="codicon codicon-comment-discussion"></span>
+                    Chat
+                </button>
+                <button id="composerBtn" class="header-button">
+                    <span class="codicon codicon-edit"></span>
+                    Composer
+                </button>
+                <button id="settingsBtn" class="header-button">
+                    <span class="codicon codicon-gear"></span>
+                    Settings
+                </button>
+            </div>
+            <div class="header-right">
+                <select id="sessionSelect" class="header-session-select">
+                    <option value="">Geçmiş sohbetler...</option>
+                </select>
+                <button id="newSessionBtn" class="header-button">
+                    +
+                </button>
+            </div>
         </div>
 
         <div class="content">
             <div id="chatView" class="view-panel active">
-                <div id="messageContainer" class="message-container"></div>
+                <div id="messageContainer" class="message-container">
+                    <div class="messages-wrapper"></div>
+                </div>
+                <button id="scrollToBottomBtn" class="scroll-to-bottom-btn">
+                    <span>↓</span>
+                </button>
                 <div class="bottom-container">
-                    <div class="session-controls">
-                        <select id="sessionSelect" class="session-select">
-                            <option value="">Geçmiş oturumlar...</option>
-                        </select>
-                    </div>
                     <div class="input-container">
                         <textarea id="userInput" placeholder="Mesajınızı yazın... (Enter ile gönder, Ctrl+Enter ile yeniden indexle)"></textarea>
                         <button id="sendButton">Gönder</button>
@@ -55,13 +65,13 @@
                         Test kodunu dahil et
                     </label>
                 </div>
-                <div id="composerPreview" class="composer-preview"></div>
+                <div id="composerPreview" class="composer-preview">
+                    <div class="messages-wrapper"></div>
+                </div>
+                <button id="scrollToBottomBtnComposer" class="scroll-to-bottom-btn">
+                    <span>↓</span>
+                </button>
                 <div class="bottom-container">
-                    <div class="session-controls">
-                        <select id="composerSessionSelect" class="session-select">
-                            <option value="">Geçmiş oturumlar...</option>
-                        </select>
-                    </div>
                     <div class="input-container">
                         <textarea id="composerInput" placeholder="Kod üretmek için talimatlarınızı yazın... (Enter ile gönder)"></textarea>
                         <button id="generateButton">Üret</button>
@@ -170,6 +180,14 @@
         let chatMessages = [];
         let composerMessages = [];
 
+        // Scroll kontrolü için değişkenler
+        let isUserScrolling = false;
+        let shouldAutoScroll = true;
+
+        // Scroll butonları
+        const scrollToBottomBtn = document.getElementById('scrollToBottomBtn');
+        const scrollToBottomBtnComposer = document.getElementById('scrollToBottomBtnComposer');
+
         // Event Listeners
         userInput.addEventListener('keydown', handleKeyPress);
         composerInput.addEventListener('keydown', handleKeyPress);
@@ -194,7 +212,8 @@
 
         newSessionBtn.addEventListener('click', () => {
             vscode.postMessage({
-                command: 'createNewSession'
+                command: 'createNewSession',
+                view: currentView
             });
         });
 
@@ -256,6 +275,17 @@
             const targetPanel = document.getElementById(view + 'View');
             targetPanel.classList.add('active');
 
+            // Oturum seçiciyi güncelle
+            const sessionSelect = document.getElementById('sessionSelect');
+            if (view === 'chat' || view === 'composer') {
+                sessionSelect.style.display = 'block';
+                document.getElementById('newSessionBtn').style.display = 'block';
+                sessionSelect.innerHTML = `<option value="">${view === 'chat' ? 'Geçmiş sohbetler...' : 'Geçmiş kod oturumları...'}</option>`;
+            } else {
+                sessionSelect.style.display = 'none';
+                document.getElementById('newSessionBtn').style.display = 'none';
+            }
+
             // Mesajları güncelle
             if (view === 'chat') {
                 updateChatMessages();
@@ -275,6 +305,7 @@
 
         function handleMessage(event) {
             const message = event.data;
+            console.log('Received message:', message);
 
             switch (message.type) {
                 case 'updateMessages':
@@ -291,6 +322,7 @@
                     }
                     break;
                 case 'updateSessions':
+                    console.log('Updating sessions:', message.sessions);
                     updateSessionList(message.sessions);
                     break;
                 case 'scrollToBottom':
@@ -303,13 +335,53 @@
         }
 
         function updateChatMessages() {
-            messageContainer.innerHTML = chatMessages.map(msg => renderMessage(msg)).join('');
-            messageContainer.scrollTop = messageContainer.scrollHeight;
+            const messagesWrapper = messageContainer.querySelector('.messages-wrapper');
+            if (!messagesWrapper) return;
+            
+            messagesWrapper.innerHTML = chatMessages.map(msg => renderMessage(msg)).join('');
+            
+            setTimeout(() => {
+                const maxScroll = messageContainer.scrollHeight - messageContainer.clientHeight;
+                const currentScroll = Math.ceil(messageContainer.scrollTop);
+                const isAtBottom = maxScroll - currentScroll <= 50;
+                
+                if (!isAtBottom) {
+                    scrollToBottomBtn.style.display = 'flex';
+                    scrollToBottomBtn.style.visibility = 'visible';
+                }
+                
+                if (shouldAutoScroll) {
+                    messageContainer.scrollTo({
+                        top: messageContainer.scrollHeight,
+                        behavior: 'smooth'
+                    });
+                }
+            }, 100);
         }
 
         function updateComposerMessages() {
-            composerPreview.innerHTML = composerMessages.map(msg => renderMessage(msg)).join('');
-            composerPreview.scrollTop = composerPreview.scrollHeight;
+            const messagesWrapper = composerPreview.querySelector('.messages-wrapper');
+            if (!messagesWrapper) return;
+            
+            messagesWrapper.innerHTML = composerMessages.map(msg => renderMessage(msg)).join('');
+            
+            setTimeout(() => {
+                const maxScroll = composerPreview.scrollHeight - composerPreview.clientHeight;
+                const currentScroll = Math.ceil(composerPreview.scrollTop);
+                const isAtBottom = maxScroll - currentScroll <= 50;
+                
+                if (!isAtBottom) {
+                    scrollToBottomBtnComposer.style.display = 'flex';
+                    scrollToBottomBtnComposer.style.visibility = 'visible';
+                }
+                
+                if (shouldAutoScroll) {
+                    composerPreview.scrollTo({
+                        top: composerPreview.scrollHeight,
+                        behavior: 'smooth'
+                    });
+                }
+            }, 100);
         }
 
         function renderMessage(message) {
@@ -335,10 +407,8 @@
             const modelSelect = document.getElementById('modelName');
             modelSelect.innerHTML = '<option value="">Yükleniyor...</option>';
 
-            // Provider değiştiğinde endpoint'i güncelle
             if (provider === 'ollama') {
                 document.getElementById('apiEndpoint').value = 'http://localhost:11434';
-                // Ollama modellerini kontrol et
                 fetch('http://localhost:11434/api/tags')
                     .then(response => response.json())
                     .then(data => {
@@ -357,7 +427,6 @@
                     });
             } else {
                 document.getElementById('apiEndpoint').value = 'http://localhost:1234';
-                // LM Studio modellerini kontrol et
                 fetch('http://localhost:1234/v1/models')
                     .then(response => response.json())
                     .then(data => {
@@ -409,19 +478,27 @@
         }
 
         function updateSessionList(sessions) {
-            const chatSelect = document.getElementById('sessionSelect');
-            const composerSelect = document.getElementById('composerSessionSelect');
+            if (!sessions) {
+                console.error('No sessions data received');
+                return;
+            }
+
+            const sessionSelect = document.getElementById('sessionSelect');
+            const placeholder = currentView === 'chat' ? 'Geçmiş sohbetler...' : 'Geçmiş kod oturumları...';
             
-            // Chat oturumlarını güncelle
-            chatSelect.innerHTML = '<option value="">Geçmiş sohbetler...</option>' +
-                sessions.chatSessions.map(session => `<option value="${session.id}">${session.title}</option>`).join('');
+            const filteredSessions = currentView === 'chat' 
+                ? (sessions.chatSessions || [])
+                : (sessions.composerSessions || []);
             
-            // Composer oturumlarını güncelle
-            composerSelect.innerHTML = '<option value="">Geçmiş kod oturumları...</option>' +
-                sessions.composerSessions.map(session => `<option value="${session.id}">${session.title}</option>`).join('');
+            console.log('Filtered sessions for view', currentView, ':', filteredSessions);
+            
+            sessionSelect.innerHTML = `<option value="">${placeholder}</option>` +
+                filteredSessions
+                    .sort((a, b) => b.lastUpdated - a.lastUpdated)
+                    .map(session => `<option value="${session.id}">${session.title || 'İsimsiz Oturum'}</option>`)
+                    .join('');
         }
 
-        // Textarea auto-resize
         [userInput, composerInput].forEach(input => {
             input.addEventListener('input', function() {
                 this.style.height = 'auto';
@@ -429,7 +506,6 @@
             });
         });
 
-        // İlk yükleme
         updateModelList();
 
         function applyCode(timestamp) {
@@ -451,6 +527,71 @@
                 });
             }
         }
+
+        // Scroll event listeners
+        messageContainer.addEventListener('scroll', handleScroll);
+        composerPreview.addEventListener('scroll', handleScroll);
+
+        function handleScroll(e) {
+            const container = e.target;
+            const isChat = container.id === 'messageContainer';
+            const button = isChat ? scrollToBottomBtn : scrollToBottomBtnComposer;
+            
+            const scrollOffset = 50;
+            const scrollPosition = Math.ceil(container.scrollTop);
+            const maxScroll = container.scrollHeight - container.clientHeight;
+            const isAtBottom = maxScroll - scrollPosition <= scrollOffset;
+            
+            console.log('Scroll state:', {
+                containerId: container.id,
+                isAtBottom,
+                scrollPosition,
+                maxScroll,
+                scrollTop: container.scrollTop,
+                scrollHeight: container.scrollHeight,
+                clientHeight: container.clientHeight,
+                difference: maxScroll - scrollPosition
+            });
+            
+            if (!isAtBottom) {
+                isUserScrolling = true;
+                shouldAutoScroll = false;
+                button.style.display = 'flex';
+                button.style.visibility = 'visible';
+            } else {
+                shouldAutoScroll = true;
+                button.style.display = 'none';
+                button.style.visibility = 'hidden';
+            }
+        }
+
+        function scrollToBottom(containerId) {
+            const container = document.getElementById(containerId);
+            const button = containerId === 'messageContainer' ? scrollToBottomBtn : scrollToBottomBtnComposer;
+            
+            if (!container) return;
+            
+            container.scrollTo({
+                top: container.scrollHeight,
+                behavior: 'smooth'
+            });
+            
+            shouldAutoScroll = true;
+            isUserScrolling = false;
+            button.style.display = 'none';
+            button.style.visibility = 'hidden';
+        }
+
+        // Scroll butonlarına tıklama
+        scrollToBottomBtn.addEventListener('click', () => {
+            console.log('Scroll button clicked for chat');
+            scrollToBottom('messageContainer');
+        });
+
+        scrollToBottomBtnComposer.addEventListener('click', () => {
+            console.log('Scroll button clicked for composer');
+            scrollToBottom('composerPreview');
+        });
     </script>
 </body>
 </html> 
