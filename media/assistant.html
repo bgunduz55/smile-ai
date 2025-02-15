@@ -10,29 +10,34 @@
 <body>
     <div class="container">
         <div class="header">
-            <button id="chatBtn" class="header-button active">
-                <span class="codicon codicon-comment-discussion"></span>
-                Chat
-            </button>
-            <button id="composerBtn" class="header-button">
-                <span class="codicon codicon-edit"></span>
-                Composer
-            </button>
-            <button id="settingsBtn" class="header-button">
-                <span class="codicon codicon-gear"></span>
-                Settings
-            </button>
+            <div class="header-left">
+                <button id="chatBtn" class="header-button active">
+                    <span class="codicon codicon-comment-discussion"></span>
+                    Chat
+                </button>
+                <button id="composerBtn" class="header-button">
+                    <span class="codicon codicon-edit"></span>
+                    Composer
+                </button>
+                <button id="settingsBtn" class="header-button">
+                    <span class="codicon codicon-gear"></span>
+                    Settings
+                </button>
+            </div>
+            <div class="header-right">
+                <select id="sessionSelect" class="header-session-select">
+                    <option value="">Geçmiş sohbetler...</option>
+                </select>
+                <button id="newSessionBtn" class="header-button">
+                    +
+                </button>
+            </div>
         </div>
 
         <div class="content">
             <div id="chatView" class="view-panel active">
                 <div id="messageContainer" class="message-container"></div>
                 <div class="bottom-container">
-                    <div class="session-controls">
-                        <select id="sessionSelect" class="session-select">
-                            <option value="">Geçmiş oturumlar...</option>
-                        </select>
-                    </div>
                     <div class="input-container">
                         <textarea id="userInput" placeholder="Mesajınızı yazın... (Enter ile gönder, Ctrl+Enter ile yeniden indexle)"></textarea>
                         <button id="sendButton">Gönder</button>
@@ -57,11 +62,6 @@
                 </div>
                 <div id="composerPreview" class="composer-preview"></div>
                 <div class="bottom-container">
-                    <div class="session-controls">
-                        <select id="composerSessionSelect" class="session-select">
-                            <option value="">Geçmiş oturumlar...</option>
-                        </select>
-                    </div>
                     <div class="input-container">
                         <textarea id="composerInput" placeholder="Kod üretmek için talimatlarınızı yazın... (Enter ile gönder)"></textarea>
                         <button id="generateButton">Üret</button>
@@ -194,7 +194,8 @@
 
         newSessionBtn.addEventListener('click', () => {
             vscode.postMessage({
-                command: 'createNewSession'
+                command: 'createNewSession',
+                view: currentView
             });
         });
 
@@ -255,6 +256,17 @@
             
             const targetPanel = document.getElementById(view + 'View');
             targetPanel.classList.add('active');
+
+            // Oturum seçiciyi güncelle
+            const sessionSelect = document.getElementById('sessionSelect');
+            if (view === 'chat' || view === 'composer') {
+                sessionSelect.style.display = 'block';
+                document.getElementById('newSessionBtn').style.display = 'block';
+                sessionSelect.placeholder = view === 'chat' ? 'Geçmiş sohbetler...' : 'Geçmiş kod oturumları...';
+            } else {
+                sessionSelect.style.display = 'none';
+                document.getElementById('newSessionBtn').style.display = 'none';
+            }
 
             // Mesajları güncelle
             if (view === 'chat') {
@@ -409,16 +421,31 @@
         }
 
         function updateSessionList(sessions) {
-            const chatSelect = document.getElementById('sessionSelect');
-            const composerSelect = document.getElementById('composerSessionSelect');
+            const sessionSelect = document.getElementById('sessionSelect');
+            const placeholder = currentView === 'chat' ? 'Geçmiş sohbetler...' : 'Geçmiş kod oturumları...';
             
-            // Chat oturumlarını güncelle
-            chatSelect.innerHTML = '<option value="">Geçmiş sohbetler...</option>' +
-                sessions.chatSessions.map(session => `<option value="${session.id}">${session.title}</option>`).join('');
+            if (!sessions || (!sessions.chatSessions && !sessions.composerSessions)) {
+                console.error('Session data is missing:', sessions);
+                sessionSelect.innerHTML = `<option value="">${placeholder}</option>`;
+                return;
+            }
+
+            // Aktif view'a göre oturumları filtrele
+            const filteredSessions = currentView === 'chat' 
+                ? (sessions.chatSessions || [])
+                : (sessions.composerSessions || []);
             
-            // Composer oturumlarını güncelle
-            composerSelect.innerHTML = '<option value="">Geçmiş kod oturumları...</option>' +
-                sessions.composerSessions.map(session => `<option value="${session.id}">${session.title}</option>`).join('');
+            // Dropdown'ı güncelle
+            sessionSelect.innerHTML = `<option value="">${placeholder}</option>` +
+                filteredSessions
+                    .sort((a, b) => b.lastUpdated - a.lastUpdated)
+                    .map(session => `<option value="${session.id}">${session.title || 'İsimsiz Oturum'}</option>`)
+                    .join('');
+
+            // Debug için oturum bilgilerini konsola yazdır
+            console.log('Current view:', currentView);
+            console.log('Available sessions:', sessions);
+            console.log('Filtered sessions:', filteredSessions);
         }
 
         // Textarea auto-resize

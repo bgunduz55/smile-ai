@@ -68,10 +68,45 @@ body {
 .header {
     display: flex;
     align-items: center;
+    justify-content: space-between;
     padding: 8px;
     background-color: var(--secondary-color);
     border-bottom: 1px solid var(--border-color);
     height: 36px;
+}
+
+.header-left {
+    display: flex;
+    align-items: center;
+}
+
+.header-right {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.header-session-select {
+    width: 200px;
+    padding: 4px 8px;
+    background-color: var(--background-color);
+    color: var(--text-color);
+    border: 1px solid var(--border-color);
+    border-radius: 3px;
+    font-size: 13px;
+    height: 28px;
+    cursor: pointer;
+}
+
+.header-session-select option {
+    padding: 8px;
+    background-color: var(--background-color);
+    color: var(--text-color);
+}
+
+.header-session-select:focus {
+    outline: none;
+    border-color: var(--primary-color);
 }
 
 .header-button {
@@ -88,8 +123,6 @@ body {
     align-items: center;
     opacity: 0.8;
     transition: all 0.2s ease-in-out;
-    position: relative;
-    overflow: hidden;
 }
 
 .header-button:hover {
@@ -100,6 +133,26 @@ body {
 .header-button.active {
     background-color: var(--active-color);
     opacity: 1;
+}
+
+#newSessionBtn {
+    padding: 4px 12px;
+    margin-right: 0;
+    font-size: 18px;
+    font-weight: bold;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 32px;
+    background-color: var(--primary-color);
+    color: white;
+    border-radius: 3px;
+    opacity: 1;
+}
+
+#newSessionBtn:hover {
+    opacity: 0.9;
+    background-color: var(--primary-color);
 }
 
 /* Content */

@@ -127,7 +127,7 @@ export class AIAssistantPanel {
                         await this.indexCodebase();
                         break;
                     case 'createNewSession':
-                        await this.createNewSession();
+                        await this.createNewSession(message.view);
                         break;
                     case 'switchSession':
                         await this.switchSession(message.sessionId);
@@ -494,27 +494,29 @@ export class AIAssistantPanel {
         }
     }
 
-    private async createNewSession() {
-        const title = await vscode.window.showInputBox({
-            prompt: 'Yeni oturum için başlık girin',
-            placeHolder: 'Örn: Proje Planlaması'
-        });
+    private async createNewSession(view: string) {
+        const firstMessage = view === 'chat' ? 'Yeni sohbet' : 'Yeni kod oturumu';
+        const session: ChatSession = {
+            id: `${view}_${Date.now()}`,
+            title: firstMessage,
+            messages: [],
+            created: Date.now(),
+            lastUpdated: Date.now()
+        };
 
-        if (title) {
-            const session: ChatSession = {
-                id: Date.now().toString(),
-                title,
-                messages: [],
-                created: Date.now(),
-                lastUpdated: Date.now()
-            };
-
-            await this.chatHistoryManager.addSession(session);
+        await this.chatHistoryManager.addSession(session);
+        
+        if (view === 'chat') {
             this.currentChatSession = session;
             this.chatMessages = [];
             this.updateMessages('chat', this.chatMessages);
-            this.updateSessionList();
+        } else if (view === 'composer') {
+            this.currentComposerSession = session;
+            this.composerMessages = [];
+            this.updateMessages('composer', this.composerMessages);
         }
+        
+        this.updateSessionList();
     }
 
     private async switchSession(sessionId: string) {
