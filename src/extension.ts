@@ -14,6 +14,9 @@ import { ModelManager } from './utils/ModelManager';
 import { ModelTreeProvider } from './views/ModelTreeProvider';
 import { FileContext } from './utils/FileAnalyzer';
 import { AIAssistantPanel } from './views/AIAssistantPanel';
+import { ImprovementManager } from './utils/ImprovementManager';
+import { ImprovementNoteContext, ImprovementNote, ImprovementNoteStatus } from './agent/types';
+import { ImprovementTreeProvider } from './views/ImprovementTreeProvider';
 
 // Extension sınıfı
 class SmileAIExtension {
@@ -26,16 +29,22 @@ class SmileAIExtension {
     private modelManager: ModelManager;
     private modelTreeProvider: ModelTreeProvider;
     private statusBarItem: vscode.StatusBarItem;
+    private improvementManager: ImprovementManager;
+    private improvementTreeProvider: ImprovementTreeProvider;
 
     constructor(context: vscode.ExtensionContext) {
         this.context = context;
         this.codebaseIndexer = CodebaseIndex.getInstance();
         this.modelManager = ModelManager.getInstance();
+        ImprovementManager.initialize(context);
+        this.improvementManager = ImprovementManager.getInstance();
         this.modelTreeProvider = new ModelTreeProvider(this.modelManager);
+        this.improvementTreeProvider = new ImprovementTreeProvider(this.improvementManager);
         this.statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
         
         this.initializeComponents();
         this.registerViews();
+        this.registerTreeViews();
         this.registerCommands();
         this.startIndexing().catch(err => console.error("Initial indexing failed:", err));
     }
@@ -147,6 +156,20 @@ class SmileAIExtension {
         );
     }
 
+    private registerTreeViews() {
+        // Register Future Improvements Tree View
+        this.context.subscriptions.push(
+            vscode.window.registerTreeDataProvider(
+                'smile-ai.futureImprovements', 
+                this.improvementTreeProvider
+            )
+        );
+
+        // Register other tree views if any (like ModelTreeProvider)
+        // vscode.window.registerTreeDataProvider('smile-ai.models', this.modelTreeProvider);
+        // Ensure ModelTreeProvider is also registered if it exists and is intended
+    }
+
     private registerCommands() {
         // Model yönetimi komutları
         this.context.subscriptions.push(
@@ -207,6 +230,44 @@ class SmileAIExtension {
                 await this.startIndexing();
             })
         );
+
+        // --- Register Note Improvement Command --- 
+        this.context.subscriptions.push(
+            vscode.commands.registerCommand('smile-ai.noteImprovement', async () => {
+                await this.noteImprovement();
+                this.improvementTreeProvider.refresh();
+            })
+        );
+
+        // --- Register TreeView Item Commands --- 
+        this.context.subscriptions.push(
+            vscode.commands.registerCommand('smile-ai.markImprovementDone', async (note: ImprovementNote) => {
+                if (note?.id) {
+                    await this.improvementManager.updateNoteStatus(note.id, ImprovementNoteStatus.DONE);
+                    // Tree view should refresh automatically via the event listener
+                } else {
+                    vscode.window.showErrorMessage('Could not mark improvement as done: Invalid note provided.');
+                }
+            })
+        );
+
+        this.context.subscriptions.push(
+            vscode.commands.registerCommand('smile-ai.dismissImprovement', async (note: ImprovementNote) => {
+                if (note?.id) {
+                    await this.improvementManager.updateNoteStatus(note.id, ImprovementNoteStatus.DISMISSED);
+                } else {
+                     vscode.window.showErrorMessage('Could not dismiss improvement: Invalid note provided.');
+                }
+            })
+        );
+
+        // TODO: Register command for opening context later
+        // this.context.subscriptions.push(
+        //     vscode.commands.registerCommand('smile-ai.openImprovementContext', async (note: ImprovementNote) => {
+        //         // ... implementation to open file and go to location ...
+        //     })
+        // );
+        // -----------------------------------------
     }
 
     private async analyzeCode() {
@@ -320,6 +381,78 @@ class SmileAIExtension {
             vscode.window.showErrorMessage(`Kod açıklama sırasında hata: ${error.message}`);
         }
     }
+
+    // --- Implement Note Improvement Logic --- 
+    private async noteImprovement() {
+        const editor = vscode.window.activeTextEditor;
+        let description = '';
+        let noteContext: ImprovementNoteContext | undefined = undefined;
+
+        if (editor) {
+            const selection = editor.selection;
+            const document = editor.document;
+            const filePath = vscode.workspace.asRelativePath(document.uri);
+
+            if (selection && !selection.isEmpty) {
+                description = document.getText(selection);
+                noteContext = {
+                    filePath: filePath,
+                    selection: {
+                        startLine: selection.start.line + 1,
+                        startChar: selection.start.character,
+                        endLine: selection.end.line + 1,
+                        endChar: selection.end.character
+                    },
+                    selectedText: description
+                };
+                // Optionally try to find the symbol name for context
+                const midPointPos = new vscode.Position(
+                    Math.floor((selection.start.line + selection.end.line) / 2),
+                    Math.floor((selection.start.character + selection.end.character) / 2)
+                );
+                const symbol = this.codebaseIndexer.findSymbolAtPosition(filePath, midPointPos);
+                if (symbol) {
+                    noteContext.symbolName = symbol.name;
+                }
+            } else {
+                // No selection, ask user for description
+                description = await vscode.window.showInputBox({ 
+                    prompt: 'Enter a description for the future improvement:',
+                    placeHolder: 'e.g., Refactor this function to be more efficient'
+                }) || '';
+                
+                if (description && filePath) {
+                     noteContext = { filePath: filePath };
+                     // Add symbol context if cursor is inside one
+                     const symbol = this.codebaseIndexer.findSymbolAtPosition(filePath, selection.active);
+                     if (symbol) {
+                         noteContext.symbolName = symbol.name;
+                     }
+                }
+            }
+        } else {
+            // No editor open, just ask for description
+            description = await vscode.window.showInputBox({ 
+                prompt: 'Enter a description for the future improvement:',
+                 placeHolder: 'e.g., Add unit tests for the authentication module'
+            }) || '';
+        }
+
+        if (!description) {
+            vscode.window.showInformationMessage('Improvement note cancelled.');
+            return;
+        }
+
+        try {
+            const newNote = await this.improvementManager.addNote(description, noteContext);
+            vscode.window.showInformationMessage(`Future improvement noted: "${newNote.description.substring(0, 30)}..."`);
+            // TODO: Refresh the TreeView here later
+        } catch (error) {
+            console.error('Error adding improvement note:', error);
+            vscode.window.showErrorMessage(`Failed to note improvement: ${error instanceof Error ? error.message : String(error)}`);
+        }
+    }
+    // ---------------------------------------
 
     public dispose() {
         this.statusBarItem.dispose();

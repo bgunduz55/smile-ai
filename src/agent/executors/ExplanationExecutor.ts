@@ -140,7 +140,86 @@ export class ExplanationExecutor implements TaskExecutor {
         const { codeAnalysis, fileContext } = task.metadata!; 
         // Adjust fileContext if needed, e.g., use determined language if different
         const actualFileContext = { ...fileContext, language: fileLang }; 
-        const prompt = this.buildExplanationPlanPrompt(promptTitle, codeToExplain, codeAnalysis, actualFileContext);
+
+        // --- Get Imports for Context --- 
+        let relevantImports: string[] = [];
+        const fileData = this.codebaseIndexer.getFileData(filePath);
+        if (fileData?.imports) {
+            relevantImports = fileData.imports;
+        }
+        // -------------------------------
+
+        // --- Get Definitions of Used Symbols (Functions) --- 
+        const usedFunctionDefinitions = new Map<string, string>();
+        try {
+            const snippetSourceFile = ts.createSourceFile(
+                `${filePath}-snippet`, // Temporary name for snippet parsing
+                codeToExplain,
+                ts.ScriptTarget.Latest,
+                true
+            );
+
+            const calledFunctionNames = new Set<string>();
+            const findCallsVisitor = (node: ts.Node) => {
+                if (ts.isCallExpression(node)) {
+                    // Try to get the name of the function being called
+                    let functionName: string | undefined;
+                    if (ts.isIdentifier(node.expression)) {
+                        functionName = node.expression.text;
+                    } else if (ts.isPropertyAccessExpression(node.expression)) {
+                        // Handle method calls like object.method()
+                        functionName = node.expression.name.text;
+                    }
+                    // Could add more handlers for complex call types
+                    
+                    if (functionName) {
+                        calledFunctionNames.add(functionName);
+                    }
+                }
+                ts.forEachChild(node, findCallsVisitor);
+            };
+            findCallsVisitor(snippetSourceFile);
+
+            // For each unique called function, try to find its definition via index
+            for (const funcName of calledFunctionNames) {
+                const definitions = this.codebaseIndexer.findSymbolByName(funcName);
+                // Find the most likely definition (e.g., the first one that is a function/method)
+                const funcDef = definitions.find(def => 
+                    def.kind === ts.SyntaxKind.FunctionDeclaration || 
+                    def.kind === ts.SyntaxKind.MethodDeclaration
+                );
+                
+                if (funcDef) {
+                    try {
+                        const defUri = vscode.Uri.joinPath(vscode.workspace.workspaceFolders![0].uri, funcDef.filePath);
+                        const defDoc = await vscode.workspace.openTextDocument(defUri);
+                        const defRange = new vscode.Range(
+                            funcDef.startLine - 1, funcDef.startChar,
+                            funcDef.endLine - 1, funcDef.endChar
+                        );
+                        const defCode = defDoc.getText(defRange);
+                        // Limit definition length to avoid huge prompts
+                        const maxLength = 500; // Max characters for definition snippet
+                        usedFunctionDefinitions.set(funcName, defCode.length > maxLength ? defCode.substring(0, maxLength) + '...\n}' : defCode);
+                    } catch (docError) {
+                        console.error(`Error reading definition for ${funcName} from ${funcDef.filePath}:`, docError);
+                    }
+                }
+            }
+        } catch(parseError) {
+            console.error('Error parsing code snippet to find used functions:', parseError);
+        }
+        // -------------------------------------------------
+
+        // Pass imports and definitions to the prompt builder
+        const prompt = this.buildExplanationPlanPrompt(
+            promptTitle, 
+            codeToExplain, 
+            codeAnalysis, 
+            actualFileContext, 
+            relevantImports,
+            usedFunctionDefinitions
+        );
 
         const response = await this.aiEngine.generateResponse({
             prompt,
@@ -150,28 +229,53 @@ export class ExplanationExecutor implements TaskExecutor {
         return this.parseExplanationPlan(response.message);
     }
 
-    private buildExplanationPlanPrompt(title: string, codeSnippet: string, analysis: CodeAnalysis, fileContext: any): string {
+    private buildExplanationPlanPrompt(
+        title: string, 
+        codeSnippet: string, 
+        analysis: CodeAnalysis, 
+        fileContext: any,
+        imports: string[],
+        usedFunctionDefinitions: Map<string, string>
+    ): string {
+        
+        const importsSection = imports.length > 0 
+            ? `\nRelevant Imports in the File:\n${imports.map(imp => `- ${imp}`).join('\n')}\n`
+            : '';
+
+        // --- Build Used Definitions Section --- 
+        let definitionsSection = '\nDefinitions of Potentially Used Functions (from other files/locations):\n';
+        if (usedFunctionDefinitions.size > 0) {
+            usedFunctionDefinitions.forEach((code, name) => {
+                definitionsSection += `\n--- Function: ${name} ---\n\`\`\`${fileContext.language || 'typescript'}\n${code}\n\`\`\`\n`;
+            });
+            definitionsSection += '\n';
+        }
+        // ------------------------------------
+
         return `
 ${title}
-
-Code Snippet:
+${importsSection}
+${definitionsSection}
+Code Snippet to Explain:
 \`\`\`${fileContext.language || ''}
 ${codeSnippet}
 \`\`\`
 
-Code Structure (Overall File Metrics - might be less relevant for snippets):
+Code Structure (Overall File Metrics - for context):
 - Classes: ${analysis.structure.classes.length}
 - Functions: ${analysis.structure.functions.length}
 - Dependencies: ${analysis.dependencies.length}
 
 Requirements:
-1. Explain the overall purpose and architecture (of the snippet/symbol)
-2. Break down complex algorithms (within the snippet)
-3. Identify key components and their relationships (within the snippet)
-4. Explain business logic and implementation details (of the snippet)
-5. Highlight important patterns and practices (in the snippet)
-6. Include usage examples (for the snippet/symbol)
-7. Consider different expertise levels
+1. Explain the overall purpose and architecture of the Code Snippet.
+2. Mention how the relevant imports are used within the snippet (if applicable).
+3. Explain how the provided function definitions (if any) are utilized or called by the Code Snippet.
+4. Break down complex algorithms within the snippet.
+5. Identify key components and their relationships within the snippet.
+6. Explain business logic and implementation details of the snippet.
+7. Highlight important patterns and practices in the snippet.
+8. Include usage examples for the snippet/symbol.
+9. Consider different expertise levels.
 
 Language: ${fileContext.language}
 Framework: ${fileContext.framework || 'None'}
