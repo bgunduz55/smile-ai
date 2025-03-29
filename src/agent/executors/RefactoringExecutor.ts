@@ -2,14 +2,30 @@ import * as vscode from 'vscode';
 import { Task, TaskType, TaskResult, TaskExecutor } from '../types';
 import { CodeAnalyzer, CodeAnalysis, CodeMetrics } from '../../utils/CodeAnalyzer';
 import { AIEngine } from '../../ai-engine/AIEngine';
+import { CodebaseIndex, SymbolInfo, FileIndexData } from '../../indexing/CodebaseIndex';
+import * as ts from 'typescript';
+
+function getSymbolKindName(kind: ts.SyntaxKind): string {
+    switch (kind) {
+        case ts.SyntaxKind.FunctionDeclaration: case ts.SyntaxKind.MethodDeclaration: return 'function';
+        case ts.SyntaxKind.ClassDeclaration: return 'class';
+        case ts.SyntaxKind.InterfaceDeclaration: return 'interface';
+        case ts.SyntaxKind.EnumDeclaration: return 'enum';
+        case ts.SyntaxKind.TypeAliasDeclaration: return 'type alias';
+        case ts.SyntaxKind.VariableDeclaration: return 'variable';
+        default: return 'symbol';
+    }
+}
 
 export class RefactoringExecutor implements TaskExecutor {
     private codeAnalyzer: CodeAnalyzer;
     private aiEngine: AIEngine;
+    private codebaseIndexer: CodebaseIndex;
 
-    constructor(aiEngine: AIEngine) {
+    constructor(aiEngine: AIEngine, codebaseIndexer: CodebaseIndex) {
         this.codeAnalyzer = CodeAnalyzer.getInstance();
         this.aiEngine = aiEngine;
+        this.codebaseIndexer = codebaseIndexer;
     }
 
     public canHandle(task: Task): boolean {
@@ -58,55 +74,128 @@ export class RefactoringExecutor implements TaskExecutor {
     }
 
     private async createRefactoringPlan(task: Task): Promise<RefactoringPlan> {
-        const { codeAnalysis, fileContext } = task.metadata!;
         const editor = vscode.window.activeTextEditor;
         if (!editor) {
             throw new Error('No active editor');
         }
 
-        const sourceCode = editor.document.getText();
-        const prompt = this.buildRefactoringPlanPrompt(sourceCode, codeAnalysis, fileContext);
+        const document = editor.document;
+        const filePath = vscode.workspace.asRelativePath(document.uri);
+        const selection = editor.selection;
+        let codeToRefactor = '';
+        let promptContext = '';
+        let targetSymbol: SymbolInfo | undefined;
+        let baseLineOffset = 0;
+
+        if (selection && !selection.isEmpty) {
+            const midPointPos = new vscode.Position(
+                Math.floor((selection.start.line + selection.end.line) / 2),
+                Math.floor((selection.start.character + selection.end.character) / 2)
+            );
+            targetSymbol = this.codebaseIndexer.findSymbolAtPosition(filePath, midPointPos);
+
+            if (targetSymbol && 
+                targetSymbol.startLine <= selection.start.line + 1 && targetSymbol.endLine >= selection.end.line + 1 &&
+                (targetSymbol.startLine !== selection.start.line + 1 || targetSymbol.startChar <= selection.start.character) &&
+                (targetSymbol.endLine !== selection.end.line + 1 || targetSymbol.endChar >= selection.end.character)) 
+            {
+                 console.log(`Refactoring symbol containing selection: ${targetSymbol.name}`);
+                 const symbolRange = new vscode.Range(targetSymbol.startLine - 1, targetSymbol.startChar, targetSymbol.endLine - 1, targetSymbol.endChar);
+                 codeToRefactor = document.getText(symbolRange);
+                 promptContext = `the ${getSymbolKindName(targetSymbol.kind)} '${targetSymbol.name}' in file ${filePath}`;
+                 baseLineOffset = targetSymbol.startLine - 1;
+            } else {
+                console.log('Refactoring selected text.');
+                codeToRefactor = document.getText(selection);
+                promptContext = `the selected code snippet in ${filePath} (lines ${selection.start.line + 1}-${selection.end.line + 1})`;
+                targetSymbol = undefined; 
+                baseLineOffset = selection.start.line;
+            }
+        } else {
+            const cursorPos = editor.selection.active;
+            targetSymbol = this.codebaseIndexer.findSymbolAtPosition(filePath, cursorPos);
+
+            if (targetSymbol) {
+                console.log(`Refactoring symbol at cursor: ${targetSymbol.name}`);
+                const symbolRange = new vscode.Range(targetSymbol.startLine - 1, targetSymbol.startChar, targetSymbol.endLine - 1, targetSymbol.endChar);
+                codeToRefactor = document.getText(symbolRange);
+                promptContext = `the ${getSymbolKindName(targetSymbol.kind)} '${targetSymbol.name}' in file ${filePath}`;
+                baseLineOffset = targetSymbol.startLine - 1;
+            } else {
+                console.error('Cannot determine target for refactoring without selection or symbol at cursor.');
+                throw new Error('Please select the code to refactor or place the cursor inside a specific symbol.');
+            }
+        }
+
+        const { codeAnalysis, fileContext } = task.metadata!;
+        const actualFileContext = { ...fileContext, language: document.languageId };
+        const prompt = this.buildRefactoringPlanPrompt(promptContext, codeToRefactor, codeAnalysis, actualFileContext);
 
         const response = await this.aiEngine.generateResponse({
             prompt,
             systemPrompt: this.getRefactoringPlanSystemPrompt()
         });
 
-        return this.parseRefactoringPlan(response.message);
+        const plan = this.parseRefactoringPlan(response.message);
+
+        if (plan.analysis?.codeSmells) {
+            plan.analysis.codeSmells.forEach(smell => {
+                if (smell.location) {
+                    smell.location.startLine = Math.max(1, smell.location.startLine) + baseLineOffset;
+                    smell.location.endLine = Math.max(1, smell.location.endLine) + baseLineOffset;
+                }
+            });
+        }
+        
+        if (plan.changes) {
+            plan.changes.forEach(change => {
+                if (change.steps) {
+                    change.steps.forEach(step => {
+                        if (step.target) {
+                             step.target.startLine = Math.max(1, step.target.startLine) + baseLineOffset;
+                             step.target.endLine = Math.max(1, step.target.endLine) + baseLineOffset;
+                        }
+                    });
+                }
+            });
+        }
+
+        return plan;
     }
 
-    private buildRefactoringPlanPrompt(sourceCode: string, analysis: CodeAnalysis, fileContext: any): string {
+    private buildRefactoringPlanPrompt(contextInfo: string, codeSnippet: string, analysis: CodeAnalysis, fileContext: any): string {
         const metrics = this.formatMetrics(analysis.metrics);
         const suggestions = analysis.suggestions
             .map(s => `- ${s.type}: ${s.description} (Priority: ${s.priority})`)
             .join('\n');
 
         return `
-Please analyze this code and create a comprehensive refactoring plan:
+Please analyze the code snippet below and create a focused refactoring plan for it. You are working on: ${contextInfo}.
 
-Source Code:
+Code Snippet to Refactor:
 \`\`\`${fileContext.language}
-${sourceCode}
+${codeSnippet}
 \`\`\`
 
-Current Metrics:
+Overall File Metrics (for context, but focus analysis on the snippet):
 ${metrics}
 
-Current Issues and Suggestions:
+Overall File Issues and Suggestions (for context, but focus analysis on the snippet):
 ${suggestions}
 
-Requirements:
-1. Identify code smells and anti-patterns
-2. Suggest design pattern implementations where appropriate
-3. Consider performance improvements
-4. Maintain backwards compatibility
-5. Ensure type safety
-6. Follow ${fileContext.language} best practices
-7. Consider test impact
+Refactoring Requirements (apply these primarily to the snippet):
+1. Identify code smells and anti-patterns WITHIN the snippet.
+2. Suggest design pattern implementations if appropriate for the snippet.
+3. Consider performance improvements relevant to the snippet.
+4. Maintain backwards compatibility for the snippet's external interface (if applicable).
+5. Ensure type safety within the snippet.
+6. Follow ${fileContext.language} best practices for the snippet.
+7. Consider test impact for the snippet's functionality.
 
 Language: ${fileContext.language}
 Framework: ${fileContext.framework || 'None'}
-`;
+
+Please provide a plan focusing ONLY on refactoring the provided snippet. Locations should be relative to the START of the snippet (1-based).`;
     }
 
     private formatMetrics(metrics: CodeMetrics): string {
@@ -579,7 +668,6 @@ Generate changes in this format:
     }
 
     private async applyRefactoring(changes: RefactoringChanges): Promise<void> {
-        // Değişiklikleri sıralı bir şekilde uygula
         for (const step of changes.orderOfExecution) {
             const fileChange = changes.fileChanges.find(f => f.path === step.fileChange);
             if (!fileChange) continue;

@@ -1,15 +1,38 @@
 import * as vscode from 'vscode';
 import { Task, TaskType, TaskResult, TaskExecutor } from '../types';
-import { CodeAnalyzer, CodeAnalysis } from '../../utils/CodeAnalyzer';
+import { CodeAnalysis } from '../../utils/CodeAnalyzer';
 import { AIEngine } from '../../ai-engine/AIEngine';
+import { CodebaseIndex, SymbolInfo, FileIndexData } from '../../indexing/CodebaseIndex';
+import * as ts from 'typescript';
+
+// Helper function to get a user-friendly name for the symbol kind
+function getSymbolKindName(kind: ts.SyntaxKind): string {
+    switch (kind) {
+        case ts.SyntaxKind.FunctionDeclaration:
+        case ts.SyntaxKind.MethodDeclaration:
+            return 'function';
+        case ts.SyntaxKind.ClassDeclaration:
+            return 'class';
+        case ts.SyntaxKind.InterfaceDeclaration:
+            return 'interface';
+        case ts.SyntaxKind.EnumDeclaration:
+            return 'enum';
+        case ts.SyntaxKind.TypeAliasDeclaration:
+            return 'type alias';
+        case ts.SyntaxKind.VariableDeclaration:
+            return 'variable';
+        default:
+            return 'symbol';
+    }
+}
 
 export class ExplanationExecutor implements TaskExecutor {
-    private codeAnalyzer: CodeAnalyzer;
     private aiEngine: AIEngine;
+    private codebaseIndexer: CodebaseIndex;
 
-    constructor(aiEngine: AIEngine) {
-        this.codeAnalyzer = CodeAnalyzer.getInstance();
+    constructor(aiEngine: AIEngine, codebaseIndexer: CodebaseIndex) {
         this.aiEngine = aiEngine;
+        this.codebaseIndexer = codebaseIndexer;
     }
 
     public canHandle(task: Task): boolean {
@@ -48,14 +71,76 @@ export class ExplanationExecutor implements TaskExecutor {
     }
 
     private async createExplanationPlan(task: Task): Promise<ExplanationPlan> {
-        const { codeAnalysis, fileContext } = task.metadata!;
         const editor = vscode.window.activeTextEditor;
         if (!editor) {
             throw new Error('No active editor');
         }
 
-        const sourceCode = editor.document.getText();
-        const prompt = this.buildExplanationPlanPrompt(sourceCode, codeAnalysis, fileContext);
+        let codeToExplain = '';
+        let promptTitle = '';
+        const selection = editor.selection;
+        const document = editor.document;
+        const filePath = vscode.workspace.asRelativePath(document.uri);
+        const fileLang = document.languageId;
+        let identifiedSymbol: SymbolInfo | undefined;
+
+        if (selection && !selection.isEmpty) {
+            // --- User has a selection ---
+            const selectionStartPos = selection.start;
+            const selectionEndPos = selection.end; 
+            // Try to find the most specific symbol containing the selection midpoint
+            const midPointLine = Math.floor((selectionStartPos.line + selectionEndPos.line) / 2);
+            const midPointChar = Math.floor((selectionStartPos.character + selectionEndPos.character) / 2);
+            const midPointPos = new vscode.Position(midPointLine, midPointChar); 
+
+            identifiedSymbol = this.codebaseIndexer.findSymbolAtPosition(filePath, midPointPos);
+            
+            if (identifiedSymbol && 
+                identifiedSymbol.startLine <= selectionStartPos.line + 1 && identifiedSymbol.endLine >= selectionEndPos.line + 1 &&
+                (identifiedSymbol.startLine !== selectionStartPos.line + 1 || identifiedSymbol.startChar <= selectionStartPos.character) &&
+                (identifiedSymbol.endLine !== selectionEndPos.line + 1 || identifiedSymbol.endChar >= selectionEndPos.character)) 
+            {
+                // Selection seems to be within a known symbol, use the symbol's code
+                 console.log(`Explaining symbol containing selection: ${identifiedSymbol.name}`);
+                 const symbolRange = new vscode.Range(
+                     identifiedSymbol.startLine - 1, identifiedSymbol.startChar, 
+                     identifiedSymbol.endLine - 1, identifiedSymbol.endChar
+                 );
+                 codeToExplain = document.getText(symbolRange);
+                 promptTitle = `Please analyze the ${getSymbolKindName(identifiedSymbol.kind)} '${identifiedSymbol.name}' from ${filePath} and create a comprehensive explanation plan:`;
+            } else {
+                // Selection doesn't clearly map to a single symbol, use selected text
+                console.log('Explaining selected text.');
+                codeToExplain = document.getText(selection);
+                promptTitle = `Please analyze the following code snippet from ${filePath} (lines ${selection.start.line + 1}-${selection.end.line + 1}) and create a comprehensive explanation plan:`;
+                identifiedSymbol = undefined; // Clear symbol if we are just using selection text
+            }
+        } else {
+            // --- No selection, use cursor position ---
+            const cursorPos = editor.selection.active;
+            identifiedSymbol = this.codebaseIndexer.findSymbolAtPosition(filePath, cursorPos);
+
+            if (identifiedSymbol) {
+                // Found symbol at cursor, use its code
+                console.log(`Explaining symbol at cursor: ${identifiedSymbol.name}`);
+                const symbolRange = new vscode.Range(
+                    identifiedSymbol.startLine - 1, identifiedSymbol.startChar, 
+                    identifiedSymbol.endLine - 1, identifiedSymbol.endChar
+                );
+                codeToExplain = document.getText(symbolRange);
+                promptTitle = `Please analyze the ${getSymbolKindName(identifiedSymbol.kind)} '${identifiedSymbol.name}' from ${filePath} and create a comprehensive explanation plan:`;
+            } else {
+                // No symbol at cursor, fall back to entire file
+                console.log('No specific symbol found at cursor, explaining the entire file.');
+                codeToExplain = document.getText();
+                promptTitle = `Please analyze the entire file ${filePath} and create a comprehensive explanation plan:`;
+            }
+        }
+        
+        const { codeAnalysis, fileContext } = task.metadata!; 
+        // Adjust fileContext if needed, e.g., use determined language if different
+        const actualFileContext = { ...fileContext, language: fileLang }; 
+        const prompt = this.buildExplanationPlanPrompt(promptTitle, codeToExplain, codeAnalysis, actualFileContext);
 
         const response = await this.aiEngine.generateResponse({
             prompt,
@@ -65,27 +150,27 @@ export class ExplanationExecutor implements TaskExecutor {
         return this.parseExplanationPlan(response.message);
     }
 
-    private buildExplanationPlanPrompt(sourceCode: string, analysis: CodeAnalysis, fileContext: any): string {
+    private buildExplanationPlanPrompt(title: string, codeSnippet: string, analysis: CodeAnalysis, fileContext: any): string {
         return `
-Please analyze this code and create a comprehensive explanation plan:
+${title}
 
-Source Code:
-\`\`\`${fileContext.language}
-${sourceCode}
+Code Snippet:
+\`\`\`${fileContext.language || ''}
+${codeSnippet}
 \`\`\`
 
-Code Structure:
+Code Structure (Overall File Metrics - might be less relevant for snippets):
 - Classes: ${analysis.structure.classes.length}
 - Functions: ${analysis.structure.functions.length}
 - Dependencies: ${analysis.dependencies.length}
 
 Requirements:
-1. Explain the overall purpose and architecture
-2. Break down complex algorithms
-3. Identify key components and their relationships
-4. Explain business logic and implementation details
-5. Highlight important patterns and practices
-6. Include usage examples
+1. Explain the overall purpose and architecture (of the snippet/symbol)
+2. Break down complex algorithms (within the snippet)
+3. Identify key components and their relationships (within the snippet)
+4. Explain business logic and implementation details (of the snippet)
+5. Highlight important patterns and practices (in the snippet)
+6. Include usage examples (for the snippet/symbol)
 7. Consider different expertise levels
 
 Language: ${fileContext.language}
@@ -616,7 +701,6 @@ Generate explanations in this format:
         }
 
         function showConcept(concept) {
-            // Scroll to the related concept section if it exists
             const elements = document.querySelectorAll('h3');
             for (const element of elements) {
                 if (element.textContent.includes(concept)) {
@@ -626,7 +710,6 @@ Generate explanations in this format:
             }
         }
 
-        // Initialize Mermaid
         mermaid.initialize({
             startOnLoad: true,
             theme: 'dark',
@@ -666,7 +749,6 @@ Generate explanations in this format:
         editor.revealRange(range, vscode.TextEditorRevealType.InCenter);
         editor.selection = new vscode.Selection(range.start, range.end);
 
-        // Highlight the range temporarily
         const decoration = vscode.window.createTextEditorDecorationType({
             backgroundColor: new vscode.ThemeColor('editor.findMatchHighlightBackground'),
             isWholeLine: true
@@ -674,7 +756,6 @@ Generate explanations in this format:
 
         editor.setDecorations(decoration, [range]);
 
-        // Remove the highlight after a delay
         setTimeout(() => {
             decoration.dispose();
         }, 3000);
