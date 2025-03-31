@@ -38,6 +38,12 @@
           "id": "smile-ai.assistant",
           "name": "AI Assistant",
           "icon": "resources/smile-ai-logo.png"
+        },
+        {
+          "type": "treeView",
+          "id": "smile-ai.futureImprovements",
+          "name": "Future Improvements",
+          "icon": "resources/lightbulb.svg"
         }
       ]
     },
@@ -86,6 +92,21 @@
         "command": "smile-ai.selectActiveModel",
         "title": "Select Active Model",
         "category": "Smile AI"
+      },
+      {
+        "command": "smile-ai.noteImprovement",
+        "title": "Smile AI: Note Future Improvement",
+        "category": "Smile AI"
+      },
+      {
+        "command": "smile-ai.markImprovementDone",
+        "title": "Mark as Done",
+        "icon": "$(check)"
+      },
+      {
+        "command": "smile-ai.dismissImprovement",
+        "title": "Dismiss",
+        "icon": "$(x)"
       }
     ],
     "menus": {
@@ -104,6 +125,18 @@
           "command": "smile-ai.addModel",
           "when": "view == smile-ai.assistant",
           "group": "navigation"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "smile-ai.markImprovementDone",
+          "when": "view == smile-ai.futureImprovements && viewItem == improvementNotePending",
+          "group": "inline@1"
+        },
+        {
+          "command": "smile-ai.dismissImprovement",
+          "when": "view == smile-ai.futureImprovements && viewItem == improvementNotePending",
+          "group": "inline@2"
         }
       ]
     },
