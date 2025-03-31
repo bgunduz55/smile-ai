@@ -1,15 +1,28 @@
 import * as vscode from 'vscode';
 import { Task, TaskType, TaskResult, TaskExecutor } from '../types';
-import { CodeAnalyzer, CodeAnalysis } from '../../utils/CodeAnalyzer';
 import { AIEngine } from '../../ai-engine/AIEngine';
+import { CodebaseIndex, SymbolInfo, FileIndexData } from '../../indexing/CodebaseIndex';
+import * as ts from 'typescript';
+
+function getSymbolKindName(kind: ts.SyntaxKind): string {
+    switch (kind) {
+        case ts.SyntaxKind.FunctionDeclaration: case ts.SyntaxKind.MethodDeclaration: return 'function';
+        case ts.SyntaxKind.ClassDeclaration: return 'class';
+        case ts.SyntaxKind.InterfaceDeclaration: return 'interface';
+        case ts.SyntaxKind.EnumDeclaration: return 'enum';
+        case ts.SyntaxKind.TypeAliasDeclaration: return 'type alias';
+        case ts.SyntaxKind.VariableDeclaration: return 'variable';
+        default: return 'symbol';
+    }
+}
 
 export class CodeModificationExecutor implements TaskExecutor {
-    private codeAnalyzer: CodeAnalyzer;
     private aiEngine: AIEngine;
+    private codebaseIndexer: CodebaseIndex;
 
-    constructor(aiEngine: AIEngine) {
-        this.codeAnalyzer = CodeAnalyzer.getInstance();
+    constructor(aiEngine: AIEngine, codebaseIndexer: CodebaseIndex) {
         this.aiEngine = aiEngine;
+        this.codebaseIndexer = codebaseIndexer;
     }
 
     public canHandle(task: Task): boolean {
@@ -52,43 +65,135 @@ export class CodeModificationExecutor implements TaskExecutor {
     }
 
     private async planModification(task: Task): Promise<ModificationPlan> {
-        const { codeAnalysis, fileContext } = task.metadata!;
+        // const { codeAnalysis, fileContext } = task.metadata!; // Keep for now if needed
         const editor = vscode.window.activeTextEditor;
         if (!editor) {
             throw new Error('No active editor');
         }
 
-        const currentCode = editor.document.getText();
-        const prompt = this.buildModificationPrompt(task.description, currentCode, fileContext);
+        const document = editor.document;
+        const filePath = vscode.workspace.asRelativePath(document.uri);
+        const selection = editor.selection;
+        let codeToModify = '';
+        let promptContext = '';
+        let targetSymbol: SymbolInfo | undefined;
+
+        if (selection && !selection.isEmpty) {
+            // --- User has a selection ---
+            const midPointPos = new vscode.Position(
+                Math.floor((selection.start.line + selection.end.line) / 2),
+                Math.floor((selection.start.character + selection.end.character) / 2)
+            );
+            targetSymbol = this.codebaseIndexer.findSymbolAtPosition(filePath, midPointPos);
+
+            // Check if the found symbol actually contains the selection
+            if (targetSymbol && 
+                targetSymbol.startLine <= selection.start.line + 1 && targetSymbol.endLine >= selection.end.line + 1 &&
+                (targetSymbol.startLine !== selection.start.line + 1 || targetSymbol.startChar <= selection.start.character) &&
+                (targetSymbol.endLine !== selection.end.line + 1 || targetSymbol.endChar >= selection.end.character)) 
+            {
+                 console.log(`Modifying symbol containing selection: ${targetSymbol.name}`);
+                 const symbolRange = new vscode.Range(targetSymbol.startLine - 1, targetSymbol.startChar, targetSymbol.endLine - 1, targetSymbol.endChar);
+                 codeToModify = document.getText(symbolRange);
+                 promptContext = `the ${getSymbolKindName(targetSymbol.kind)} '${targetSymbol.name}' in file ${filePath}`;
+            } else {
+                console.log('Modifying selected text.');
+                codeToModify = document.getText(selection);
+                promptContext = `the selected code snippet in ${filePath} (lines ${selection.start.line + 1}-${selection.end.line + 1})`;
+                targetSymbol = undefined; 
+            }
+        } else {
+            // --- No selection, use cursor position ---
+            const cursorPos = editor.selection.active;
+            targetSymbol = this.codebaseIndexer.findSymbolAtPosition(filePath, cursorPos);
+
+            if (targetSymbol) {
+                console.log(`Modifying symbol at cursor: ${targetSymbol.name}`);
+                const symbolRange = new vscode.Range(targetSymbol.startLine - 1, targetSymbol.startChar, targetSymbol.endLine - 1, targetSymbol.endChar);
+                codeToModify = document.getText(symbolRange);
+                promptContext = `the ${getSymbolKindName(targetSymbol.kind)} '${targetSymbol.name}' in file ${filePath}`;
+            } else {
+                // Cannot determine target, maybe ask user or throw error?
+                // For now, throw an error as modifying the whole file without context is risky.
+                console.error('Cannot determine target for modification without selection or symbol at cursor.');
+                throw new Error('Please select the code to modify or place the cursor inside a function/class/variable.'); 
+                // Alternatively, could fall back to whole file modification if desired:
+                // codeToModify = document.getText();
+                // promptContext = `the entire file ${filePath}`;
+            }
+        }
+
+        // Build prompt with the specific code and context
+        const fileContext = task.metadata?.fileContext; // Get original file context if available
+        const prompt = this.buildModificationPrompt(task.description, promptContext, codeToModify, fileContext);
 
         const response = await this.aiEngine.generateResponse({
             prompt,
-            systemPrompt: this.getModificationSystemPrompt()
+            systemPrompt: this.getModificationSystemPrompt() // Keep or adapt the system prompt
         });
 
-        return this.parseModificationPlan(response.message);
+        // Parse the plan (needs to handle potential changes in AI response format)
+        const plan = this.parseModificationPlan(response.message);
+
+        // --- IMPORTANT: Adjust plan locations --- 
+        // The AI plan's locations are relative to the snippet sent.
+        // Adjust them back to be relative to the entire document.
+        let baseLineOffset = 0;
+        if (targetSymbol) {
+            baseLineOffset = targetSymbol.startLine - 1; // 0-based start line of the symbol
+        } else if (selection && !selection.isEmpty) { // If we used selection text
+             baseLineOffset = selection.start.line; // 0-based start line of the selection
+        }
+        // If modifying the whole file (currently disabled), offset is 0.
+        
+        plan.modifications.forEach(mod => {
+            // Adjust start and end lines by adding the base offset
+            // Ensure the lines remain at least 1 after adjustment relative to snippet start
+            mod.location.startLine = Math.max(1, mod.location.startLine) + baseLineOffset;
+            mod.location.endLine = Math.max(1, mod.location.endLine) + baseLineOffset;
+        });
+
+        return plan; // Ensure the adjusted plan is returned
     }
 
-    private buildModificationPrompt(description: string, code: string, fileContext: any): string {
+    private buildModificationPrompt(description: string, contextInfo: string, code: string, fileContext: any): string {
+        const language = fileContext?.language || 'typescript'; // Infer language if possible
         return `
 Please analyze the following code and provide a detailed modification plan based on this request:
 "${description}"
 
+Context: You are modifying ${contextInfo}.
+
 Code to modify:
-\`\`\`${fileContext.language}
+\`\`\`${language}
 ${code}
 \`\`\`
 
-Please provide:
-1. A clear explanation of the changes to be made
-2. The exact modifications with proper context
-3. Any potential risks or side effects
-4. Required imports or dependencies
-5. Suggested tests to validate the changes
+Provide a plan to modify ONLY the code snippet above. Focus on the user's request.
+Consider potential risks or side effects WITHIN the context of this snippet.
 
-Language: ${fileContext.language}
-Framework: ${fileContext.framework || 'None'}
-`;
+Please provide your modification plan in this JSON format (ensure startLine/endLine are relative to the START of the snippet above, 1-based):
+{
+    "description": "Clear explanation of the changes to be made to the snippet",
+    "modifications": [
+        {
+            "type": "add|modify|delete",
+            "location": {
+                "startLine": number, // Relative to snippet start (1-based)
+                "endLine": number   // Relative to snippet start (1-based)
+            },
+            "code": "The new code to insert/replace/add",
+            "explanation": "Why this change is needed for the snippet"
+        }
+        // Usually expect only one modification block for a focused snippet change
+    ],
+    "risks": [
+        "Potential risk 1 (within snippet context)",
+    ],
+    "tests": [
+        "Test case 1 (relevant to snippet change)",
+    ]
+}`;
     }
 
     private getModificationSystemPrompt(): string {

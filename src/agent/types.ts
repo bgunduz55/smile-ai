@@ -79,4 +79,32 @@ export interface TaskManager {
     getTask(taskId: string): Task | undefined;
     getTasks(status?: TaskStatus): Task[];
     cancelTask(taskId: string): void;
+}
+
+// --- Future Improvement Notes --- 
+
+export enum ImprovementNoteStatus {
+    PENDING = 'pending',
+    DONE = 'done',
+    DISMISSED = 'dismissed'
+}
+
+export interface ImprovementNoteContext {
+    filePath?: string;
+    symbolName?: string;
+    selection?: {
+        startLine: number;
+        startChar: number;
+        endLine: number;
+        endChar: number;
+    };
+    selectedText?: string;
+}
+
+export interface ImprovementNote {
+    id: string;
+    description: string;
+    context?: ImprovementNoteContext;
+    status: ImprovementNoteStatus;
+    createdAt: number;
 } 
