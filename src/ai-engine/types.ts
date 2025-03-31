@@ -1,3 +1,5 @@
+import * as vscode from 'vscode';
+
 export interface AIProvider {
     name: string;
     modelName: string;
@@ -8,18 +10,37 @@ export interface AIConfig {
     provider: AIProvider;
     maxTokens: number;
     temperature: number;
+    embeddingModelName?: string;
 }
 
 export interface AIRequest {
-    prompt: string;
+    messages: AIMessage[];
     systemPrompt?: string;
     maxTokens?: number;
     temperature?: number;
+    context?: {
+        mode?: string;
+        selectedText?: string;
+        filePath?: string;
+        prompt?: string;
+        currentFile?: string;
+        [key: string]: any;
+    };
 }
 
 export interface AIResponse {
     message: string;
-    codeChanges?: any;
+    edit?: vscode.WorkspaceEdit;
+    success?: boolean;
+    error?: string;
+    codeChanges?: Array<{
+        uri: string;
+        range: {
+            start: { line: number; character: number };
+            end: { line: number; character: number };
+        };
+        newText: string;
+    }>;
 }
 
 export interface AIContext {

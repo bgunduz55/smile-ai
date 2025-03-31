@@ -1,15 +1,65 @@
 import * as vscode from 'vscode';
-import * as path from 'path';
 import { Task, TaskType, TaskResult, TaskExecutor } from '../types';
-import { CodeAnalyzer, CodeAnalysis, ClassInfo, FunctionInfo } from '../../utils/CodeAnalyzer';
+import { CodeAnalysis, ClassInfo, FunctionInfo } from '../../utils/CodeAnalyzer';
 import { AIEngine } from '../../ai-engine/AIEngine';
+import { AIMessage } from '../../ai-engine/types';
+
+interface DocumentationSection {
+    type: 'class' | 'function' | 'interface' | 'constant';
+    target: string;
+    documentation: string;
+}
+
+interface Documentation {
+    fileHeader: string;
+    sections: DocumentationSection[];
+}
+
+interface DocumentationPlan {
+    overview: {
+        description: string;
+        purpose: string;
+        dependencies: string[];
+        usage: string;
+    };
+    sections: {
+        type: 'class' | 'function' | 'interface' | 'constant';
+        target: string;
+        content: {
+            description: string;
+            params?: {
+                name: string;
+                type: string;
+                description: string;
+                optional: boolean;
+                defaultValue?: string;
+            }[];
+            returns?: {
+                type: string;
+                description: string;
+            };
+            throws?: {
+                type: string;
+                condition: string;
+            }[];
+            examples?: {
+                description: string;
+                code: string;
+            }[];
+            notes?: string[];
+            seeAlso?: string[];
+        };
+    }[];
+    style: {
+        format: string;
+        conventions: string[];
+    };
+}
 
 export class DocumentationExecutor implements TaskExecutor {
-    private codeAnalyzer: CodeAnalyzer;
-    private aiEngine: AIEngine;
+    private readonly aiEngine: AIEngine;
 
     constructor(aiEngine: AIEngine) {
-        this.codeAnalyzer = CodeAnalyzer.getInstance();
         this.aiEngine = aiEngine;
     }
 
@@ -68,8 +118,14 @@ export class DocumentationExecutor implements TaskExecutor {
         const sourceCode = editor.document.getText();
         const prompt = this.buildDocPlanPrompt(sourceCode, codeAnalysis, fileContext);
 
+        const messages: AIMessage[] = [{
+            role: 'user',
+            content: prompt,
+            timestamp: Date.now()
+        }];
+
         const response = await this.aiEngine.generateResponse({
-            prompt,
+            messages,
             systemPrompt: this.getDocPlanSystemPrompt()
         });
 
@@ -209,8 +265,14 @@ Please provide your documentation plan in this JSON format:
     private async generateDocumentation(plan: DocumentationPlan): Promise<Documentation> {
         const prompt = this.buildDocGenerationPrompt(plan);
         
+        const messages: AIMessage[] = [{
+            role: 'user',
+            content: prompt,
+            timestamp: Date.now()
+        }];
+
         const response = await this.aiEngine.generateResponse({
-            prompt,
+            messages,
             systemPrompt: this.getDocGenerationSystemPrompt()
         });
 
@@ -248,258 +310,12 @@ Generate documentation in this format:
     "fileHeader": "File header comment",
     "sections": [
         {
-            "target": "Target name",
-            "position": {
-                "startLine": number,
-                "endLine": number
-            },
-            "content": "Documentation content"
+            "type": "class|function|interface|constant",
+            "target": "Name of the item",
+            "documentation": "Generated documentation"
         }
     ]
 }`;
-    }
-
-    private detectDocStyle(fileContext: any): string {
-        // Dile göre dokümantasyon stilini belirle
-        switch (fileContext.language) {
-            case 'typescript':
-            case 'javascript':
-                return 'JSDoc';
-            case 'python':
-                return 'Google Style Python Docstrings';
-            case 'java':
-                return 'Javadoc';
-            default:
-                return 'JSDoc';
-        }
-    }
-
-    private async showDocumentationPreview(documentation: Documentation, plan: DocumentationPlan): Promise<boolean> {
-        const panel = vscode.window.createWebviewPanel(
-            'documentationPreview',
-            'Documentation Preview',
-            vscode.ViewColumn.Two,
-            {
-                enableScripts: true
-            }
-        );
-
-        panel.webview.html = this.generatePreviewHTML(documentation, plan);
-
-        return new Promise((resolve) => {
-            panel.webview.onDidReceiveMessage(
-                async message => {
-                    switch (message.command) {
-                        case 'approve':
-                            panel.dispose();
-                            resolve(true);
-                            break;
-                        case 'reject':
-                            panel.dispose();
-                            resolve(false);
-                            break;
-                    }
-                },
-                undefined
-            );
-        });
-    }
-
-    private generatePreviewHTML(documentation: Documentation, plan: DocumentationPlan): string {
-        return `<!DOCTYPE html>
-<html>
-<head>
-    <title>Documentation Preview</title>
-    <style>
-        :root {
-            --primary-color: #007acc;
-            --secondary-color: #3d3d3d;
-            --background-color: #1e1e1e;
-            --text-color: #d4d4d4;
-            --border-color: #404040;
-            --success-color: #4caf50;
-            --warning-color: #ff9800;
-            --error-color: #f44336;
-            --info-color: #2196f3;
-        }
-
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
-            margin: 0;
-            padding: 20px;
-            background-color: var(--background-color);
-            color: var(--text-color);
-        }
-
-        .container {
-            max-width: 1200px;
-            margin: 0 auto;
-        }
-
-        .header {
-            margin-bottom: 20px;
-        }
-
-        .section {
-            background-color: var(--secondary-color);
-            padding: 15px;
-            border-radius: 8px;
-            margin-bottom: 20px;
-        }
-
-        .section h2 {
-            color: var(--primary-color);
-            margin-top: 0;
-        }
-
-        pre {
-            margin: 0;
-            padding: 10px;
-            background-color: #1a1a1a;
-            border-radius: 4px;
-            overflow-x: auto;
-        }
-
-        .overview {
-            margin-bottom: 20px;
-        }
-
-        .doc-section {
-            background-color: var(--background-color);
-            padding: 10px;
-            border-radius: 4px;
-            margin-bottom: 10px;
-        }
-
-        .doc-section h4 {
-            color: var(--info-color);
-            margin: 0 0 10px 0;
-        }
-
-        .example {
-            margin: 10px 0;
-            padding: 10px;
-            background-color: #1a1a1a;
-            border-radius: 4px;
-        }
-
-        .button-container {
-            display: flex;
-            gap: 10px;
-            justify-content: flex-end;
-            margin-top: 20px;
-        }
-
-        .button {
-            padding: 8px 16px;
-            border: none;
-            border-radius: 4px;
-            cursor: pointer;
-            font-size: 14px;
-            transition: background-color 0.2s;
-        }
-
-        .approve {
-            background-color: var(--success-color);
-            color: white;
-        }
-
-        .reject {
-            background-color: var(--error-color);
-            color: white;
-        }
-
-        .button:hover {
-            opacity: 0.9;
-        }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <div class="header">
-            <h1>Documentation Preview</h1>
-        </div>
-
-        <div class="section overview">
-            <h2>Overview</h2>
-            <p>${plan.overview.description}</p>
-            <p><strong>Purpose:</strong> ${plan.overview.purpose}</p>
-            <p><strong>Dependencies:</strong> ${plan.overview.dependencies.join(', ')}</p>
-            <p><strong>Usage:</strong> ${plan.overview.usage}</p>
-        </div>
-
-        <div class="section">
-            <h2>Documentation Sections</h2>
-            ${documentation.sections.map(section => `
-                <div class="doc-section">
-                    <h4>${section.target}</h4>
-                    <pre>${this.escapeHtml(section.content)}</pre>
-                    <div class="location">Lines ${section.position.startLine}-${section.position.endLine}</div>
-                </div>
-            `).join('')}
-        </div>
-
-        <div class="section">
-            <h2>File Header</h2>
-            <pre>${this.escapeHtml(documentation.fileHeader)}</pre>
-        </div>
-
-        <div class="section">
-            <h2>Style Guide</h2>
-            <p><strong>Format:</strong> ${plan.style.format}</p>
-            <ul>
-                ${plan.style.conventions.map(conv => `<li>${conv}</li>`).join('')}
-            </ul>
-        </div>
-
-        <div class="button-container">
-            <button class="button reject" onclick="reject()">Cancel</button>
-            <button class="button approve" onclick="approve()">Apply Documentation</button>
-        </div>
-    </div>
-
-    <script>
-        const vscode = acquireVsCodeApi();
-
-        function approve() {
-            vscode.postMessage({ command: 'approve' });
-        }
-
-        function reject() {
-            vscode.postMessage({ command: 'reject' });
-        }
-    </script>
-</body>
-</html>`;
-    }
-
-    private escapeHtml(unsafe: string): string {
-        return unsafe
-            .replace(/&/g, "&amp;")
-            .replace(/</g, "&lt;")
-            .replace(/>/g, "&gt;")
-            .replace(/"/g, "&quot;")
-            .replace(/'/g, "&#039;");
-    }
-
-    private async applyDocumentation(documentation: Documentation): Promise<void> {
-        const editor = vscode.window.activeTextEditor;
-        if (!editor) {
-            throw new Error('No active editor');
-        }
-
-        await editor.edit(editBuilder => {
-            // Dosya başlığını ekle
-            if (documentation.fileHeader) {
-                editBuilder.insert(new vscode.Position(0, 0), documentation.fileHeader + '\n\n');
-            }
-
-            // Her bölüm için dokümantasyonu ekle
-            for (const section of documentation.sections) {
-                const position = new vscode.Position(section.position.startLine - 1, 0);
-                editBuilder.insert(position, section.content + '\n');
-            }
-        });
     }
 
     private parseDocumentation(aiResponse: string): Documentation {
@@ -510,67 +326,95 @@ Generate documentation in this format:
             throw new Error('Failed to parse AI response for documentation');
         }
     }
-}
 
-interface DocumentationPlan {
-    overview: {
-        description: string;
-        purpose: string;
-        dependencies: string[];
-        usage: string;
-    };
-    sections: DocSection[];
-    style: {
-        format: string;
-        conventions: string[];
-    };
-}
+    private async showDocumentationPreview(documentation: Documentation, plan: DocumentationPlan): Promise<boolean> {
+        const preview = this.generatePreview(documentation, plan);
+        const choice = await vscode.window.showInformationMessage(
+            'Review the generated documentation:',
+            { modal: true, detail: preview },
+            'Apply',
+            'Cancel'
+        );
+        return choice === 'Apply';
+    }
 
-interface DocSection {
-    type: 'class' | 'function' | 'interface' | 'constant';
-    target: string;
-    content: {
-        description: string;
-        params?: DocParam[];
-        returns?: DocReturn;
-        throws?: DocError[];
-        examples?: DocExample[];
-        notes?: string[];
-        seeAlso?: string[];
-    };
-}
+    private generatePreview(documentation: Documentation, plan: DocumentationPlan): string {
+        return `
+Documentation Plan:
+${JSON.stringify(plan, null, 2)}
 
-interface DocParam {
-    name: string;
-    type: string;
-    description: string;
-    optional: boolean;
-    defaultValue?: string;
-}
+Generated Documentation:
+${JSON.stringify(documentation, null, 2)}
+`;
+    }
 
-interface DocReturn {
-    type: string;
-    description: string;
-}
+    private async applyDocumentation(documentation: Documentation): Promise<void> {
+        const editor = vscode.window.activeTextEditor;
+        if (!editor) {
+            throw new Error('No active editor');
+        }
 
-interface DocError {
-    type: string;
-    condition: string;
-}
+        const workspaceEdit = new vscode.WorkspaceEdit();
+        const document = editor.document;
 
-interface DocExample {
-    description: string;
-    code: string;
-}
+        // Dosya başlığını ekle
+        if (documentation.fileHeader) {
+            workspaceEdit.insert(
+                document.uri,
+                new vscode.Position(0, 0),
+                documentation.fileHeader + '\n\n'
+            );
+        }
 
-interface Documentation {
-    fileHeader: string;
-    sections: {
-        target: string;
-        position: {
-            startLine: number;
-            endLine: number;
-        };
-        content: string;
-    }[];
+        // Her bölüm için dokümantasyonu ekle
+        for (const section of documentation.sections) {
+            // Bölümün konumunu bul
+            const position = await this.findDocumentationPosition(document, section);
+            if (position) {
+                workspaceEdit.insert(
+                    document.uri,
+                    position,
+                    section.documentation + '\n'
+                );
+            }
+        }
+
+        await vscode.workspace.applyEdit(workspaceEdit);
+    }
+
+    private async findDocumentationPosition(document: vscode.TextDocument, section: DocumentationSection): Promise<vscode.Position | undefined> {
+        // Bu metod, dokümantasyonun nereye ekleneceğini belirler
+        // Örneğin, bir sınıf veya fonksiyon için dokümantasyon eklerken,
+        // o öğenin hemen üstüne eklenmesi gerekir
+        
+        const text = document.getText();
+        const lines = text.split('\n');
+
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i].trim();
+            if (line.includes(section.target)) {
+                // Öğenin başlangıcını bulduk, dokümantasyonu buraya ekle
+                return new vscode.Position(i, 0);
+            }
+        }
+
+        return undefined;
+    }
+
+    private detectDocStyle(fileContext: any): string {
+        // Dosya türüne göre dokümantasyon stilini belirle
+        switch (fileContext.language.toLowerCase()) {
+            case 'typescript':
+            case 'javascript':
+                return 'JSDoc';
+            case 'python':
+                return 'Google Style Python Docstrings';
+            case 'java':
+                return 'Javadoc';
+            case 'c#':
+                return 'XML Documentation Comments';
+            default:
+                return 'Standard Documentation Comments';
+        }
+    }
 } 

@@ -1,29 +1,101 @@
 import * as vscode from 'vscode';
 import { Task, TaskType, TaskResult, TaskExecutor } from '../types';
-import { CodeAnalyzer, CodeAnalysis, CodeMetrics } from '../../utils/CodeAnalyzer';
+import { CodeAnalysis, CodeMetrics } from '../../utils/CodeAnalyzer';
 import { AIEngine } from '../../ai-engine/AIEngine';
-import { CodebaseIndex, SymbolInfo, FileIndexData } from '../../indexing/CodebaseIndex';
-import * as ts from 'typescript';
+import { CodebaseIndex, SymbolInfo, ReferenceLocation } from '../../indexing/CodebaseIndex';
+import { ImprovementManager } from '../../utils/ImprovementManager';
+import { ImprovementNoteContext } from '../types';
 
-function getSymbolKindName(kind: ts.SyntaxKind): string {
+function getSymbolKindName(kind: vscode.SymbolKind): string {
     switch (kind) {
-        case ts.SyntaxKind.FunctionDeclaration: case ts.SyntaxKind.MethodDeclaration: return 'function';
-        case ts.SyntaxKind.ClassDeclaration: return 'class';
-        case ts.SyntaxKind.InterfaceDeclaration: return 'interface';
-        case ts.SyntaxKind.EnumDeclaration: return 'enum';
-        case ts.SyntaxKind.TypeAliasDeclaration: return 'type alias';
-        case ts.SyntaxKind.VariableDeclaration: return 'variable';
+        case vscode.SymbolKind.Function: case vscode.SymbolKind.Method: return 'function';
+        case vscode.SymbolKind.Class: return 'class';
+        case vscode.SymbolKind.Interface: return 'interface';
+        case vscode.SymbolKind.Enum: return 'enum';
+        case vscode.SymbolKind.TypeParameter: return 'type alias';
+        case vscode.SymbolKind.Variable: return 'variable';
         default: return 'symbol';
     }
 }
 
+interface RefactoringPlan {
+    analysis: {
+        codeSmells: {
+            type: string;
+            description: string;
+            severity: 'high' | 'medium' | 'low';
+            location?: {
+                startLine: number;
+                endLine: number;
+            };
+        }[];
+        designIssues: {
+            type: string;
+            description: string;
+            suggestedPattern: string;
+            rationale: string;
+        }[];
+        performanceIssues: {
+            description: string;
+            impact: string;
+            suggestion: string;
+        }[];
+    };
+    changes: {
+        id: string;
+        type: 'extract' | 'move' | 'rename' | 'inline' | 'split' | 'merge' | string;
+        description: string;
+        rationale: string;
+        impact: {
+            complexity: string;
+            maintainability: string;
+            scope: string[];
+        };
+        steps: {
+            order: number;
+            action: string;
+            target?: {
+                startLine: number;
+                endLine: number;
+            };
+            code?: string;
+        }[];
+    }[];
+    risks: {
+        type: string;
+        description: string;
+        mitigation: string;
+    }[];
+    testingStrategy: {
+        impactedTests: string[];
+        newTestsNeeded: string[];
+        regressionRisks: string[];
+    };
+}
+
+interface RefactoringChanges {
+    fileChanges: {
+        filePath: string;
+        edits: {
+            range: { startLine: number; startChar: number; endLine: number; endChar: number };
+            newText: string;
+            type?: string;
+            description?: string;
+        }[];
+    }[];
+    orderOfExecution?: {
+        step: number;
+        fileChange: string;
+        changeIndex: number;
+        dependencies: number[];
+    }[];
+}
+
 export class RefactoringExecutor implements TaskExecutor {
-    private codeAnalyzer: CodeAnalyzer;
     private aiEngine: AIEngine;
     private codebaseIndexer: CodebaseIndex;
 
     constructor(aiEngine: AIEngine, codebaseIndexer: CodebaseIndex) {
-        this.codeAnalyzer = CodeAnalyzer.getInstance();
         this.aiEngine = aiEngine;
         this.codebaseIndexer = codebaseIndexer;
     }
@@ -127,47 +199,100 @@ export class RefactoringExecutor implements TaskExecutor {
             }
         }
 
+        // --- Find References --- 
+        let references: ReferenceLocation[] = [];
+        if (targetSymbol) {
+            references = this.codebaseIndexer.findReferences(targetSymbol);
+            console.log(`Found ${references.length} references for symbol ${targetSymbol.name}`);
+        }
+        // ---------------------
+
         const { codeAnalysis, fileContext } = task.metadata!;
         const actualFileContext = { ...fileContext, language: document.languageId };
-        const prompt = this.buildRefactoringPlanPrompt(promptContext, codeToRefactor, codeAnalysis, actualFileContext);
+        const prompt = this.buildRefactoringPlanPrompt(
+            promptContext, 
+            codeToRefactor, 
+            codeAnalysis, 
+            actualFileContext,
+            references // Pass references
+        );
 
         const response = await this.aiEngine.generateResponse({
-            prompt,
-            systemPrompt: this.getRefactoringPlanSystemPrompt()
+            messages: [
+                { role: 'system', content: this.getRefactoringPlanSystemPrompt() },
+                { role: 'user', content: prompt }
+            ],
+            context: {
+                prompt: prompt
+            }
         });
 
         const plan = this.parseRefactoringPlan(response.message);
 
-        if (plan.analysis?.codeSmells) {
-            plan.analysis.codeSmells.forEach(smell => {
-                if (smell.location) {
-                    smell.location.startLine = Math.max(1, smell.location.startLine) + baseLineOffset;
-                    smell.location.endLine = Math.max(1, smell.location.endLine) + baseLineOffset;
+        // Adjust relative locations in plan analysis/changes
+        this.adjustPlanLocations(plan, baseLineOffset);
+
+        // --- Extract and Note Suggestions from Plan --- 
+        const improvementManager = ImprovementManager.getInstance();
+        const suggestions = this.extractSuggestionsFromPlan(plan);
+        if (suggestions.length > 0) {
+            console.log(`[RefactoringExecutor] Found ${suggestions.length} improvement suggestions in plan.`);
+            let noteContext: ImprovementNoteContext | undefined = undefined;
+            if (editor) { // Use editor from createRefactoringPlan scope
+                 noteContext = { filePath: filePath };
+                 if (targetSymbol) { // Use targetSymbol from createRefactoringPlan scope
+                     noteContext.symbolName = targetSymbol.name;
+                      noteContext.selection = {
+                          startLine: targetSymbol.startLine,
+                          startChar: targetSymbol.startChar,
+                          endLine: targetSymbol.endLine,
+                          endChar: targetSymbol.endChar
+                      };
+                 }
+             }
+            for (const suggestion of suggestions) {
+                try {
+                     await improvementManager.addNote(suggestion, noteContext);
+                     vscode.window.showInformationMessage(`Improvement suggestion noted: ${suggestion.substring(0, 30)}...`);
+                     console.log(`[RefactoringExecutor] Automatically noted improvement from plan: ${suggestion.substring(0, 50)}...`);
+                } catch (noteError) {
+                    console.error('Error automatically noting improvement from plan:', noteError);
                 }
-            });
+            }
         }
-        
-        if (plan.changes) {
-            plan.changes.forEach(change => {
-                if (change.steps) {
-                    change.steps.forEach(step => {
-                        if (step.target) {
-                             step.target.startLine = Math.max(1, step.target.startLine) + baseLineOffset;
-                             step.target.endLine = Math.max(1, step.target.endLine) + baseLineOffset;
-                        }
-                    });
-                }
-            });
-        }
+        // --------------------------------------------
 
         return plan;
     }
 
-    private buildRefactoringPlanPrompt(contextInfo: string, codeSnippet: string, analysis: CodeAnalysis, fileContext: any): string {
+    private buildRefactoringPlanPrompt(
+        contextInfo: string, 
+        codeSnippet: string, 
+        analysis: CodeAnalysis, 
+        fileContext: any,
+        references: ReferenceLocation[]
+    ): string {
         const metrics = this.formatMetrics(analysis.metrics);
         const suggestions = analysis.suggestions
             .map(s => `- ${s.type}: ${s.description} (Priority: ${s.priority})`)
             .join('\n');
+
+        // --- Build References Section --- 
+        let referencesSection = '';
+        if (references.length > 0) {
+            referencesSection = '\nKnown Usages (Locations of potential references):\n';
+            // Group by file path for readability
+            const refsByFile = references.reduce((acc, ref) => {
+                (acc[ref.filePath] = acc[ref.filePath] || []).push(ref.startLine);
+                return acc;
+            }, {} as Record<string, number[]>);
+
+            for (const [filePath, lines] of Object.entries(refsByFile)) {
+                referencesSection += `- ${filePath} (Lines: ${(lines as number[]).sort((a: number, b: number)=>a-b).join(', ')})\n`;
+            }
+            referencesSection += '\n';
+        }
+        // -------------------------------
 
         return `
 Please analyze the code snippet below and create a focused refactoring plan for it. You are working on: ${contextInfo}.
@@ -176,7 +301,7 @@ Code Snippet to Refactor:
 \`\`\`${fileContext.language}
 ${codeSnippet}
 \`\`\`
-
+${referencesSection}
 Overall File Metrics (for context, but focus analysis on the snippet):
 ${metrics}
 
@@ -191,11 +316,12 @@ Refactoring Requirements (apply these primarily to the snippet):
 5. Ensure type safety within the snippet.
 6. Follow ${fileContext.language} best practices for the snippet.
 7. Consider test impact for the snippet's functionality.
+8. **IMPORTANT:** Consider the listed 'Known Usages'. If renaming or changing the signature, the plan MUST include steps to update these usages.
 
 Language: ${fileContext.language}
 Framework: ${fileContext.framework || 'None'}
 
-Please provide a plan focusing ONLY on refactoring the provided snippet. Locations should be relative to the START of the snippet (1-based).`;
+Please provide a plan focusing ONLY on refactoring the provided snippet and updating its known usages. Locations in the plan (smells, change steps) should be relative to the START of the snippet (1-based). Steps for updating usages should specify the target file and line number.`;
     }
 
     private formatMetrics(metrics: CodeMetrics): string {
@@ -210,20 +336,21 @@ Duplications: ${metrics.duplications}
 
     private getRefactoringPlanSystemPrompt(): string {
         return `You are a refactoring expert. Your role is to:
-1. Analyze code quality and structure
-2. Identify improvement opportunities
-3. Plan safe and effective refactoring
-4. Consider code maintainability
-5. Ensure backward compatibility
-6. Follow clean code principles
+1. Analyze code quality and structure for the provided snippet.
+2. Identify improvement opportunities within the snippet.
+3. Plan safe and effective refactoring steps for the snippet.
+4. Consider code maintainability.
+5. Ensure backward compatibility where applicable.
+6. Follow clean code principles.
+7. **IMPORTANT:** If your analysis reveals potential improvements beyond the immediate refactoring scope, or alternative approaches, flag them using the format: [IMPROVEMENT_SUGGESTION]: <Your suggestion here>.
 
-Please provide your refactoring plan in this JSON format:
+Provide your refactoring plan in this JSON format (locations relative to snippet start):
 {
     "analysis": {
         "codeSmells": [
             {
                 "type": "smell type",
-                "description": "smell description",
+                "description": "smell description (potentially include [IMPROVEMENT_SUGGESTION]: flag)", 
                 "severity": "high|medium|low",
                 "location": {
                     "startLine": number,
@@ -234,7 +361,7 @@ Please provide your refactoring plan in this JSON format:
         "designIssues": [
             {
                 "type": "issue type",
-                "description": "issue description",
+                "description": "issue description (potentially include [IMPROVEMENT_SUGGESTION]: flag)",
                 "suggestedPattern": "design pattern name",
                 "rationale": "why this pattern"
             }
@@ -251,7 +378,7 @@ Please provide your refactoring plan in this JSON format:
         {
             "id": "unique change id",
             "type": "extract|move|rename|inline|split|merge",
-            "description": "change description",
+            "description": "change description (potentially include [IMPROVEMENT_SUGGESTION]: flag for alternatives)",
             "rationale": "why this change",
             "impact": {
                 "complexity": "impact on complexity",
@@ -299,67 +426,26 @@ Please provide your refactoring plan in this JSON format:
         const prompt = this.buildRefactoringChangesPrompt(plan);
         
         const response = await this.aiEngine.generateResponse({
-            prompt,
-            systemPrompt: this.getRefactoringChangesSystemPrompt()
+            messages: [
+                { role: 'system', content: this.getRefactoringChangesSystemPrompt() },
+                { role: 'user', content: prompt }
+            ],
+            context: {
+                prompt: prompt
+            }
         });
 
         return this.parseRefactoringChanges(response.message);
     }
 
     private buildRefactoringChangesPrompt(plan: RefactoringPlan): string {
-        return `
-Please generate detailed refactoring changes based on this plan:
-
+        return `Based on the plan:
 ${JSON.stringify(plan, null, 2)}
-
-Requirements:
-1. Generate precise code changes
-2. Maintain code style and formatting
-3. Include all necessary imports
-4. Update related documentation
-5. Consider dependencies
-6. Ensure type safety
-7. Follow clean code principles
-`;
+Generate the code changes in JSON format matching RefactoringChanges interface.`;
     }
 
     private getRefactoringChangesSystemPrompt(): string {
-        return `You are a code refactoring implementer. Your role is to:
-1. Generate precise code changes
-2. Follow the refactoring plan exactly
-3. Maintain code quality
-4. Ensure backward compatibility
-5. Consider edge cases
-6. Preserve functionality
-
-Generate changes in this format:
-{
-    "fileChanges": [
-        {
-            "type": "modify|create|delete",
-            "path": "file path",
-            "changes": [
-                {
-                    "type": "insert|update|delete",
-                    "position": {
-                        "startLine": number,
-                        "endLine": number
-                    },
-                    "content": "new content",
-                    "description": "change description"
-                }
-            ]
-        }
-    ],
-    "orderOfExecution": [
-        {
-            "step": number,
-            "fileChange": "file path",
-            "changeIndex": number,
-            "dependencies": ["step numbers"]
-        }
-    ]
-}`;
+        return `You generate code changes based on a refactoring plan. Output ONLY the JSON.`;
     }
 
     private parseRefactoringChanges(aiResponse: string): RefactoringChanges {
@@ -410,7 +496,7 @@ Generate changes in this format:
     <style>
         :root {
             --primary-color: #007acc;
-            --secondary-color: #3d3d3d;
+            --secondary-color: #3d3d3d; /* A bit lighter for sections */
             --background-color: #1e1e1e;
             --text-color: #d4d4d4;
             --border-color: #404040;
@@ -418,14 +504,31 @@ Generate changes in this format:
             --warning-color: #ff9800;
             --error-color: #f44336;
             --info-color: #2196f3;
+            /* Use VS Code theme variables for better integration */
+            --vscode-editor-background: var(--vscode-editor-background, #1e1e1e);
+            --vscode-editor-foreground: var(--vscode-editor-foreground, #d4d4d4);
+            --vscode-editorGutter-background: var(--vscode-editorGutter-background, #1e1e1e);
+            --vscode-editorLineNumber-foreground: var(--vscode-editorLineNumber-foreground, #858585);
+            --vscode-descriptionForeground: var(--vscode-descriptionForeground, #cccccc);
+            --vscode-editorInfo-foreground: var(--vscode-editorInfo-foreground, #9cdcfe);
+            --vscode-editorWarning-foreground: var(--vscode-editorWarning-foreground, #ffcc00);
+            --vscode-editorError-foreground: var(--vscode-editorError-foreground, #f44747);
+            --vscode-button-background: var(--vscode-button-background, #0e639c);
+            --vscode-button-foreground: var(--vscode-button-foreground, #ffffff);
+            --vscode-button-hoverBackground: var(--vscode-button-hoverBackground, #1177bb);
+            --vscode-input-background: var(--vscode-input-background, #3c3c3c);
+            --vscode-input-border: var(--vscode-input-border, #3c3c3c);
+            --vscode-font-family: var(--vscode-editor-font-family, Consolas, 'Courier New', monospace);
+            --vscode-font-size: var(--vscode-editor-font-size, 14px);
         }
 
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
             margin: 0;
             padding: 20px;
-            background-color: var(--background-color);
-            color: var(--text-color);
+            background-color: var(--vscode-editor-background);
+            color: var(--vscode-editor-foreground);
+            font-size: var(--vscode-font-size);
         }
 
         .container {
@@ -435,107 +538,184 @@ Generate changes in this format:
 
         .header {
             margin-bottom: 20px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid var(--border-color);
+        }
+        .header h1 {
+            color: var(--primary-color);
+            margin: 0;
         }
 
         .section {
             background-color: var(--secondary-color);
-            padding: 15px;
+            padding: 15px 20px;
             border-radius: 8px;
             margin-bottom: 20px;
+            border: 1px solid var(--border-color);
         }
 
         .section h2 {
             color: var(--primary-color);
             margin-top: 0;
+            margin-bottom: 15px;
+            border-bottom: 1px solid var(--border-color);
+            padding-bottom: 10px;
         }
+        .section h3 {
+             color: var(--vscode-editorInfo-foreground);
+             margin-top: 15px;
+             margin-bottom: 10px;
+             font-weight: 600;
+        }
+        .section h4 {
+             color: var(--vscode-descriptionForeground);
+             margin-top: 10px;
+             margin-bottom: 5px;
+             font-weight: normal;
+        }
+
 
         pre {
-            margin: 0;
+            margin: 5px 0 10px 0;
             padding: 10px;
-            background-color: #1a1a1a;
+            background-color: var(--vscode-input-background); /* Use input background for contrast */
+            border: 1px solid var(--border-color);
             border-radius: 4px;
             overflow-x: auto;
+            color: var(--vscode-editor-foreground);
+        }
+        code {
+             font-family: var(--vscode-font-family);
+             font-size: inherit; /* Inherit from body or container */
         }
 
-        .analysis {
-            margin-bottom: 20px;
-        }
+        .analysis { } /* Specific styles for analysis section if needed */
 
-        .issue {
-            background-color: var(--background-color);
-            padding: 10px;
+        .issue, .risk-item, .test-item, .step, .change-item, .edit-detail {
+            background-color: var(--vscode-editorGutter-background); /* Slightly different bg */
+            padding: 10px 15px;
             border-radius: 4px;
             margin-bottom: 10px;
+            border: 1px solid var(--border-color);
+        }
+        .issue h4, .change-item h4 {
+             color: var(--vscode-editorInfo-foreground);
+             margin: 0 0 8px 0;
+             font-size: 1.05em;
+             border-bottom: 1px dashed var(--border-color);
+             padding-bottom: 5px;
+        }
+         .risk-item strong, .test-item strong {
+             color: var(--vscode-editorInfo-foreground);
+         }
+
+
+        .tag {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 10px; /* More rounded */
+            font-size: 0.85em;
+            margin-right: 8px;
+            color: white; /* Ensure contrast */
+            font-weight: bold;
         }
 
-        .issue h4 {
-            color: var(--info-color);
-            margin: 0 0 10px 0;
-        }
+        .tag.high { background-color: var(--vscode-editorError-foreground); }
+        .tag.medium { background-color: var(--vscode-editorWarning-foreground); }
+        .tag.low { background-color: var(--success-color); } /* Keep custom green or use a vscode info color */
 
-        .change {
-            background-color: var(--background-color);
-            padding: 10px;
-            border-radius: 4px;
-            margin-bottom: 10px;
+        ul {
+             margin: 5px 0 10px 0;
+             padding-left: 25px;
+             list-style: disc;
         }
+         li {
+             margin-bottom: 5px;
+         }
 
-        .change-content {
-            margin: 10px 0;
-        }
 
-        .risk {
-            color: var(--warning-color);
-        }
+        /* --- Improved Styles for Changes Section --- */
+        .change-item { } /* Base style already defined */
 
-        .step {
-            background-color: var(--background-color);
-            padding: 10px;
-            border-radius: 4px;
-            margin-bottom: 10px;
+        .edit-detail {
+            margin-bottom: 15px; /* Add more space between edits */
+            padding-left: 15px;
+            border-left: 3px solid var(--primary-color);
         }
+        .edit-info {
+            margin-bottom: 8px; /* Space below info line */
+            display: flex;
+            align-items: center;
+            gap: 10px; /* Space between type and location */
+        }
+        .edit-type {
+            font-weight: bold;
+            background-color: var(--primary-color);
+            color: white;
+            padding: 3px 8px; /* Slightly larger padding */
+            border-radius: 4px; /* Match other radius */
+            font-size: 0.9em;
+            /* margin-right: 10px; */ /* Use gap instead */
+        }
+        .edit-location {
+            font-style: italic;
+            color: var(--vscode-descriptionForeground);
+            font-size: 0.9em;
+        }
+        .edit-description {
+            margin-top: 5px;
+            margin-bottom: 8px; /* More space before code */
+            color: var(--vscode-descriptionForeground);
+            font-style: italic;
+        }
+        .edit-detail h5 { /* Style for 'New Code:' header */
+            margin-top: 10px;
+            margin-bottom: 5px;
+            font-size: 0.9em;
+            font-weight: bold;
+            color: var(--vscode-editorInfo-foreground);
+        }
+        /* pre/code styles already defined, ensure they apply */
+        /* --- End of Improved Changes Section Styles --- */
+
 
         .button-container {
             display: flex;
             gap: 10px;
             justify-content: flex-end;
             margin-top: 20px;
+            padding-top: 15px;
+             border-top: 1px solid var(--border-color);
         }
 
         .button {
             padding: 8px 16px;
-            border: none;
+            border: 1px solid transparent; /* Add border for definition */
             border-radius: 4px;
             cursor: pointer;
-            font-size: 14px;
-            transition: background-color 0.2s;
+            font-size: inherit; /* Use base font size */
+            transition: background-color 0.2s, border-color 0.2s;
         }
 
         .approve {
-            background-color: var(--success-color);
-            color: white;
+            background-color: var(--vscode-button-background);
+            color: var(--vscode-button-foreground);
+            border-color: var(--vscode-button-background);
+        }
+        .approve:hover {
+             background-color: var(--vscode-button-hoverBackground);
+             border-color: var(--vscode-button-hoverBackground);
         }
 
         .reject {
-            background-color: var(--error-color);
+            background-color: var(--vscode-editorError-foreground); /* Use error color for reject */
             color: white;
+            border-color: var(--vscode-editorError-foreground);
         }
+         .reject:hover {
+             opacity: 0.8; /* Dim on hover */
+         }
 
-        .button:hover {
-            opacity: 0.9;
-        }
-
-        .tag {
-            display: inline-block;
-            padding: 2px 6px;
-            border-radius: 3px;
-            font-size: 12px;
-            margin-right: 6px;
-        }
-
-        .tag.high { background-color: var(--error-color); }
-        .tag.medium { background-color: var(--warning-color); }
-        .tag.low { background-color: var(--success-color); }
     </style>
 </head>
 <body>
@@ -546,234 +726,235 @@ Generate changes in this format:
 
         <div class="section analysis">
             <h2>Analysis</h2>
-            
-            <h3>Code Smells</h3>
-            ${plan.analysis.codeSmells.map(smell => `
-                <div class="issue">
-                    <span class="tag ${smell.severity}">${smell.severity}</span>
-                    <h4>${smell.type}</h4>
-                    <p>${smell.description}</p>
-                    <div>Location: Lines ${smell.location.startLine}-${smell.location.endLine}</div>
-                </div>
-            `).join('')}
 
-            <h3>Design Issues</h3>
-            ${plan.analysis.designIssues.map(issue => `
-                <div class="issue">
-                    <h4>${issue.type}</h4>
-                    <p>${issue.description}</p>
-                    <p><strong>Suggested Pattern:</strong> ${issue.suggestedPattern}</p>
-                    <p><strong>Rationale:</strong> ${issue.rationale}</p>
-                </div>
-            `).join('')}
+            ${plan.analysis.codeSmells?.length > 0 ? `
+                <h3>Code Smells</h3>
+                ${plan.analysis.codeSmells.map(smell => `
+                    <div class="issue">
+                        <span class="tag ${smell.severity}">${smell.severity}</span>
+                        <h4>${this.escapeHtml(smell.type)}</h4>
+                        <p>${this.escapeHtml(smell.description)}</p>
+                        ${smell.location ? `<div><small>Location: Lines ${smell.location.startLine}-${smell.location.endLine}</small></div>` : ''}
+                    </div>
+                `).join('')}
+            ` : '<h3>Code Smells</h3><p>None identified.</p>'}
 
-            <h3>Performance Issues</h3>
-            ${plan.analysis.performanceIssues.map(issue => `
-                <div class="issue">
-                    <p>${issue.description}</p>
-                    <p><strong>Impact:</strong> ${issue.impact}</p>
-                    <p><strong>Suggestion:</strong> ${issue.suggestion}</p>
-                </div>
-            `).join('')}
+             ${plan.analysis.designIssues?.length > 0 ? `
+                <h3>Design Issues</h3>
+                ${plan.analysis.designIssues.map(issue => `
+                    <div class="issue">
+                        <h4>${this.escapeHtml(issue.type)}</h4>
+                        <p>${this.escapeHtml(issue.description)}</p>
+                        <p><strong>Suggested Pattern:</strong> ${this.escapeHtml(issue.suggestedPattern)}</p>
+                        <p><small>Rationale: ${this.escapeHtml(issue.rationale)}</small></p>
+                    </div>
+                `).join('')}
+             ` : '<h3>Design Issues</h3><p>None identified.</p>'}
+
+            ${plan.analysis.performanceIssues?.length > 0 ? `
+                <h3>Performance Issues</h3>
+                ${plan.analysis.performanceIssues.map(issue => `
+                    <div class="issue">
+                        <p>${this.escapeHtml(issue.description)}</p>
+                        <p><strong>Impact:</strong> ${this.escapeHtml(issue.impact)}</p>
+                        <p><strong>Suggestion:</strong> ${this.escapeHtml(issue.suggestion)}</p>
+                    </div>
+                `).join('')}
+             ` : '<h3>Performance Issues</h3><p>None identified.</p>'}
         </div>
 
-        <div class="section">
-            <h2>Proposed Changes</h2>
-            ${changes.fileChanges.map(file => `
-                <div class="change">
-                    <h4>${file.path}</h4>
-                    ${file.changes.map(change => `
-                        <div class="change-content">
-                            <div>Type: ${change.type}</div>
-                            <div>Lines: ${change.position.startLine}-${change.position.endLine}</div>
-                            <div>${change.description}</div>
-                            <pre>${this.escapeHtml(change.content)}</pre>
-                        </div>
-                    `).join('')}
-                </div>
-            `).join('')}
-        </div>
+        <!-- Updated Changes Section -->
+        <div class="section changes">
+             <h2>Proposed Changes</h2>
+             ${changes.fileChanges && changes.fileChanges.length > 0
+                 ? changes.fileChanges.map(file => `
+                 <div class="change-item">
+                     <h4>File: ${this.escapeHtml(file.filePath)}</h4>
+                     ${file.edits && file.edits.length > 0
+                         ? file.edits.map(edit => `
+                         <div class="edit-detail">
+                             <div class="edit-info">
+                                 <!-- Display type if available, default to MODIFY -->
+                                 <span class="edit-type">${this.escapeHtml(edit.type || 'MODIFY')}</span>
+                                 <!-- Display range -->
+                                 <span class="edit-location">Lines ${edit.range.startLine}-${edit.range.endLine}</span>
+                             </div>
+                             <!-- Display description if available -->
+                             ${edit.description ? `<p class="edit-description">${this.escapeHtml(edit.description)}</p>` : ''}
+                             <!-- Display new code block clearly -->
+                             <h5>New Code:</h5>
+                             <pre><code>${this.escapeHtml(edit.newText)}</code></pre>
+                         </div>
+                     `).join('')
+                         : '<p>No specific edits provided for this file.</p>'
+                     }
+                 </div>
+             `).join('')
+                 : '<p>No file changes proposed.</p>'
+             }
+         </div>
+         <!-- End of Updated Changes Section -->
 
+
+        ${changes.orderOfExecution && changes.orderOfExecution.length > 0 ? `
         <div class="section">
-            <h2>Execution Plan</h2>
+            <h2>Execution Plan (Order)</h2>
             ${changes.orderOfExecution.map(step => `
                 <div class="step">
                     <h4>Step ${step.step}</h4>
-                    <div>File: ${step.fileChange}</div>
+                    <div>File: ${this.escapeHtml(step.fileChange)}</div>
+                    <div>Change Index: ${step.changeIndex}</div>
                     <div>Dependencies: ${step.dependencies.join(', ') || 'None'}</div>
                 </div>
             `).join('')}
         </div>
+        ` : ''}
 
         <div class="section">
             <h2>Risks and Testing</h2>
             <div class="risks">
                 <h3>Identified Risks</h3>
-                <ul>
-                    ${plan.risks.map(risk => `
-                        <li class="risk">
-                            <strong>${risk.type}:</strong> ${risk.description}
-                            <br>
-                            <strong>Mitigation:</strong> ${risk.mitigation}
-                        </li>
-                    `).join('')}
-                </ul>
+                 ${plan.risks?.length > 0 ? `
+                    <ul>
+                        ${plan.risks.map(risk => `
+                            <li class="risk-item">
+                                <strong>${this.escapeHtml(risk.type)}:</strong> ${this.escapeHtml(risk.description)}
+                                <br>
+                                <small>Mitigation: ${this.escapeHtml(risk.mitigation)}</small>
+                            </li>
+                        `).join('')}
+                    </ul>
+                 ` : '<p>No specific risks identified.</p>'}
             </div>
 
             <div class="testing">
                 <h3>Testing Strategy</h3>
                 <p><strong>Impacted Tests:</strong></p>
-                <ul>
-                    ${plan.testingStrategy.impactedTests.map(test => `<li>${test}</li>`).join('')}
-                </ul>
+                ${plan.testingStrategy?.impactedTests?.length > 0 ? `
+                    <ul>${plan.testingStrategy.impactedTests.map(test => `<li>${this.escapeHtml(test)}</li>`).join('')}</ul>
+                ` : '<p>None specified.</p>'}
+
                 <p><strong>New Tests Needed:</strong></p>
-                <ul>
-                    ${plan.testingStrategy.newTestsNeeded.map(test => `<li>${test}</li>`).join('')}
-                </ul>
+                ${plan.testingStrategy?.newTestsNeeded?.length > 0 ? `
+                     <ul>${plan.testingStrategy.newTestsNeeded.map(test => `<li>${this.escapeHtml(test)}</li>`).join('')}</ul>
+                 ` : '<p>None specified.</p>'}
+
                 <p><strong>Regression Risks:</strong></p>
-                <ul>
-                    ${plan.testingStrategy.regressionRisks.map(risk => `<li>${risk}</li>`).join('')}
-                </ul>
+                 ${plan.testingStrategy?.regressionRisks?.length > 0 ? `
+                     <ul>${plan.testingStrategy.regressionRisks.map(risk => `<li>${this.escapeHtml(risk)}</li>`).join('')}</ul>
+                 ` : '<p>None specified.</p>'}
             </div>
         </div>
 
         <div class="button-container">
-            <button class="button reject" onclick="reject()">Cancel</button>
-            <button class="button approve" onclick="approve()">Apply Refactoring</button>
+            <button class="button reject">Reject</button>
+            <button class="button approve">Approve</button>
         </div>
     </div>
 
     <script>
+        // Use VS Code API to post messages
         const vscode = acquireVsCodeApi();
 
-        function approve() {
-            vscode.postMessage({ command: 'approve' });
-        }
+        document.querySelector('.approve').addEventListener('click', () => {
+            // vscode.postMessage({ command: 'approve' }, '*'); // '*' is not needed for acquireVsCodeApi
+             vscode.postMessage({ command: 'approve' });
+        });
 
-        function reject() {
+        document.querySelector('.reject').addEventListener('click', () => {
+            // vscode.postMessage({ command: 'reject' }, '*');
             vscode.postMessage({ command: 'reject' });
-        }
+        });
     </script>
 </body>
 </html>`;
     }
 
-    private escapeHtml(unsafe: string): string {
-        return unsafe
-            .replace(/&/g, "&amp;")
-            .replace(/</g, "&lt;")
-            .replace(/>/g, "&gt;")
-            .replace(/"/g, "&quot;")
-            .replace(/'/g, "&#039;");
+    private escapeHtml(str: string): string {
+        return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
     }
 
     private async applyRefactoring(changes: RefactoringChanges): Promise<void> {
-        for (const step of changes.orderOfExecution) {
-            const fileChange = changes.fileChanges.find(f => f.path === step.fileChange);
-            if (!fileChange) continue;
+        console.warn('[RefactoringExecutor] applyRefactoring currently only supports single-file changes based on AI plan structure. Multi-file reference updates are NOT implemented.');
 
-            const change = fileChange.changes[step.changeIndex];
-            if (!change) continue;
+        const workspaceEdit = new vscode.WorkspaceEdit();
 
-            const uri = vscode.Uri.file(fileChange.path);
-            const document = await vscode.workspace.openTextDocument(uri);
-            const editor = await vscode.window.showTextDocument(document);
+        if (changes?.fileChanges) { 
+            for (const fileChange of changes.fileChanges) {
+                const fileUri = vscode.Uri.joinPath(vscode.workspace.workspaceFolders![0].uri, fileChange.filePath);
+                for (const edit of fileChange.edits) { 
+                     const range = new vscode.Range(edit.range.startLine -1, edit.range.startChar, edit.range.endLine -1, edit.range.endChar);
+                     workspaceEdit.replace(fileUri, range, edit.newText);
+                }
+            }
+        }
 
-            await editor.edit(editBuilder => {
-                const range = new vscode.Range(
-                    new vscode.Position(change.position.startLine - 1, 0),
-                    new vscode.Position(change.position.endLine, 0)
-                );
+        const success = await vscode.workspace.applyEdit(workspaceEdit);
+        if (!success) {
+            throw new Error('Failed to apply refactoring edits.');
+        }
+    }
 
-                switch (change.type) {
-                    case 'insert':
-                        editBuilder.insert(range.start, change.content);
-                        break;
-                    case 'update':
-                        editBuilder.replace(range, change.content);
-                        break;
-                    case 'delete':
-                        editBuilder.delete(range);
-                        break;
+    // Adjust plan location helper method
+    private adjustPlanLocations(plan: RefactoringPlan, baseLineOffset: number): void {
+         if (plan.analysis?.codeSmells) {
+            plan.analysis.codeSmells.forEach(smell => {
+                if (smell.location) {
+                    smell.location.startLine = Math.max(1, smell.location.startLine) + baseLineOffset;
+                    smell.location.endLine = Math.max(1, smell.location.endLine) + baseLineOffset;
+                }
+            });
+        }
+        if (plan.changes) {
+            plan.changes.forEach((change: any) => { 
+                if (change.steps) {
+                    change.steps.forEach((step: any) => {
+                        if (step.target) {
+                            step.target.startLine = Math.max(1, step.target.startLine) + baseLineOffset;
+                            step.target.endLine = Math.max(1, step.target.endLine) + baseLineOffset;
+                        }
+                    });
                 }
             });
         }
     }
-}
 
-interface RefactoringPlan {
-    analysis: {
-        codeSmells: {
-            type: string;
-            description: string;
-            severity: 'high' | 'medium' | 'low';
-            location: {
-                startLine: number;
-                endLine: number;
-            };
-        }[];
-        designIssues: {
-            type: string;
-            description: string;
-            suggestedPattern: string;
-            rationale: string;
-        }[];
-        performanceIssues: {
-            description: string;
-            impact: string;
-            suggestion: string;
-        }[];
-    };
-    changes: {
-        id: string;
-        type: 'extract' | 'move' | 'rename' | 'inline' | 'split' | 'merge';
-        description: string;
-        rationale: string;
-        impact: {
-            complexity: string;
-            maintainability: string;
-            scope: string[];
+    // Add suggestion extraction helper
+    /**
+     * Extracts improvement suggestions flagged in the refactoring plan.
+     * @param plan The parsed refactoring plan.
+     * @returns An array of suggestion strings.
+     */
+    private extractSuggestionsFromPlan(plan: RefactoringPlan): string[] {
+        const suggestions: string[] = [];
+        const regex = /\\\[IMPROVEMENT_SUGGESTION\\\]:\\s*(.*)/gi; // Case-insensitive, global
+
+        const checkContent = (content: string | undefined) => {
+            if (!content) return;
+            let match;
+            regex.lastIndex = 0; // Reset regex state
+            while ((match = regex.exec(content)) !== null) {
+                if (match[1]) suggestions.push(match[1].trim());
+            }
         };
-        steps: {
-            order: number;
-            action: string;
-            target: {
-                startLine: number;
-                endLine: number;
-            };
-            code: string;
-        }[];
-    }[];
-    risks: {
-        type: string;
-        description: string;
-        mitigation: string;
-    }[];
-    testingStrategy: {
-        impactedTests: string[];
-        newTestsNeeded: string[];
-        regressionRisks: string[];
-    };
-}
 
-interface RefactoringChanges {
-    fileChanges: {
-        type: 'modify' | 'create' | 'delete';
-        path: string;
-        changes: {
-            type: 'insert' | 'update' | 'delete';
-            position: {
-                startLine: number;
-                endLine: number;
-            };
-            content: string;
-            description: string;
-        }[];
-    }[];
-    orderOfExecution: {
-        step: number;
-        fileChange: string;
-        changeIndex: number;
-        dependencies: number[];
-    }[];
-} 
+        // Check analysis descriptions
+        plan.analysis?.codeSmells?.forEach(smell => checkContent(smell.description));
+        plan.analysis?.designIssues?.forEach(issue => checkContent(issue.description));
+        plan.analysis?.performanceIssues?.forEach(issue => {
+             checkContent(issue.description);
+             checkContent(issue.suggestion); // Check both fields separately
+        });
+
+        // Check changes descriptions
+        plan.changes?.forEach(change => checkContent(change.description));
+
+        // Check risks descriptions/mitigations
+        plan.risks?.forEach(risk => {
+             checkContent(risk.description); 
+             checkContent(risk.mitigation); // Check both fields separately
+        });
+
+        return suggestions;
+    }
+}

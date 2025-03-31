@@ -7,6 +7,7 @@ export interface AIModel {
     apiEndpoint: string;
     maxTokens?: number;
     temperature?: number;
+    embeddingModelName?: string; // Optional: Specific model for embeddings
 }
 
 export class ModelManager {

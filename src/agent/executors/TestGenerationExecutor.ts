@@ -1,15 +1,13 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import { Task, TaskType, TaskResult, TaskExecutor } from '../types';
-import { CodeAnalyzer, CodeAnalysis, FunctionInfo } from '../../utils/CodeAnalyzer';
+import { CodeAnalysis, FunctionInfo } from '../../utils/CodeAnalyzer';
 import { AIEngine } from '../../ai-engine/AIEngine';
 
 export class TestGenerationExecutor implements TaskExecutor {
-    private codeAnalyzer: CodeAnalyzer;
     private aiEngine: AIEngine;
 
     constructor(aiEngine: AIEngine) {
-        this.codeAnalyzer = CodeAnalyzer.getInstance();
         this.aiEngine = aiEngine;
     }
 
@@ -71,8 +69,13 @@ export class TestGenerationExecutor implements TaskExecutor {
         const prompt = this.buildTestPlanPrompt(sourceCode, codeAnalysis, fileContext);
 
         const response = await this.aiEngine.generateResponse({
-            prompt,
-            systemPrompt: this.getTestPlanSystemPrompt()
+            messages: [
+                { role: 'system', content: this.getTestPlanSystemPrompt() },
+                { role: 'user', content: prompt }
+            ],
+            context: {
+                prompt: prompt
+            }
         });
 
         return this.parseTestPlan(response.message);
@@ -184,8 +187,13 @@ Please provide your test plan in this JSON format:
         const prompt = this.buildTestCodePrompt(plan);
         
         const response = await this.aiEngine.generateResponse({
-            prompt,
-            systemPrompt: this.getTestCodeSystemPrompt()
+            messages: [
+                { role: 'system', content: this.getTestCodeSystemPrompt() },
+                { role: 'user', content: prompt }
+            ],
+            context: {
+                prompt: prompt
+            }
         });
 
         return response.message;

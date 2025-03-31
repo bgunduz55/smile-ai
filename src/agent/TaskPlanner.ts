@@ -97,10 +97,15 @@ export class TaskPlanner {
         const prompt = this.buildTaskAnalysisPrompt(description, fileContext, codeAnalysis);
         
         const response = await this.aiEngine.generateResponse({
-            prompt,
-            systemPrompt: this.getTaskAnalysisSystemPrompt(),
+            messages: [
+                { role: 'system', content: this.getTaskAnalysisSystemPrompt() },
+                { role: 'user', content: prompt }
+            ],
             maxTokens: 1000,
-            temperature: 0.7
+            temperature: 0.7,
+            context: {
+                prompt: prompt
+            }
         });
 
         return this.parseTaskAnalysis(response.message);
@@ -114,10 +119,15 @@ export class TaskPlanner {
         const prompt = this.buildSubtaskAnalysisPrompt(task, fileContext, codeAnalysis);
         
         const response = await this.aiEngine.generateResponse({
-            prompt,
-            systemPrompt: this.getSubtaskAnalysisSystemPrompt(),
+            messages: [
+                { role: 'system', content: this.getSubtaskAnalysisSystemPrompt() },
+                { role: 'user', content: prompt }
+            ],
             maxTokens: 1000,
-            temperature: 0.7
+            temperature: 0.7,
+            context: {
+                prompt: prompt
+            }
         });
 
         return this.parseSubtaskAnalysis(response.message);
