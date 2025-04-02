@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import { v4 as uuidv4 } from 'uuid';
-import { Task, TaskType, TaskStatus, TaskPriority, TaskMetadata } from './types';
-import { FileAnalyzer, FileContext, FileType } from '../utils/FileAnalyzer';
+import { Task, TaskType, TaskStatus, TaskPriority } from './types';
+import { FileAnalyzer, FileContext } from '../utils/FileAnalyzer';
 import { CodeAnalyzer, CodeAnalysis } from '../utils/CodeAnalyzer';
 import { AIEngine } from '../ai-engine/AIEngine';
 
@@ -25,7 +25,7 @@ export class TaskPlanner {
 
         // Dosya ve kod analizini yap
         const fileContext = await this.fileAnalyzer.analyzeFile(editor.document.uri);
-        const codeAnalysis = await this.codeAnalyzer.analyzeCode(editor.document, fileContext);
+        const codeAnalysis = await this.codeAnalyzer.analyzeCode(editor.document.uri, fileContext);
 
         // AI'dan görev analizi iste
         const taskAnalysis = await this.analyzeTaskWithAI(description, fileContext, codeAnalysis);
@@ -37,11 +37,6 @@ export class TaskPlanner {
             description: description,
             status: TaskStatus.PENDING,
             priority: taskAnalysis.priority,
-            metadata: {
-                fileContext,
-                codeAnalysis,
-                taskAnalysis
-            },
             created: Date.now(),
             updated: Date.now()
         };
@@ -97,10 +92,15 @@ export class TaskPlanner {
         const prompt = this.buildTaskAnalysisPrompt(description, fileContext, codeAnalysis);
         
         const response = await this.aiEngine.generateResponse({
-            prompt,
-            systemPrompt: this.getTaskAnalysisSystemPrompt(),
+            messages: [
+                { role: 'system', content: this.getTaskAnalysisSystemPrompt() },
+                { role: 'user', content: prompt }
+            ],
             maxTokens: 1000,
-            temperature: 0.7
+            temperature: 0.7,
+            context: {
+                prompt: prompt
+            }
         });
 
         return this.parseTaskAnalysis(response.message);
@@ -114,10 +114,15 @@ export class TaskPlanner {
         const prompt = this.buildSubtaskAnalysisPrompt(task, fileContext, codeAnalysis);
         
         const response = await this.aiEngine.generateResponse({
-            prompt,
-            systemPrompt: this.getSubtaskAnalysisSystemPrompt(),
+            messages: [
+                { role: 'system', content: this.getSubtaskAnalysisSystemPrompt() },
+                { role: 'user', content: prompt }
+            ],
             maxTokens: 1000,
-            temperature: 0.7
+            temperature: 0.7,
+            context: {
+                prompt: prompt
+            }
         });
 
         return this.parseSubtaskAnalysis(response.message);

@@ -7,6 +7,7 @@ export interface AIModel {
     apiEndpoint: string;
     maxTokens?: number;
     temperature?: number;
+    embeddingModelName?: string; // Optional: Specific model for embeddings
 }
 
 export class ModelManager {
@@ -75,7 +76,7 @@ export class ModelManager {
                 throw new Error('Ollama API returned error');
             }
             
-            const data = await response.json();
+            const data = await response.json() as { models?: { name: string }[] };
             if (data.models) {
                 for (const model of data.models) {
                     if (!this.models.some(m => m.name === model.name)) {
@@ -110,7 +111,7 @@ export class ModelManager {
                 throw new Error('LM Studio API returned error');
             }
             
-            const data = await response.json();
+            const data = await response.json() as { data?: { id: string }[] };
             if (data.data) {
                 for (const model of data.data) {
                     if (!this.models.some(m => m.name === model.id)) {

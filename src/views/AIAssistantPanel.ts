@@ -1,10 +1,10 @@
 import * as vscode from 'vscode';
 import { AIEngine } from '../ai-engine/AIEngine';
 import { ModelManager } from '../utils/ModelManager';
-import { CodebaseIndexer } from '../utils/CodebaseIndexer';
+import { CodebaseIndexer } from '../indexing/CodebaseIndexer';
 import { FileAnalyzer } from '../utils/FileAnalyzer';
 import { ChatHistoryManager, ChatSession } from '../utils/ChatHistoryManager';
-import { AIMessage } from '../ai-engine/types';
+import { AIMessage, AIRequest } from '../ai-engine/types';
 
 interface Message extends AIMessage {
     role: 'user' | 'assistant';
@@ -18,13 +18,14 @@ interface Message extends AIMessage {
 }
 
 export class AIAssistantPanel {
-    private static currentPanel: AIAssistantPanel | undefined;
     private readonly webviewView: vscode.WebviewView;
+    private readonly context: vscode.ExtensionContext;
+    private readonly disposables: vscode.Disposable[] = [];
+    private aiEngine: AIEngine;
     private chatMessages: Message[] = [];
     private composerMessages: Message[] = [];
     private currentView: string = 'chat';
     private modelManager: ModelManager;
-    private aiEngine: AIEngine | undefined;
     private codebaseIndexer: CodebaseIndexer;
     private fileAnalyzer: FileAnalyzer;
     private isIndexing: boolean = false;
@@ -34,12 +35,15 @@ export class AIAssistantPanel {
 
     private constructor(
         webviewView: vscode.WebviewView,
-        private readonly context: vscode.ExtensionContext,
-        aiEngine: AIEngine
+        context: vscode.ExtensionContext,
+        aiEngine: AIEngine,
+        codebaseIndexer: CodebaseIndexer
     ) {
         this.webviewView = webviewView;
+        this.context = context;
+        this.aiEngine = aiEngine;
         this.modelManager = ModelManager.getInstance();
-        this.codebaseIndexer = CodebaseIndexer.getInstance();
+        this.codebaseIndexer = codebaseIndexer;
         this.fileAnalyzer = FileAnalyzer.getInstance();
         this.chatHistoryManager = ChatHistoryManager.getInstance(context);
         
@@ -86,9 +90,10 @@ export class AIAssistantPanel {
     public static show(
         webviewView: vscode.WebviewView,
         context: vscode.ExtensionContext,
-        aiEngine: AIEngine
+        aiEngine: AIEngine,
+        codebaseIndexer: CodebaseIndexer
     ) {
-        AIAssistantPanel.currentPanel = new AIAssistantPanel(webviewView, context, aiEngine);
+        new AIAssistantPanel(webviewView, context, aiEngine, codebaseIndexer);
     }
 
     private setupWebview() {
@@ -106,7 +111,7 @@ export class AIAssistantPanel {
 
         // Mesaj dinleyicisini ayarla
         this.webviewView.webview.onDidReceiveMessage(
-            async message => {
+            async (message: any) => {
                 switch (message.command) {
                     case 'sendMessage':
                         await this.handleUserMessage(message.text);
@@ -135,7 +140,7 @@ export class AIAssistantPanel {
                 }
             },
             undefined,
-            this.context.subscriptions
+            this.disposables
         );
 
         // İlk yükleme
@@ -149,23 +154,35 @@ export class AIAssistantPanel {
             vscode.Uri.joinPath(this.context.extensionUri, 'media', 'assistant.css')
         );
 
-        // HTML template'i oku
         const htmlPath = vscode.Uri.joinPath(this.context.extensionUri, 'media', 'assistant.html');
         let html = '';
         
         try {
             const uint8Array = await vscode.workspace.fs.readFile(htmlPath);
             html = Buffer.from(uint8Array).toString('utf-8');
+
+            // Template değişkenlerini değiştir
+            html = html.replace(/\{\{styleUri\}\}/g, styleUri.toString());
+            html = html.replace(/\{\{cspSource\}\}/g, this.webviewView.webview.cspSource);
+
+            return html;
         } catch (error) {
             console.error('HTML template okuma hatası:', error);
-            html = '<html><body>Template yüklenemedi</body></html>';
+            return `<!DOCTYPE html>
+                <html>
+                <head>
+                    <meta charset="UTF-8">
+                    <style>
+                        body { font-family: sans-serif; padding: 20px; }
+                        .error { color: red; }
+                    </style>
+                </head>
+                <body>
+                    <h1 class="error">Hata</h1>
+                    <p>Template yüklenemedi. Lütfen extension'ı yeniden yükleyin.</p>
+                </body>
+                </html>`;
         }
-
-        // Template değişkenlerini değiştir
-        html = html.replace('{{styleUri}}', styleUri.toString());
-        html = html.replace('{{cspSource}}', this.webviewView.webview.cspSource);
-
-        return html;
     }
 
     private async indexCodebase() {
@@ -219,13 +236,11 @@ export class AIAssistantPanel {
         const selectedText = document.getText(selection);
 
         const fileContext = await this.fileAnalyzer.analyzeFile(document.uri);
-        const projectContext = this.codebaseIndexer.getProjectStructure();
 
         return {
             file: document.fileName,
             selection: selectedText,
-            fileContext,
-            projectContext
+            fileContext
         };
     }
 
@@ -236,23 +251,15 @@ export class AIAssistantPanel {
                 throw new Error('Lütfen önce bir AI model seçin');
             }
 
-            if (!this.aiEngine) {
-                this.aiEngine = new AIEngine({
-                    provider: {
-                        name: activeModel.provider,
-                        modelName: activeModel.modelName,
-                        apiEndpoint: activeModel.apiEndpoint
-                    },
-                    maxTokens: activeModel.maxTokens || 2048,
-                    temperature: activeModel.temperature || 0.7
-                });
-            }
-
             const context = await this.getCurrentContext();
-            const currentView = this.currentView;
+            const userMessage: Message = {
+                role: 'user',
+                content: text,
+                timestamp: Date.now(),
+                context
+            };
 
-            // View'a göre oturum kontrolü ve başlık güncelleme
-            if (currentView === 'chat') {
+            if (this.currentView === 'chat') {
                 if (!this.currentChatSession) {
                     const session: ChatSession = {
                         id: `chat_${Date.now()}`,
@@ -264,12 +271,15 @@ export class AIAssistantPanel {
                     await this.chatHistoryManager.addSession(session);
                     this.currentChatSession = session;
                 } else {
-                    // Mevcut oturumun başlığını güncelle
                     this.currentChatSession.title = text.length > 50 ? text.substring(0, 47) + '...' : text;
                     await this.chatHistoryManager.updateSessionTitle(this.currentChatSession.id, this.currentChatSession.title);
                 }
-                this.updateSessionList();
-            } else if (currentView === 'composer') {
+                this.chatMessages.push(userMessage);
+                this.updateMessages('chat', this.chatMessages);
+                if (this.currentChatSession) {
+                    await this.chatHistoryManager.addMessage(this.currentChatSession.id, userMessage);
+                }
+            } else if (this.currentView === 'composer') {
                 if (!this.currentComposerSession) {
                     const session: ChatSession = {
                         id: `composer_${Date.now()}`,
@@ -281,65 +291,47 @@ export class AIAssistantPanel {
                     await this.chatHistoryManager.addSession(session);
                     this.currentComposerSession = session;
                 } else {
-                    // Mevcut oturumun başlığını güncelle
                     this.currentComposerSession.title = text.length > 50 ? text.substring(0, 47) + '...' : text;
                     await this.chatHistoryManager.updateSessionTitle(this.currentComposerSession.id, this.currentComposerSession.title);
                 }
-                this.updateSessionList();
+                this.composerMessages.push(userMessage);
+                this.updateMessages('composer', this.composerMessages);
+                if (this.currentComposerSession) {
+                    await this.chatHistoryManager.addMessage(this.currentComposerSession.id, userMessage);
+                }
             }
 
-            const userMessage: Message = {
-                role: 'user',
-                content: text,
+            const request: AIRequest = {
+                messages: this.currentView === 'chat' ? this.chatMessages : this.composerMessages
+            };
+
+            const response = await this.aiEngine.generateResponse(request);
+            const aiMessage: Message = {
+                role: 'assistant',
+                content: response.message,
                 timestamp: Date.now(),
                 context
             };
 
-            if (currentView === 'chat') {
-                this.chatMessages.push(userMessage);
-                this.updateMessages('chat', this.chatMessages);
-                if (this.currentChatSession) {
-                    await this.chatHistoryManager.addMessage(this.currentChatSession.id, userMessage as AIMessage);
-                }
-            } else if (currentView === 'composer') {
-                this.composerMessages.push(userMessage);
-                this.updateMessages('composer', this.composerMessages);
-                if (this.currentComposerSession) {
-                    await this.chatHistoryManager.addMessage(this.currentComposerSession.id, userMessage as AIMessage);
-                }
-            }
-
-            const response = await this.aiEngine.generateResponse({
-                prompt: text,
-                maxTokens: activeModel.maxTokens || 2048,
-                temperature: activeModel.temperature || 0.7
-            });
-
-            const aiMessage: Message = {
-                role: 'assistant',
-                content: response.message,
-                timestamp: Date.now()
-            };
-
-            if (currentView === 'chat') {
+            if (this.currentView === 'chat') {
                 this.chatMessages.push(aiMessage);
                 this.updateMessages('chat', this.chatMessages);
                 if (this.currentChatSession) {
-                    await this.chatHistoryManager.addMessage(this.currentChatSession.id, aiMessage as AIMessage);
+                    await this.chatHistoryManager.addMessage(this.currentChatSession.id, aiMessage);
                 }
                 this.scrollToBottom('messageContainer');
-            } else if (currentView === 'composer') {
+            } else if (this.currentView === 'composer') {
                 this.composerMessages.push(aiMessage);
                 this.updateMessages('composer', this.composerMessages);
                 if (this.currentComposerSession) {
-                    await this.chatHistoryManager.addMessage(this.currentComposerSession.id, aiMessage as AIMessage);
+                    await this.chatHistoryManager.addMessage(this.currentComposerSession.id, aiMessage);
                 }
-                this.scrollToBottom('composerPreview');
+                this.scrollToBottom('composerContainer');
             }
 
-        } catch (error: any) {
-            vscode.window.showErrorMessage(`Hata: ${error.message}`);
-            console.error(error);
+        } catch (error) {
+            console.error('Message handling error:', error);
+            vscode.window.showErrorMessage('Mesaj işlenirken bir hata oluştu');
         }
     }
 
@@ -359,34 +351,12 @@ export class AIAssistantPanel {
             this.updateMessages('composer', this.composerMessages);
             this.updateSessionList();
         }
-    }
-
-    private async handleModelToggle(modelName: string) {
-        try {
-            const currentModel = this.modelManager.getActiveModel();
-            if (currentModel?.name === modelName) {
-                await this.modelManager.setActiveModel(undefined);
-            } else {
-                await this.modelManager.setActiveModel(modelName);
-                
-                // AI Engine'i yeni modelle güncelle
-                const model = this.modelManager.getActiveModel();
-                if (model) {
-                    this.aiEngine = new AIEngine({
-                        provider: {
-                            name: model.provider,
-                            modelName: model.modelName,
-                            apiEndpoint: model.apiEndpoint
-                        },
-                        maxTokens: model.maxTokens || 2048,
-                        temperature: model.temperature || 0.7
-                    });
-                }
-            }
-            this.updateModels();
-        } catch (error: any) {
-            vscode.window.showErrorMessage(`Model değiştirilemedi: ${error.message}`);
-        }
+        
+        // Update webview with current view
+        this.webviewView.webview.postMessage({
+            type: 'viewChanged',
+            view: this.currentView
+        });
     }
 
     private async handleSettingUpdate(key: string, value: any) {
@@ -443,8 +413,16 @@ export class AIAssistantPanel {
             });
 
             const response = await testEngine.generateResponse({
-                prompt: 'Test message',
-                maxTokens: 10
+                messages: [{
+                    role: 'user',
+                    content: 'Test message',
+                    timestamp: Date.now()
+                }],
+                maxTokens: 10,
+                temperature: 0.7,
+                context: {
+                    prompt: 'Test message'
+                }
             });
 
             if (response) {
@@ -490,10 +468,17 @@ export class AIAssistantPanel {
         });
     }
 
-    private updateViewState() {
+    private async updateSessionList() {
+        const sessions = await this.chatHistoryManager.getSessions();
+        const chatSessions = Array.from(sessions.values()).filter(s => s.id.startsWith('chat_'));
+        const composerSessions = Array.from(sessions.values()).filter(s => s.id.startsWith('composer_'));
+
         this.webviewView.webview.postMessage({
-            type: 'viewChanged',
-            view: this.currentView
+            type: 'updateSessions',
+            sessions: {
+                chatSessions: chatSessions.sort((a, b) => b.lastUpdated - a.lastUpdated),
+                composerSessions: composerSessions.sort((a, b) => b.lastUpdated - a.lastUpdated)
+            }
         });
     }
 
@@ -559,19 +544,5 @@ export class AIAssistantPanel {
             this.composerMessages = session.messages as Message[];
             this.updateMessages('composer', this.composerMessages);
         }
-    }
-
-    private async updateSessionList() {
-        const sessions = await this.chatHistoryManager.getSessions();
-        const chatSessions = Array.from(sessions.values()).filter(s => s.id.startsWith('chat_'));
-        const composerSessions = Array.from(sessions.values()).filter(s => s.id.startsWith('composer_'));
-
-        this.webviewView.webview.postMessage({
-            type: 'updateSessions',
-            sessions: {
-                chatSessions: chatSessions.sort((a, b) => b.lastUpdated - a.lastUpdated),
-                composerSessions: composerSessions.sort((a, b) => b.lastUpdated - a.lastUpdated)
-            }
-        });
     }
 } 

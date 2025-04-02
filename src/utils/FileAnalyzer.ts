@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
-import { CodeAnalyzer, CodeAnalysis } from './CodeAnalyzer';
+import { CodeAnalysis } from './CodeAnalyzer';
 
 export interface FileContext {
     path: string;
@@ -55,14 +55,12 @@ interface LanguageConfig {
 
 export class FileAnalyzer {
     private static instance: FileAnalyzer;
-    private codeAnalyzer: CodeAnalyzer;
     private projectContext: Map<string, FileContext>;
     private languageConfigs: Map<string, LanguageConfig>;
 
     private constructor() {
         this.projectContext = new Map();
         this.languageConfigs = new Map();
-        this.codeAnalyzer = CodeAnalyzer.getInstance();
         this.initializeLanguageConfigs();
     }
 
@@ -144,7 +142,7 @@ export class FileAnalyzer {
         const content = document.getText();
         const stats = await vscode.workspace.fs.stat(uri);
 
-        const language = this.detectLanguage(extension, content);
+        const language = this.detectLanguage(extension);
         const languageConfig = this.languageConfigs.get(language);
 
         const context: FileContext = {
@@ -164,7 +162,7 @@ export class FileAnalyzer {
         };
 
         // AST oluştur
-        context.ast = await this.parseAST(document);
+        context.ast = await this.parseAST();
 
         // Projenin tipini belirle
         context.projectType = await this.detectProjectType(uri);
@@ -175,7 +173,7 @@ export class FileAnalyzer {
         return context;
     }
 
-    private detectLanguage(extension: string, content: string): string {
+    private detectLanguage(extension: string): string {
         for (const [language, config] of this.languageConfigs) {
             if (config.extensions.includes(extension.toLowerCase())) {
                 return language;
@@ -278,10 +276,8 @@ export class FileAnalyzer {
         return Array.from(exports);
     }
 
-    private async parseAST(document: vscode.TextDocument): Promise<any> {
-        // Dile göre uygun AST parser'ı kullan
-        const language = document.languageId;
-        // TODO: Implement AST parsing for different languages
+    private async parseAST(): Promise<any> {
+        // TODO: Implement AST parsing based on language
         return null;
     }
 

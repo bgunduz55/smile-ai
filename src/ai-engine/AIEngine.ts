@@ -1,25 +1,74 @@
 import axios from 'axios';
 import * as vscode from 'vscode';
-import {
-    AIConfig,
-    AIRequest,
-    AIResponse,
-    AIContext,
-    AIMessage
-} from './types';
+import { AIConfig, AIMessage, AIRequest, AIResponse } from './types';
 
 export class AIEngine {
     private config: AIConfig;
-    private context: AIContext;
+    private conversationHistory: AIMessage[] = [];
 
     constructor(config: AIConfig) {
         this.config = config;
-        this.context = { messages: [] };
+    }
+
+    public async testConnection(): Promise<boolean> {
+        try {
+            const response = await fetch(this.config.provider.apiEndpoint + '/api/health', {
+                method: 'GET'
+            });
+            return response.ok;
+        } catch (error) {
+            console.error('Model bağlantı hatası:', error);
+            return false;
+        }
+    }
+
+    public async sendRequest(request: AIRequest): Promise<AIResponse> {
+        try {
+            if (!this.config.provider.apiEndpoint) {
+                throw new Error('API endpoint yapılandırılmamış');
+            }
+
+            const response = await fetch(this.config.provider.apiEndpoint + '/api/chat', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    model: this.config.provider.modelName,
+                    messages: request.messages,
+                    max_tokens: this.config.maxTokens,
+                    temperature: this.config.temperature
+                })
+            });
+
+            if (!response.ok) {
+                throw new Error(`AI model yanıt hatası: ${response.statusText}`);
+            }
+
+            const data = await response.json() as { message: string };
+            return {
+                message: data.message
+            };
+        } catch (error) {
+            if (error instanceof Error) {
+                console.error('AI isteği hatası:', error);
+                vscode.window.showErrorMessage(`AI isteği başarısız: ${error.message}`);
+            }
+            throw error;
+        }
+    }
+
+    public updateConfig(newConfig: Partial<AIConfig>) {
+        this.config = { ...this.config, ...newConfig };
+    }
+
+    public getConfig(): AIConfig {
+        return this.config;
     }
 
     public async generateResponse(request: AIRequest): Promise<AIResponse> {
         try {
-            const messages = this.prepareMessages(request);
+            const messages = request.messages;
             const response = await this.callAIProvider(messages);
             this.updateContext(request, response);
             return response;
@@ -27,31 +76,6 @@ export class AIEngine {
             console.error('Error generating response:', error);
             throw new Error('Failed to generate response');
         }
-    }
-
-    private prepareMessages(request: AIRequest): AIMessage[] {
-        const messages: AIMessage[] = [];
-
-        // Add system prompt if provided
-        if (request.systemPrompt) {
-            messages.push({
-                role: 'system',
-                content: request.systemPrompt,
-                timestamp: Date.now()
-            });
-        }
-
-        // Add context messages
-        messages.push(...this.context.messages);
-
-        // Add current request
-        messages.push({
-            role: 'user',
-            content: request.prompt,
-            timestamp: Date.now()
-        });
-
-        return messages;
     }
 
     private async callAIProvider(messages: AIMessage[]): Promise<AIResponse> {
@@ -95,60 +119,138 @@ export class AIEngine {
 
             if (provider.name === 'ollama') {
                 return {
-                    message: response.data.message.content,
-                    codeChanges: response.data.code_changes
+                    message: response.data.message.content
                 };
             } else if (provider.name === 'lmstudio') {
                 return {
-                    message: response.data.choices[0].message.content,
-                    codeChanges: response.data.choices[0].code_changes
+                    message: response.data.choices[0].message.content
                 };
             } else {
                 throw new Error(`Unsupported provider: ${provider.name}`);
             }
         } catch (error: any) {
             console.error('Error calling AI provider:', error);
+            const providerName = this.config.provider.name;
+            const endpoint = this.config.provider.apiEndpoint;
+            const modelName = this.config.provider.modelName;
+            let userMessage = `Failed to get response from ${providerName}.`;
+
             if (error.response) {
-                throw new Error(`AI provider error: ${error.response.data.error || error.response.statusText}`);
+                const status = error.response.status;
+                const dataError = error.response.data?.error;
+                userMessage = `Error from ${providerName} (Status ${status}): ${dataError || error.response.statusText}.`;
+                if (status === 404 && dataError?.includes('model')) {
+                     userMessage += `\nPlease ensure model '${modelName}' is available at ${endpoint}.`;
+                } else if (status === 500) {
+                    userMessage += `\nThere might be an issue with the ${providerName} server itself.`;
+                } else {
+                    userMessage += `\nPlease check your configuration for ${providerName}.`;
+                }
             } else if (error.request) {
-                throw new Error('Failed to connect to AI provider. Please check if the service is running.');
+                userMessage = `Could not connect to ${providerName} at ${endpoint}.`;
+                userMessage += `\nPlease ensure the ${providerName} service is running and the API endpoint in settings is correct.`;
             } else {
-                throw new Error(`Failed to communicate with AI provider: ${error.message}`);
+                userMessage = `Failed to communicate with ${providerName}: ${error.message}.`;
+                userMessage += `\nThis might be a configuration issue or an unexpected error.`;
             }
+            throw new Error(userMessage);
         }
     }
 
     private updateContext(request: AIRequest, response: AIResponse): void {
-        // Add user message to context
-        this.context.messages.push({
-            role: 'user',
-            content: request.prompt,
-            timestamp: Date.now()
-        });
+        this.conversationHistory.push(...request.messages);
 
-        // Add assistant response to context
-        this.context.messages.push({
+        this.conversationHistory.push({
             role: 'assistant',
             content: response.message,
             timestamp: Date.now()
         });
 
-        // Maintain context size (keep last N messages)
         const maxContextMessages = 10;
-        if (this.context.messages.length > maxContextMessages) {
-            this.context.messages = this.context.messages.slice(-maxContextMessages);
+        if (this.conversationHistory.length > maxContextMessages) {
+            this.conversationHistory = this.conversationHistory.slice(-maxContextMessages);
         }
     }
 
     public clearContext(): void {
-        this.context = { messages: [] };
+        this.conversationHistory = [];
     }
 
-    public getContext(): AIContext {
-        return this.context;
+    public getContext(): AIMessage[] {
+        return this.conversationHistory;
     }
 
-    public updateConfig(config: Partial<AIConfig>): void {
-        this.config = { ...this.config, ...config };
+    public async generateEmbeddings(text: string): Promise<number[]> {
+        const { provider } = this.config;
+        const embeddingModelName = this.config.embeddingModelName || provider.modelName;
+        const endpoint = provider.apiEndpoint;
+
+        if (provider.name !== 'ollama') {
+            throw new Error(`Embeddings are currently only supported for Ollama provider, not ${provider.name}.`);
+        }
+
+        const embeddingEndpoint = `${endpoint}/api/embeddings`;
+        const requestBody = {
+            model: embeddingModelName,
+            prompt: text
+        };
+
+        try {
+            const response = await axios.post(embeddingEndpoint, requestBody, {
+                headers: {
+                    'Content-Type': 'application/json'
+                }
+            });
+
+            if (response.data?.embedding && Array.isArray(response.data.embedding)) {
+                return response.data.embedding;
+            } else {
+                throw new Error('Invalid response format received from embedding endpoint.');
+            }
+        } catch (error: any) {
+            console.error('Error generating embeddings:', error);
+            const providerName = provider.name;
+            let userMessage = `Failed to generate embeddings from ${providerName}.`;
+
+            if (error.response) {
+                const status = error.response.status;
+                const dataError = error.response.data?.error;
+                userMessage = `Error from ${providerName} embedding endpoint (Status ${status}): ${dataError || error.response.statusText}.`;
+                if (status === 404) {
+                     userMessage += `\nPlease ensure embedding model '${embeddingModelName}' is available/pulled in Ollama at ${endpoint}.`;
+                } else {
+                    userMessage += `\nPlease check your Ollama setup and model name.`;
+                }
+            } else if (error.request) {
+                userMessage = `Could not connect to ${providerName} at ${endpoint} for embeddings.`;
+                userMessage += `\nPlease ensure the ${providerName} service is running.`;
+            } else {
+                userMessage = `Failed to communicate with ${providerName} for embeddings: ${error.message}.`;
+            }
+            throw new Error(userMessage);
+        }
+    }
+
+    public async generateEmbedding(text: string): Promise<number[]> {
+        const { provider } = this.config;
+        if (!provider.name || !provider.apiEndpoint) {
+            throw new Error('AI provider configuration is incomplete');
+        }
+
+        try {
+            const response = await axios.post(`${provider.apiEndpoint}/embeddings`, {
+                model: this.config.embeddingModelName || provider.modelName,
+                input: text
+            }, {
+                headers: {
+                    'Content-Type': 'application/json'
+                }
+            });
+
+            return response.data.data[0].embedding;
+        } catch (error) {
+            console.error('Error generating embedding:', error);
+            throw new Error('Failed to generate embedding');
+        }
     }
 } 

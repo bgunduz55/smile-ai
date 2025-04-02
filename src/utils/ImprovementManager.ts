@@ -56,16 +56,40 @@ export class ImprovementManager {
 
     /**
      * Adds a new improvement note.
+     * @param description The description of the note.
+     * @param context Optional context (file path, selection).
+     * @param bypassConfirmation If true, skips user confirmation (for AI suggestions).
+     * @param priority Optional priority for the note.
+     * @returns The newly created note.
      */
-    public async addNote(description: string, context?: ImprovementNoteContext): Promise<ImprovementNote> {
-        const allNotes = this.getAllNotes();
+    public async addNote(
+        description: string,
+        context?: ImprovementNoteContext,
+        bypassConfirmation: boolean = false,
+        priority?: 'high' | 'medium' | 'low' // Add priority parameter
+    ): Promise<ImprovementNote> {
+        if (!bypassConfirmation) {
+            // Basic confirmation for manually added notes
+            const confirm = await vscode.window.showQuickPick(['Yes', 'No'], {
+                placeHolder: `Add this improvement note? "${description.substring(0,50)}..."`
+            });
+            if (confirm !== 'Yes') {
+                throw new Error('Note addition cancelled by user.');
+            }
+        }
+
+        const now = new Date().toISOString();
         const newNote: ImprovementNote = {
-            id: uuidv4(),
-            description,
-            context,
+            id: uuidv4(), // Generate a unique ID
+            description: description,
             status: ImprovementNoteStatus.PENDING,
-            createdAt: Date.now()
+            context: context,
+            createdAt: now,
+            updatedAt: now,
+            priority: priority // Assign priority
         };
+
+        const allNotes = this.getAllNotes();
         allNotes.push(newNote);
         await this.context.workspaceState.update(IMPROVEMENT_NOTES_KEY, allNotes);
         console.log('Added improvement note:', newNote.id);
