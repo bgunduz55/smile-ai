@@ -1,5 +1,5 @@
 /// <reference types="jest" />
-import * as vscode from 'vscode';
+// import * as vscode from 'vscode';
 
 // VSCode API mock
 const mockVSCode = {

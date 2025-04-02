@@ -71,6 +71,9 @@ ollama pull codellama
 # Extension ayarlarından AI model tercihlerinizi yapılandırın
 ```
 
+# To compile and create a vsix file
+npm run compile ; vsce package
+
 ## 🤝 Katkıda Bulunma
 
 Projeye katkıda bulunmak için lütfen [CONTRIBUTING.md](CONTRIBUTING.md) dosyasını inceleyin.

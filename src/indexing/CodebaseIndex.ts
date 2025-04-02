@@ -1,28 +1,31 @@
 import * as vscode from 'vscode';
 import * as ts from 'typescript'; // Import TypeScript Compiler API
+import { AIEngine } from '../ai-engine/AIEngine'; // Import AIEngine
+import { cosineSimilarity } from '../utils/vectorUtils'; // Import helper
 
 /**
  * Represents information about a symbol found in the codebase.
  */
 export interface SymbolInfo {
     name: string;
-    kind: ts.SyntaxKind;
-    filePath: string;
+    kind: vscode.SymbolKind;
+    location: vscode.Location;
+    children?: SymbolInfo[];
     startLine: number;
     startChar: number;
     endLine: number;
     endChar: number;
-    // Future additions: parameters, return type, references, etc.
+    references?: vscode.Location[];
+    embedding?: number[];
 }
 
 /**
  * Represents the indexed information for a single file.
  */
 export interface FileIndexData {
-    filePath: string;
     symbols: SymbolInfo[];
-    imports: string[]; // Keep track of imports
-    // Future additions: exports, relationships, parse errors
+    references: Map<string, vscode.Location[]>;
+    error?: string;
 }
 
 /**
@@ -30,20 +33,12 @@ export interface FileIndexData {
  * symbols, and relationships.
  */
 export class CodebaseIndex {
-    private static instance: CodebaseIndex;
+    protected static instance: CodebaseIndex;
+    protected indexData: Map<string, FileIndexData> = new Map();
+    protected isIndexing: boolean = false;
 
-    // Use the defined interface for better type safety
-    private indexData: Map<string, FileIndexData>;
-    private isIndexing: boolean = false;
+    protected constructor() {}
 
-    private constructor() {
-        this.indexData = new Map();
-        // TODO: Listen for workspace changes (file saves, deletes) to update the index
-    }
-
-    /**
-     * Gets the singleton instance of the CodebaseIndex.
-     */
     public static getInstance(): CodebaseIndex {
         if (!CodebaseIndex.instance) {
             CodebaseIndex.instance = new CodebaseIndex();
@@ -51,8 +46,74 @@ export class CodebaseIndex {
         return CodebaseIndex.instance;
     }
 
+    public findSymbolAtPosition(filePath: string, position: vscode.Position): SymbolInfo | undefined {
+        const fileData = this.indexData.get(filePath);
+        if (!fileData) return undefined;
+
+        let bestMatch: SymbolInfo | undefined;
+        for (const symbol of fileData.symbols) {
+            const range = symbol.location.range;
+            if (range.contains(position)) {
+                if (!bestMatch || range.start.isAfter(bestMatch.location.range.start)) {
+                    bestMatch = symbol;
+                }
+            }
+        }
+        return bestMatch;
+    }
+
+    public async indexWorkspace(): Promise<void> {
+        if (this.isIndexing) return;
+        this.isIndexing = true;
+
+        try {
+            const files = await vscode.workspace.findFiles('**/*.{ts,js,tsx,jsx}');
+            for (const file of files) {
+                await this.indexFile(file);
+            }
+        } finally {
+            this.isIndexing = false;
+        }
+    }
+
+    public async indexFile(uri: vscode.Uri): Promise<void> {
+        try {
+            const symbols = await vscode.commands.executeCommand<vscode.SymbolInformation[]>(
+                'vscode.executeDocumentSymbolProvider',
+                uri
+            );
+
+            if (symbols) {
+                const fileSymbols: SymbolInfo[] = symbols.map(symbol => ({
+                    name: symbol.name,
+                    kind: symbol.kind,
+                    location: symbol.location,
+                    children: [],
+                    startLine: symbol.location.range.start.line,
+                    startChar: symbol.location.range.start.character,
+                    endLine: symbol.location.range.end.line,
+                    endChar: symbol.location.range.end.character
+                }));
+
+                this.indexData.set(uri.fsPath, {
+                    symbols: fileSymbols,
+                    references: new Map()
+                });
+            }
+        } catch (error) {
+            console.error(`Error indexing file ${uri.fsPath}:`, error);
+            this.indexData.set(uri.fsPath, {
+                symbols: [],
+                references: new Map()
+            });
+        }
+    }
+
+    private generateEmbeddingsEnabled: boolean = false; // Setting cache
+    protected aiEngine?: AIEngine; // Optional AI Engine reference
+
     /**
-     * Initiates the indexing process for the entire workspace.
+     * Initiates the indexing process for the entire workspace using a full ts.Program.
      * @param progress Optional progress reporter.
      */
     public async buildIndex(progress?: vscode.Progress<{ message?: string; increment?: number }>): Promise<void> {
@@ -60,157 +121,282 @@ export class CodebaseIndex {
             vscode.window.showWarningMessage('Indexing is already in progress.');
             return;
         }
+        // Add check for aiEngine
+        if (this.generateEmbeddingsEnabled && !this.aiEngine) {
+             this.isIndexing = false; // Reset flag before handling error
+             console.error('[CodebaseIndex] Cannot generate embeddings because AI Engine has not been set via setAIEngine().');
+             vscode.window.showErrorMessage('Smile AI: Cannot generate embeddings - AI Engine not ready.');
+             return; // Prevent index build if embeddings are enabled but engine isn't set
+        }
         this.isIndexing = true;
         this.indexData.clear(); // Clear previous index
         progress?.report({ message: 'Starting codebase indexing...' });
         console.log('Starting codebase indexing...');
+        const startTime = Date.now();
 
         try {
             const workspaceFolders = vscode.workspace.workspaceFolders;
             if (!workspaceFolders) {
-                vscode.window.showErrorMessage('No workspace folder open.');
-                return;
+                throw new Error('No workspace folder open.');
             }
-            const rootPath = workspaceFolders[0].uri; // Assuming single root for now
+            const workspaceRootUri = workspaceFolders[0].uri;
+            const workspaceRootPath = workspaceRootUri.fsPath;
 
-            // 1. Find all relevant code files (e.g., .ts, .tsx)
-            //    - Use vscode.workspace.findFiles
-            const files = await vscode.workspace.findFiles('**/*.{ts,tsx}', '**/node_modules/**');
+            // --- Create Full ts.Program --- 
+            progress?.report({ message: 'Finding tsconfig.json...'});
+            const configFileName = ts.findConfigFile(
+                workspaceRootPath,
+                ts.sys.fileExists,
+                'tsconfig.json'
+            );
+
+            if (!configFileName) {
+                throw new Error('tsconfig.json not found in the workspace root.');
+            }
+            console.log(`Using tsconfig: ${configFileName}`);
+            progress?.report({ message: 'Reading tsconfig.json...'});
+
+            const configFile = ts.readConfigFile(configFileName, ts.sys.readFile);
+            if (configFile.error) {
+                 throw new Error(`Error reading tsconfig.json: ${ts.flattenDiagnosticMessageText(configFile.error.messageText, '\n')}`);
+            }
+
+            const parsedCommandLine = ts.parseJsonConfigFileContent(
+                configFile.config,
+                ts.sys,
+                workspaceRootPath
+            );
+
+            if (parsedCommandLine.errors.length > 0) {
+                // Handle tsconfig parsing errors - maybe log them but continue?
+                console.warn(`Errors parsing tsconfig.json:`, parsedCommandLine.errors.map(d => ts.flattenDiagnosticMessageText(d.messageText, '\n')));
+                // Depending on severity, might want to throw an error here
+            }
+
+            const rootFileNames = parsedCommandLine.fileNames;
+            const compilerOptions = parsedCommandLine.options;
             
-            progress?.report({ message: `Found ${files.length} files to index...`, increment: 10 });
-            console.log(`Found ${files.length} files to index.`);
+            progress?.report({ message: `Creating program with ${rootFileNames.length} files...`, increment: 10 });
+            console.log(`Creating program with ${rootFileNames.length} root files...`);
 
-            // 2. For each file, parse it to extract symbols (functions, classes, etc.)
-            //    - This is where we'll use the TypeScript Compiler API
-            for (let i = 0; i < files.length; i++) {
-                const fileUri = files[i];
-                const fileName = vscode.workspace.asRelativePath(fileUri);
+            // Create the program that includes all files in the project
+            const program = ts.createProgram(rootFileNames, compilerOptions);
+            const typeChecker = program.getTypeChecker();
+            const allSourceFiles = program.getSourceFiles(); // Get all source files from the program
+            console.log(`Program created with ${allSourceFiles.length} total source files.`);
+            // ----------------------------- 
+
+            progress?.report({ message: `Analyzing ${allSourceFiles.length} files...`, increment: 10 });
+
+            // 2. Parse each source file using the *same* program and typeChecker
+            let processedCount = 0;
+            for (const sourceFile of allSourceFiles) {
+                // Skip declaration files (.d.ts) and external libraries if desired
+                if (sourceFile.isDeclarationFile || program.isSourceFileFromExternalLibrary(sourceFile)) {
+                    continue;
+                }
+                
+                const fileUri = vscode.Uri.file(sourceFile.fileName); // Convert path back to Uri if needed
+                const relativePath = vscode.workspace.asRelativePath(fileUri);
+                
                 progress?.report({ 
-                    message: `Indexing ${fileName}...`, 
-                    increment: (80 / files.length) // Allocate 80% of progress to parsing
+                    message: `Analyzing ${relativePath}...`, 
+                    increment: (70 / allSourceFiles.length) // Allocate 70% to analysis
                 });
-                console.log(`Indexing ${fileName}...`);
-                await this.parseFile(fileUri);
-                // Add a small delay to prevent UI freeze for large projects
-                await new Promise(resolve => setTimeout(resolve, 10)); 
+                // Pass the program and typeChecker to parseFile
+                await this.parseFileWithProgram(sourceFile, program, typeChecker);
+                processedCount++;
+                // Optional small delay
+                // await new Promise(resolve => setTimeout(resolve, 5)); 
             }
-
-            // 3. (Future) Build relationships between symbols (call graphs, inheritance)
 
             progress?.report({ message: 'Finalizing index...', increment: 10 });
-            console.log('Codebase indexing finished.');
-            vscode.window.showInformationMessage('Codebase indexing finished.');
+            const endTime = Date.now();
+            console.log(`Codebase indexing finished in ${(endTime - startTime) / 1000} seconds. Analyzed ${processedCount} files.`);
+            vscode.window.showInformationMessage(`Codebase indexing finished (${processedCount} files).`);
 
         } catch (error) {
             console.error('Error during codebase indexing:', error);
             vscode.window.showErrorMessage(`Codebase indexing failed: ${error instanceof Error ? error.message : String(error)}`);
+            this.isIndexing = false; // Ensure flag is reset on error
         } finally {
             this.isIndexing = false;
         }
     }
 
-    /**
-     * Parses a single file and updates the index using TypeScript Compiler API.
-     * @param fileUri The URI of the file to parse.
-     */
-    private async parseFile(fileUri: vscode.Uri): Promise<void> {
+    // Rename and modify parseFile to accept program and checker
+    // private async parseFile(fileUri: vscode.Uri): Promise<void> { ... }
+    private async parseFileWithProgram(sourceFile: ts.SourceFile, program: ts.Program, typeChecker: ts.TypeChecker): Promise<void> {
+        const filePath = vscode.workspace.asRelativePath(sourceFile.fileName);
+        if (this.indexData.has(filePath)) {
+            return;
+        }
         try {
-            const document = await vscode.workspace.openTextDocument(fileUri);
-            const code = document.getText();
-            const filePath = vscode.workspace.asRelativePath(fileUri);
-
-            // Use TypeScript Compiler API to parse the file
-            const sourceFile = ts.createSourceFile(
-                filePath,         // fileName
-                code,             // sourceText
-                ts.ScriptTarget.Latest, // languageVersion
-                true              // setParentNodes
-            );
-
             const fileSymbols: SymbolInfo[] = [];
             const fileImports: string[] = [];
 
-            // Visitor function to traverse the AST (Abstract Syntax Tree)
-            const visitNode = (node: ts.Node) => {
-                let symbolInfo: Partial<SymbolInfo> | null = null;
+            const visitNodeAsync = async (node: ts.Node): Promise<void> => {
+                let symbolInfo: SymbolInfo | undefined;
                 let symbolName: string | undefined;
+
+                const createSymbolInfo = (name: string, node: ts.Node): SymbolInfo => {
+                    const startPos = sourceFile.getLineAndCharacterOfPosition(node.getStart());
+                    const endPos = sourceFile.getLineAndCharacterOfPosition(node.getEnd());
+                    const range = new vscode.Range(
+                        new vscode.Position(startPos.line, startPos.character),
+                        new vscode.Position(endPos.line, endPos.character)
+                    );
+                    
+                    return {
+                        name,
+                        kind: this.convertSyntaxKindToSymbolKind(node.kind),
+                        location: new vscode.Location(vscode.Uri.file(sourceFile.fileName), range),
+                        children: [],
+                        startLine: startPos.line + 1,
+                        startChar: startPos.character,
+                        endLine: endPos.line + 1,
+                        endChar: endPos.character,
+                        references: []
+                    };
+                };
 
                 if (ts.isFunctionDeclaration(node) || ts.isMethodDeclaration(node)) {
                     symbolName = node.name?.getText(sourceFile);
                     if (symbolName) {
-                        symbolInfo = { kind: node.kind }; // Store kind
+                        symbolInfo = createSymbolInfo(symbolName, node);
                     }
                 } else if (ts.isClassDeclaration(node)) {
                     symbolName = node.name?.getText(sourceFile);
                     if (symbolName) {
-                        symbolInfo = { kind: node.kind }; // Store kind
+                        symbolInfo = createSymbolInfo(symbolName, node);
                     }
                 } else if (ts.isInterfaceDeclaration(node)) {
                     symbolName = node.name.getText(sourceFile);
-                    symbolInfo = { kind: node.kind }; // Store kind
+                    symbolInfo = createSymbolInfo(symbolName, node);
                 } else if (ts.isEnumDeclaration(node)) {
                     symbolName = node.name.getText(sourceFile);
-                    symbolInfo = { kind: node.kind }; // Store kind
+                    symbolInfo = createSymbolInfo(symbolName, node);
                 } else if (ts.isTypeAliasDeclaration(node)) {
                     symbolName = node.name.getText(sourceFile);
-                    symbolInfo = { kind: node.kind }; // Store kind
+                    symbolInfo = createSymbolInfo(symbolName, node);
                 } else if (ts.isVariableDeclaration(node)) {
-                    // Handle variable names (can be simple identifier or binding pattern)
                     if (ts.isIdentifier(node.name)) {
                         symbolName = node.name.getText(sourceFile);
-                        symbolInfo = { kind: node.kind }; // Store kind
-                    } // Skip complex patterns for now
+                        symbolInfo = createSymbolInfo(symbolName, node);
+                    }
                 } else if (ts.isImportDeclaration(node)) {
-                    // Extract module specifier (the path being imported)
                     if (ts.isStringLiteral(node.moduleSpecifier)) {
                         fileImports.push(node.moduleSpecifier.text);
                     }
+                } else if (ts.isCallExpression(node)) {
+                    const expression = node.expression;
+                    try {
+                        const symbol = typeChecker.getSymbolAtLocation(expression);
+                        if (symbol) {
+                            const declarations = symbol.getDeclarations();
+                            if (declarations && declarations.length > 0) {
+                                const declaration = declarations[0];
+                                const declarationFile = declaration.getSourceFile();
+                                const declarationStart = declaration.getStart();
+                                const definitionFilePath = vscode.workspace.asRelativePath(declarationFile.fileName);
+
+                                if (program.isSourceFileFromExternalLibrary(declarationFile) || declarationFile.isDeclarationFile) {
+                                    await visitNodeAsync(node);
+                                    return;
+                                }
+
+                                const definitionFileData = this.indexData.get(definitionFilePath);
+                                let definitionSymbolInfo: SymbolInfo | undefined;
+                                if (definitionFileData?.symbols) {
+                                    const defStartPos = declarationFile.getLineAndCharacterOfPosition(declarationStart);
+                                    definitionSymbolInfo = definitionFileData.symbols.find(def =>
+                                        def.startLine === defStartPos.line + 1 &&
+                                        def.startChar === defStartPos.character
+                                    );
+                                }
+
+                                if (definitionSymbolInfo) {
+                                    const callPos = sourceFile.getLineAndCharacterOfPosition(expression.getStart());
+                                    const callEndPos = sourceFile.getLineAndCharacterOfPosition(expression.getEnd());
+                                    const range = new vscode.Range(
+                                        new vscode.Position(callPos.line, callPos.character),
+                                        new vscode.Position(callEndPos.line, callEndPos.character)
+                                    );
+                                    const reference = new vscode.Location(vscode.Uri.file(sourceFile.fileName), range);
+
+                                    if (!definitionSymbolInfo.references) {
+                                        definitionSymbolInfo.references = [];
+                                    }
+                                    definitionSymbolInfo.references.push(reference);
+                                }
+                            }
+                        }
+                    } catch (checkerError) {
+                        console.error(`TypeChecker error processing call at ${filePath}:${sourceFile.getLineAndCharacterOfPosition(node.getStart()).line + 1}:`, checkerError);
+                    }
                 }
 
-                // If a symbol name and kind were identified, get its position and add to the list
                 if (symbolInfo && symbolName) {
                     try {
-                        const startPos = sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile));
-                        // For variables, the declaration node (e.g., `x` in `const x = 1`) might be better than the whole statement
+                        const startPos = sourceFile.getLineAndCharacterOfPosition(node.getStart());
                         const endNode = ts.isVariableDeclaration(node) ? node.name : node;
                         const endPos = sourceFile.getLineAndCharacterOfPosition(endNode.getEnd());
-                        fileSymbols.push({
+                        const range = new vscode.Range(
+                            new vscode.Position(startPos.line, startPos.character),
+                            new vscode.Position(endPos.line, endPos.character)
+                        );
+
+                        const definition: SymbolInfo = {
                             name: symbolName,
-                            kind: symbolInfo.kind!,
-                            filePath: filePath,
-                            startLine: startPos.line + 1, // 1-based indexing
+                            kind: symbolInfo.kind,
+                            location: new vscode.Location(vscode.Uri.file(sourceFile.fileName), range),
+                            children: [],
+                            startLine: startPos.line + 1,
                             startChar: startPos.character,
-                            endLine: endPos.line + 1, // 1-based indexing
+                            endLine: endPos.line + 1,
                             endChar: endPos.character,
-                        });
+                            references: symbolInfo.references
+                        };
+
+                        if (this.generateEmbeddingsEnabled && this.aiEngine) {
+                            try {
+                                const symbolCode = node.getSourceFile().text.substring(node.getStart(), node.getEnd());
+                                const maxEmbedLength = 1000;
+                                const truncatedCode = symbolCode.length > maxEmbedLength
+                                    ? symbolCode.substring(0, maxEmbedLength)
+                                    : symbolCode;
+                                definition.embedding = await this.aiEngine.generateEmbeddings(truncatedCode);
+                            } catch (embedError) {
+                                console.warn(`[CodebaseIndex] Failed to generate embedding for symbol '${definition.name}' in ${filePath}:`, embedError);
+                            }
+                        }
+
+                        fileSymbols.push(definition);
                     } catch (posError) {
                         console.error(`Error getting position for symbol ${symbolName} in ${filePath}:`, posError);
                     }
                 }
 
-                // Continue traversing child nodes
-                ts.forEachChild(node, visitNode);
+                const children = node.getChildren(sourceFile);
+                for (const child of children) {
+                    await visitNodeAsync(child);
+                }
             };
 
-            // Start traversal from the root node
-            visitNode(sourceFile);
+            await visitNodeAsync(sourceFile);
 
-            // Store the extracted information in the index
             this.indexData.set(filePath, {
-                filePath: filePath,
                 symbols: fileSymbols,
-                imports: fileImports
+                references: new Map()
             });
 
         } catch (error) {
-            console.error(`Error parsing file ${fileUri.fsPath}:`, error);
-            // Store error information for this file
-            const filePath = vscode.workspace.asRelativePath(fileUri);
+            const filePath = vscode.workspace.asRelativePath(sourceFile.fileName);
+            console.error(`Error parsing file ${filePath}:`, error);
             this.indexData.set(filePath, {
-                filePath: filePath,
                 symbols: [],
-                imports: [],
-                // TODO: Add an 'error' field here
+                references: new Map(),
+                error: error instanceof Error ? error.message : String(error)
             });
         }
     }
@@ -238,44 +424,15 @@ export class CodebaseIndex {
     }
 
     /**
-     * Finds the symbol definition at a specific position in a file.
+     * Finds all known references for a given symbol definition.
+     * Note: Reliability depends on the successful linking during parsing.
      *
-     * @param filePath Relative path to the file.
-     * @param position The position within the file.
-     * @returns The SymbolInfo for the symbol at the position, or undefined if not found.
+     * @param symbolInfo The SymbolInfo object for the definition.
+     * @returns An array of ReferenceLocation objects, or an empty array if none found.
      */
-    public findSymbolAtPosition(filePath: string, position: vscode.Position): SymbolInfo | undefined {
-        const fileData = this.getFileData(filePath);
-        if (!fileData?.symbols) {
-            return undefined;
-        }
-
-        // VS Code Position is 0-based, SymbolInfo lines are 1-based
-        const targetLine = position.line + 1;
-        const targetChar = position.character;
-
-        // Find the smallest symbol that contains the position
-        let bestMatch: SymbolInfo | undefined = undefined;
-
-        for (const symbol of fileData.symbols) {
-            if (
-                symbol.startLine <= targetLine &&
-                symbol.endLine >= targetLine &&
-                // Check character boundaries only if the symbol is on a single line or the target is on the start/end line
-                (symbol.startLine !== targetLine || symbol.startChar <= targetChar) &&
-                (symbol.endLine !== targetLine || symbol.endChar >= targetChar)
-            ) {
-                // If we found a match, check if it's smaller (more specific) than the previous best match
-                if (!bestMatch || 
-                    (symbol.startLine > bestMatch.startLine || (symbol.startLine === bestMatch.startLine && symbol.startChar >= bestMatch.startChar)) &&
-                    (symbol.endLine < bestMatch.endLine || (symbol.endLine === bestMatch.endLine && symbol.endChar <= bestMatch.endChar))
-                ) {
-                    bestMatch = symbol;
-                }
-            }
-        }
-
-        return bestMatch;
+    public findReferences(symbolInfo: SymbolInfo): vscode.Location[] {
+        // The references are stored directly on the SymbolInfo object during parsing
+        return symbolInfo.references || [];
     }
 
     /**
@@ -288,18 +445,113 @@ export class CodebaseIndex {
     }
 
     /**
-     * Updates the index for a single file, typically after a save.
+     * Updates the index for a single file (definitions only) after a save.
+     * Does not update cross-file references; full re-index recommended for that.
      * @param fileUri The URI of the file to update.
      */
     public async updateFileIndex(fileUri: vscode.Uri): Promise<void> {
-         if (this.isIndexing) {
-             console.warn('Skipping single file update, full indexing in progress.');
-             return;
-         }
-         const filePath = vscode.workspace.asRelativePath(fileUri);
-         console.log(`Updating index for ${filePath}...`);
-         await this.parseFile(fileUri); // Re-parse the file
-         console.log(`Index updated for ${filePath}.`);
+        if (this.isIndexing) {
+            console.warn('Skipping single file update, full indexing in progress.');
+            return;
+        }
+        const filePath = vscode.workspace.asRelativePath(fileUri);
+        console.log(`Updating definitions in index for ${filePath}...`);
+        
+        try {
+            const document = await vscode.workspace.openTextDocument(fileUri);
+            const code = document.getText();
+
+            // Use basic parsing without full Type Checker for speed
+            const sourceFile = ts.createSourceFile(
+                filePath,
+                code,             
+                ts.ScriptTarget.Latest,
+                true              
+            );
+
+            const fileSymbols: SymbolInfo[] = [];
+            const fileImports: string[] = [];
+
+            // Simplified visitor - only extracts definitions
+            const visitNode = (node: ts.Node) => {
+                let symbolInfo: SymbolInfo | undefined;
+                let symbolName: string | undefined;
+
+                const createSymbolInfo = (name: string, node: ts.Node): SymbolInfo => {
+                    const startPos = sourceFile.getLineAndCharacterOfPosition(node.getStart());
+                    const endPos = sourceFile.getLineAndCharacterOfPosition(node.getEnd());
+                    const range = new vscode.Range(
+                        new vscode.Position(startPos.line, startPos.character),
+                        new vscode.Position(endPos.line, endPos.character)
+                    );
+                    
+                    return {
+                        name,
+                        kind: this.convertSyntaxKindToSymbolKind(node.kind),
+                        location: new vscode.Location(vscode.Uri.file(sourceFile.fileName), range),
+                        children: [],
+                        startLine: startPos.line + 1,
+                        startChar: startPos.character,
+                        endLine: endPos.line + 1,
+                        endChar: endPos.character,
+                        references: []
+                    };
+                };
+
+                if (ts.isFunctionDeclaration(node) || ts.isMethodDeclaration(node)) {
+                    symbolName = node.name?.getText(sourceFile);
+                    if (symbolName) {
+                        symbolInfo = createSymbolInfo(symbolName, node);
+                    }
+                } else if (ts.isClassDeclaration(node)) {
+                    symbolName = node.name?.getText(sourceFile);
+                    if (symbolName) {
+                        symbolInfo = createSymbolInfo(symbolName, node);
+                    }
+                } else if (ts.isInterfaceDeclaration(node)) {
+                    symbolName = node.name.getText(sourceFile);
+                    symbolInfo = createSymbolInfo(symbolName, node);
+                } else if (ts.isEnumDeclaration(node)) {
+                    symbolName = node.name.getText(sourceFile);
+                    symbolInfo = createSymbolInfo(symbolName, node);
+                } else if (ts.isTypeAliasDeclaration(node)) {
+                    symbolName = node.name.getText(sourceFile);
+                    symbolInfo = createSymbolInfo(symbolName, node);
+                } else if (ts.isVariableDeclaration(node)) {
+                    if (ts.isIdentifier(node.name)) {
+                        symbolName = node.name.getText(sourceFile);
+                        symbolInfo = createSymbolInfo(symbolName, node);
+                    }
+                } else if (ts.isImportDeclaration(node)) {
+                    if (ts.isStringLiteral(node.moduleSpecifier)) {
+                        fileImports.push(node.moduleSpecifier.text);
+                    }
+                }
+
+                if (symbolInfo && symbolName) {
+                    fileSymbols.push(symbolInfo);
+                }
+                ts.forEachChild(node, visitNode);
+            };
+
+            visitNode(sourceFile);
+
+            // Update the index entry for this file
+            this.indexData.set(filePath, {
+                symbols: fileSymbols,
+                references: new Map()
+            });
+
+            console.log(`Index definitions updated for ${filePath}.`);
+
+        } catch (error) {
+            console.error(`Error updating index for ${filePath}:`, error);
+            this.indexData.set(filePath, {
+                symbols: [],
+                references: new Map(),
+                error: error instanceof Error ? error.message : String(error)
+            });
+        }
     }
 
     /**
@@ -321,4 +573,85 @@ export class CodebaseIndex {
         console.log('Disposing CodebaseIndex...');
         this.indexData.clear();
     }
-} 
+
+    /** Set the AI Engine instance needed for embeddings */
+    public setAIEngine(engine: AIEngine) {
+        this.aiEngine = engine;
+        console.log('[CodebaseIndex] AI Engine instance set.');
+    }
+
+    /**
+     * Finds symbols in the index that are semantically similar to the provided embedding.
+     * Requires embeddings to have been generated during indexing.
+     *
+     * @param queryEmbedding The embedding vector to search against.
+     * @param topN The maximum number of similar symbols to return.
+     * @param minSimilarity The minimum cosine similarity score to consider a match (e.g., 0.7).
+     * @returns An array of objects containing the SymbolInfo and similarity score, sorted by similarity.
+     */
+    public findSimilarSymbols(
+        queryEmbedding: number[], 
+        topN: number = 5, 
+        minSimilarity: number = 0.7
+    ): { symbol: SymbolInfo; score: number }[] {
+        
+        if (!this.generateEmbeddingsEnabled) {
+            console.warn('[CodebaseIndex] Cannot find similar symbols: Embeddings generation is disabled.');
+            // Optionally throw an error or return empty
+             vscode.window.showWarningMessage('Cannot perform semantic search: Embedding generation is disabled in Smile AI settings.');
+            return [];
+        }
+
+        const results: { symbol: SymbolInfo; score: number }[] = [];
+
+        console.log(`[CodebaseIndex] Searching for symbols similar to query vector (${queryEmbedding.length} dimensions)...`);
+        const startTime = Date.now();
+
+        for (const fileData of this.indexData.values()) {
+            if (fileData.symbols) {
+                for (const symbol of fileData.symbols) {
+                    if (symbol.embedding && symbol.embedding.length === queryEmbedding.length) {
+                        try {
+                            const score = cosineSimilarity(queryEmbedding, symbol.embedding);
+                            if (score >= minSimilarity) {
+                                results.push({ symbol, score });
+                            }
+                        } catch (error) {
+                             console.error(`Error calculating similarity for symbol ${symbol.name}:`, error);
+                             // Skip this symbol if similarity calculation fails
+                        }
+                    }
+                }
+            }
+        }
+
+        // Sort results by score descending
+        results.sort((a, b) => b.score - a.score);
+
+        const endTime = Date.now();
+        console.log(`[CodebaseIndex] Semantic search completed in ${endTime - startTime}ms. Found ${results.length} potential matches.`);
+
+        // Return top N results
+        return results.slice(0, topN);
+    }
+
+    private convertSyntaxKindToSymbolKind(kind: ts.SyntaxKind): vscode.SymbolKind {
+        switch (kind) {
+            case ts.SyntaxKind.FunctionDeclaration:
+            case ts.SyntaxKind.MethodDeclaration:
+                return vscode.SymbolKind.Function;
+            case ts.SyntaxKind.ClassDeclaration:
+                return vscode.SymbolKind.Class;
+            case ts.SyntaxKind.InterfaceDeclaration:
+                return vscode.SymbolKind.Interface;
+            case ts.SyntaxKind.EnumDeclaration:
+                return vscode.SymbolKind.Enum;
+            case ts.SyntaxKind.TypeAliasDeclaration:
+                return vscode.SymbolKind.TypeParameter;
+            case ts.SyntaxKind.VariableDeclaration:
+                return vscode.SymbolKind.Variable;
+            default:
+                return vscode.SymbolKind.Variable;
+        }
+    }
+}

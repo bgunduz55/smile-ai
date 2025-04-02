@@ -31,7 +31,13 @@ export enum TaskType {
     TEST_GENERATION = 'TEST_GENERATION',
     DOCUMENTATION = 'DOCUMENTATION',
     REFACTORING = 'REFACTORING',
-    EXPLANATION = 'EXPLANATION'
+    EXPLANATION = 'EXPLANATION',
+    IMPROVEMENT_NOTE = 'IMPROVEMENT_NOTE',
+    TESTING = 'TESTING',
+    DEBUGGING = 'DEBUGGING',
+    OPTIMIZATION = 'OPTIMIZATION',
+    SECURITY = 'SECURITY',
+    REVIEW = 'REVIEW'
 }
 
 export enum TaskStatus {
@@ -64,8 +70,8 @@ export interface AgentContext {
 }
 
 export interface TaskExecutor {
-    execute(task: Task): Promise<TaskResult>;
     canHandle(task: Task): boolean;
+    execute(task: Task): Promise<TaskResult | boolean>;
 }
 
 export interface TaskPlanner {
@@ -106,5 +112,37 @@ export interface ImprovementNote {
     description: string;
     context?: ImprovementNoteContext;
     status: ImprovementNoteStatus;
-    createdAt: number;
+    createdAt: string;
+    updatedAt: string;
+    priority?: 'high' | 'medium' | 'low';
+}
+
+export interface CodeModification {
+    description: string;
+    content: string;
+    location: {
+        filePath: string;
+        startLine: number;
+        endLine: number;
+    };
+    type: 'insert' | 'replace' | 'delete';
+    code: string;
+}
+
+export interface ModificationPlan {
+    description: string;
+    modifications: CodeModification[];
+}
+
+export enum InteractionMode {
+    ASK = 'ask',
+    EDIT = 'edit',
+    AGENT = 'agent'
+}
+
+export interface StatusCallbacks {
+    setStatusBar: (text: string, tooltip?: string, icon?: string) => void;
+    showLoading: (message?: string) => void;
+    showReady: (message?: string) => void;
+    showError: (message?: string) => void;
 } 

@@ -1,7 +1,6 @@
 import * as vscode from 'vscode';
-import * as path from 'path';
 import { FileAnalyzer, FileContext } from './FileAnalyzer';
-import { CodeAnalyzer, CodeAnalysis } from './CodeAnalyzer';
+import { CodeAnalyzer } from './CodeAnalyzer';
 
 interface IndexedFile extends FileContext {
     uri: vscode.Uri;
@@ -41,21 +40,13 @@ export class CodebaseIndexer {
     private codeAnalyzer: CodeAnalyzer;
     private indexedFiles: Map<string, IndexedFile>;
     private isIndexing: boolean;
-    private lastIndexTime: number;
     private watcher: vscode.FileSystemWatcher | undefined;
-    private supportedLanguages: Set<string>;
 
     private constructor() {
         this.fileAnalyzer = FileAnalyzer.getInstance();
         this.codeAnalyzer = CodeAnalyzer.getInstance();
         this.indexedFiles = new Map();
         this.isIndexing = false;
-        this.lastIndexTime = 0;
-        this.supportedLanguages = new Set([
-            'typescript', 'javascript', 'python', 'java', 'csharp',
-            'cpp', 'c', 'go', 'rust', 'php', 'ruby', 'swift'
-        ]);
-
         this.setupWatchers();
     }
 
@@ -102,8 +93,6 @@ export class CodebaseIndexer {
 
             // Referansları ve bağımlılıkları analiz et
             await this.analyzeReferences();
-
-            this.lastIndexTime = Date.now();
         } catch (error) {
             console.error('Workspace indexing error:', error);
         } finally {
@@ -142,13 +131,13 @@ export class CodebaseIndexer {
             
             // Dosya analizi yap
             const context = await this.fileAnalyzer.analyzeFile(uri);
-            const analysis = await this.codeAnalyzer.analyzeCode(document, context);
+            await this.codeAnalyzer.analyzeCode(uri, context);
             
             // Sembolleri çıkar
             const symbols = await this.extractSymbols(document);
             
             // AST oluştur
-            const ast = await this.parseAST(document);
+            const ast = await this.parseAST();
 
             // Bağımlılıkları bul
             const dependencies = await this.findDependencies(document);
@@ -184,9 +173,7 @@ export class CodebaseIndexer {
         }));
     }
 
-    private async parseAST(document: vscode.TextDocument): Promise<any> {
-        // Dile göre uygun AST parser'ı kullan
-        const language = document.languageId;
+    private async parseAST(): Promise<any> {
         // TODO: Implement AST parsing for different languages
         return null;
     }

@@ -1,14 +1,13 @@
 import * as vscode from 'vscode';
 import { Task, TaskType, TaskResult, TaskExecutor } from '../types';
-import { CodeAnalyzer, CodeAnalysis, CodeSuggestion } from '../../utils/CodeAnalyzer';
+import { CodeAnalysis, CodeSuggestion } from '../../utils/CodeAnalyzer';
 import { AIEngine } from '../../ai-engine/AIEngine';
+import { AIMessage } from '../../ai-engine/types';
 
 export class CodeAnalysisExecutor implements TaskExecutor {
-    private codeAnalyzer: CodeAnalyzer;
-    private aiEngine: AIEngine;
+    private readonly aiEngine: AIEngine;
 
     constructor(aiEngine: AIEngine) {
-        this.codeAnalyzer = CodeAnalyzer.getInstance();
         this.aiEngine = aiEngine;
     }
 
@@ -76,7 +75,9 @@ export class CodeAnalysisExecutor implements TaskExecutor {
     }
 
     private async getAIInsights(codeAnalysis: CodeAnalysis, fileContext: any) {
-        const prompt = `
+        const messages: AIMessage[] = [{
+            role: 'user',
+            content: `
 Please analyze this code and provide insights on:
 1. Overall code quality and architecture
 2. Potential improvements and best practices
@@ -92,10 +93,12 @@ Code Metrics:
 
 Language: ${fileContext.language}
 Framework: ${fileContext.framework || 'None'}
-`;
+`,
+            timestamp: Date.now()
+        }];
 
         const response = await this.aiEngine.generateResponse({
-            prompt,
+            messages,
             systemPrompt: this.getAnalysisSystemPrompt()
         });
 
@@ -510,11 +513,29 @@ Framework: ${fileContext.framework || 'None'}
     }
 
     private async applyAutoFix(suggestion: CodeSuggestion): Promise<void> {
-        // TODO: Otomatik düzeltme implementasyonu
+        if (suggestion.fix) {
+            const workspaceEdit = new vscode.WorkspaceEdit();
+            const uri = vscode.Uri.file(suggestion.file);
+            const range = new vscode.Range(
+                suggestion.range.start.line,
+                suggestion.range.start.character,
+                suggestion.range.end.line,
+                suggestion.range.end.character
+            );
+            workspaceEdit.replace(uri, range, suggestion.fix);
+            await vscode.workspace.applyEdit(workspaceEdit);
+        }
     }
 
     private async showSuggestionDetail(suggestion: CodeSuggestion): Promise<void> {
-        // TODO: Öneri detayları gösterme implementasyonu
+        const message = `
+Type: ${suggestion.type}
+Priority: ${suggestion.priority}
+Description: ${suggestion.description}
+Location: ${suggestion.file}:${suggestion.range.start.line + 1}:${suggestion.range.start.character + 1}
+${suggestion.fix ? `\nSuggested Fix:\n${suggestion.fix}` : ''}
+`;
+        await vscode.window.showInformationMessage(message, { modal: true });
     }
 
     private getAnalysisSystemPrompt(): string {

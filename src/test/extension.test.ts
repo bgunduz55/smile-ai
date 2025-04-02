@@ -1,5 +1,4 @@
 /// <reference types="jest" />
-import * as assert from 'assert';
 import * as vscode from 'vscode';
 import { AIEngine } from '../ai-engine/AIEngine';
 import { TaskManager } from '../agent/TaskManager';
@@ -117,9 +116,9 @@ describe('Smile AI Extension Test Suite', () => {
         };
 
         const invalidEngine = new AIEngine(invalidConfig);
-        await expect(invalidEngine.generateResponse({ prompt: 'test' }))
-            .rejects
-            .toThrow();
+        await expect(invalidEngine.generateResponse({
+            messages: [{ role: 'user', content: 'test' }]
+        })).rejects.toThrow();
     });
 
     it('WebView panel oluşturma', async () => {

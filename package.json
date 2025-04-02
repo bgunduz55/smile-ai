@@ -107,6 +107,36 @@
         "command": "smile-ai.dismissImprovement",
         "title": "Dismiss",
         "icon": "$(x)"
+      },
+      {
+        "command": "smile-ai.semanticCodeSearch",
+        "title": "Smile AI: Search Code Semantically...",
+        "category": "Smile AI",
+        "icon": "$(search)"
+      },
+      {
+        "command": "smile-ai.setImprovementPriority",
+        "title": "Smile AI: Set Improvement Priority",
+        "category": "Smile AI",
+        "icon": "$(list-ordered)"
+      },
+      {
+        "command": "smile-ai.modifyMultipleFiles",
+        "title": "Smile AI: Modify Multiple Files",
+        "category": "Smile AI",
+        "icon": "$(files)"
+      },
+      {
+        "command": "smile-ai.switchMode",
+        "title": "Switch Mode",
+        "category": "Smile AI",
+        "icon": "$(gear)"
+      },
+      {
+        "command": "smile-ai.interact",
+        "title": "Ask/Edit/Agent",
+        "category": "Smile AI",
+        "icon": "$(comment)"
       }
     ],
     "menus": {
@@ -129,17 +159,53 @@
       ],
       "view/item/context": [
         {
+          "command": "smile-ai.setImprovementPriority",
+          "when": "view == smile-ai.futureImprovements && viewItem == improvementNotePending",
+          "group": "1_modification"
+        },
+        {
           "command": "smile-ai.markImprovementDone",
           "when": "view == smile-ai.futureImprovements && viewItem == improvementNotePending",
-          "group": "inline@1"
+          "group": "2_status"
         },
         {
           "command": "smile-ai.dismissImprovement",
           "when": "view == smile-ai.futureImprovements && viewItem == improvementNotePending",
-          "group": "inline@2"
+          "group": "2_status"
         }
       ]
     },
+    "keybindings": [
+      {
+        "command": "smile-ai.noteImprovement",
+        "key": "ctrl+alt+n",
+        "mac": "cmd+alt+n",
+        "when": "editorTextFocus"
+      },
+      {
+        "command": "smile-ai.setImprovementPriority",
+        "key": "ctrl+alt+p",
+        "mac": "cmd+alt+p",
+        "when": "focusedView == smile-ai.futureImprovements"
+      },
+      {
+        "command": "smile-ai.modifyMultipleFiles",
+        "key": "ctrl+alt+m",
+        "mac": "cmd+alt+m",
+        "when": "editorTextFocus"
+      },
+      {
+        "command": "smile-ai.interact",
+        "key": "ctrl+shift+i",
+        "mac": "cmd+shift+i",
+        "when": "editorTextFocus"
+      },
+      {
+        "command": "smile-ai.switchMode",
+        "key": "ctrl+shift+m",
+        "mac": "cmd+shift+m"
+      }
+    ],
     "configuration": {
       "title": "Smile AI",
       "properties": {
@@ -203,6 +269,10 @@
                 "type": "number",
                 "default": 0.7,
                 "description": "Temperature for responses"
+              },
+              "embeddingModelName": {
+                "type": "string",
+                "description": "(Optional) Name of the embedding model to use with this provider (e.g., 'nomic-embed-text' for Ollama). If empty, the main modelName might be tried."
               }
             }
           }
@@ -283,6 +353,12 @@
               "description": "Move to previous suggestion"
             }
           }
+        },
+        "smile-ai.indexing.generateEmbeddings": {
+          "type": "boolean",
+          "scope": "resource",
+          "default": false,
+          "description": "Enable generation and storage of embeddings for code symbols during indexing. Requires a compatible embedding model (e.g., Ollama) and significantly increases indexing time."
         }
       }
     }
@@ -299,7 +375,9 @@
     "test": "jest",
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage",
-    "test:debug": "node --inspect-brk node_modules/.bin/jest --runInBand"
+    "test:debug": "node --inspect-brk node_modules/.bin/jest --runInBand",
+    "build": "tsc -p ./",
+    "dev": "tsc -watch -p ./"
   },
   "devDependencies": {
     "@types/diff": "^7.0.1",
