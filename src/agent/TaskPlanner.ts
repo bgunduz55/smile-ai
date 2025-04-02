@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import { v4 as uuidv4 } from 'uuid';
-import { Task, TaskType, TaskStatus, TaskPriority, TaskMetadata } from './types';
-import { FileAnalyzer, FileContext, FileType } from '../utils/FileAnalyzer';
+import { Task, TaskType, TaskStatus, TaskPriority } from './types';
+import { FileAnalyzer, FileContext } from '../utils/FileAnalyzer';
 import { CodeAnalyzer, CodeAnalysis } from '../utils/CodeAnalyzer';
 import { AIEngine } from '../ai-engine/AIEngine';
 
@@ -25,7 +25,7 @@ export class TaskPlanner {
 
         // Dosya ve kod analizini yap
         const fileContext = await this.fileAnalyzer.analyzeFile(editor.document.uri);
-        const codeAnalysis = await this.codeAnalyzer.analyzeCode(editor.document, fileContext);
+        const codeAnalysis = await this.codeAnalyzer.analyzeCode(editor.document.uri, fileContext);
 
         // AI'dan görev analizi iste
         const taskAnalysis = await this.analyzeTaskWithAI(description, fileContext, codeAnalysis);
@@ -37,11 +37,6 @@ export class TaskPlanner {
             description: description,
             status: TaskStatus.PENDING,
             priority: taskAnalysis.priority,
-            metadata: {
-                fileContext,
-                codeAnalysis,
-                taskAnalysis
-            },
             created: Date.now(),
             updated: Date.now()
         };

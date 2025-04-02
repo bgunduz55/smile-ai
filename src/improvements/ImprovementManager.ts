@@ -50,7 +50,7 @@ export class ImprovementManager {
         return ImprovementManager.instance;
     }
 
-    public addNote(content: string, context?: ImprovementNoteContext, isAIGenerated: boolean = false, priority: 'high' | 'medium' | 'low' | 'none' = 'medium'): ImprovementNote {
+    public addNote(content: string, context?: ImprovementNoteContext, priority: 'high' | 'medium' | 'low' | 'none' = 'medium'): ImprovementNote {
         const note: ImprovementNote = {
             id: this.generateId(),
             content,

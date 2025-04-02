@@ -2,9 +2,11 @@ import * as vscode from 'vscode';
 import { Task, TaskType, TaskResult, TaskExecutor } from '../types';
 import { CodeAnalysis, CodeMetrics } from '../../utils/CodeAnalyzer';
 import { AIEngine } from '../../ai-engine/AIEngine';
-import { CodebaseIndex, SymbolInfo, ReferenceLocation } from '../../indexing/CodebaseIndex';
+import { BaseExecutor } from './BaseExecutor';
+import { SymbolInfo } from '../../indexing/CodebaseIndex';
 import { ImprovementManager } from '../../utils/ImprovementManager';
 import { ImprovementNoteContext } from '../types';
+import { CodebaseIndexer } from '../../indexing/CodebaseIndexer';
 
 function getSymbolKindName(kind: vscode.SymbolKind): string {
     switch (kind) {
@@ -91,12 +93,11 @@ interface RefactoringChanges {
     }[];
 }
 
-export class RefactoringExecutor implements TaskExecutor {
-    private aiEngine: AIEngine;
-    private codebaseIndexer: CodebaseIndex;
+export class RefactoringExecutor extends BaseExecutor implements TaskExecutor {
+    private codebaseIndexer: CodebaseIndexer;
 
-    constructor(aiEngine: AIEngine, codebaseIndexer: CodebaseIndex) {
-        this.aiEngine = aiEngine;
+    constructor(aiEngine: AIEngine, codebaseIndexer: CodebaseIndexer) {
+        super(aiEngine);
         this.codebaseIndexer = codebaseIndexer;
     }
 
@@ -200,7 +201,7 @@ export class RefactoringExecutor implements TaskExecutor {
         }
 
         // --- Find References --- 
-        let references: ReferenceLocation[] = [];
+        let references: vscode.Location[] = [];
         if (targetSymbol) {
             references = this.codebaseIndexer.findReferences(targetSymbol);
             console.log(`Found ${references.length} references for symbol ${targetSymbol.name}`);
@@ -270,7 +271,7 @@ export class RefactoringExecutor implements TaskExecutor {
         codeSnippet: string, 
         analysis: CodeAnalysis, 
         fileContext: any,
-        references: ReferenceLocation[]
+        references: vscode.Location[]
     ): string {
         const metrics = this.formatMetrics(analysis.metrics);
         const suggestions = analysis.suggestions
@@ -283,7 +284,7 @@ export class RefactoringExecutor implements TaskExecutor {
             referencesSection = '\nKnown Usages (Locations of potential references):\n';
             // Group by file path for readability
             const refsByFile = references.reduce((acc, ref) => {
-                (acc[ref.filePath] = acc[ref.filePath] || []).push(ref.startLine);
+                (acc[ref.uri.fsPath] = acc[ref.uri.fsPath] || []).push(ref.range.start.line);
                 return acc;
             }, {} as Record<string, number[]>);
 

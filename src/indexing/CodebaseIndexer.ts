@@ -1,7 +1,9 @@
 import { CodebaseIndex } from './CodebaseIndex';
+import { AIEngine } from '../ai-engine/AIEngine';
 
 export class CodebaseIndexer extends CodebaseIndex {
     private static indexerInstance: CodebaseIndexer;
+    protected aiEngine?: AIEngine;
 
     private constructor() {
         super();
@@ -13,4 +15,8 @@ export class CodebaseIndexer extends CodebaseIndex {
         }
         return CodebaseIndexer.indexerInstance;
     }
-} 
+
+    public setAIEngine(aiEngine: AIEngine): void {
+        this.aiEngine = aiEngine;
+    }
+}

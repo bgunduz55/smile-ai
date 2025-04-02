@@ -30,7 +30,7 @@ export interface AIRequest {
 
 export interface AIResponse {
     message: string;
-    edit?: vscode.WorkspaceEdit;
+    workspaceEdit?: vscode.WorkspaceEdit;
     success?: boolean;
     error?: string;
     codeChanges?: Array<{
@@ -41,22 +41,27 @@ export interface AIResponse {
         };
         newText: string;
     }>;
-}
-
-export interface AIContext {
-    messages: AIMessage[];
-    metadata?: Record<string, any>;
+    usage?: {
+        promptTokens?: number;
+        completionTokens?: number;
+        totalTokens?: number;
+    };
 }
 
 export interface AIMessage {
     role: 'user' | 'assistant' | 'system';
     content: string;
-    timestamp: number;
+    timestamp?: number;
     context?: {
         file?: string;
         selection?: string;
         codebase?: any;
     };
+}
+
+export interface AIContext {
+    messages: AIMessage[];
+    metadata?: Record<string, any>;
 }
 
 export interface AIResult {

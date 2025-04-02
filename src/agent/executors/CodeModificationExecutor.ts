@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import { BaseExecutor } from './BaseExecutor';
 import { AIEngine } from '../../ai-engine/AIEngine';
-import { Task, TaskType, ModificationPlan, TaskExecutor, TaskResult, StatusCallbacks } from '../types';
+import { Task, TaskType, ModificationPlan, TaskExecutor, TaskResult } from '../types';
 import { AIMessage } from '../../ai-engine/types';
 
 export interface ExecutionContext {
@@ -15,8 +15,7 @@ export interface ExecutionContext {
 
 export class CodeModificationExecutor extends BaseExecutor implements TaskExecutor {
     constructor(
-        aiEngine: AIEngine,
-        private readonly statusCallbacks: StatusCallbacks
+        protected readonly aiEngine: AIEngine
     ) {
         super(aiEngine);
     }
@@ -64,23 +63,6 @@ export class CodeModificationExecutor extends BaseExecutor implements TaskExecut
             description: response.message,
             modifications: []  // You'll need to implement the actual parsing logic
         };
-    }
-
-    private async showModificationPreview(plan: ModificationPlan): Promise<boolean> {
-        const preview = this.generatePreview(plan);
-        const choice = await vscode.window.showInformationMessage(
-            'Review the following modifications:',
-            { modal: true, detail: preview },
-            'Apply',
-            'Cancel'
-        );
-        return choice === 'Apply';
-    }
-
-    private generatePreview(plan: ModificationPlan): string {
-        return `${plan.description}\n\nModifications:\n${plan.modifications
-            .map(mod => `- ${mod.description} in ${mod.location.filePath}:${mod.location.startLine}`)
-            .join('\n')}`;
     }
 
     private async applyModification(plan: ModificationPlan): Promise<boolean> {

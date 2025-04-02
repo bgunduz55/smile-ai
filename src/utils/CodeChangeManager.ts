@@ -12,16 +12,14 @@ export interface CodeChange {
 export class CodeChangeManager {
     private static instance: CodeChangeManager;
     private changes: Map<string, CodeChange>;
-    private context: vscode.ExtensionContext;
 
-    private constructor(context: vscode.ExtensionContext) {
-        this.context = context;
+    private constructor() {
         this.changes = new Map();
     }
 
-    public static getInstance(context: vscode.ExtensionContext): CodeChangeManager {
+    public static getInstance(): CodeChangeManager {
         if (!CodeChangeManager.instance) {
-            CodeChangeManager.instance = new CodeChangeManager(context);
+            CodeChangeManager.instance = new CodeChangeManager();
         }
         return CodeChangeManager.instance;
     }
