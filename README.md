@@ -72,6 +72,7 @@ ollama pull codellama
 ```
 
 # To compile and create a vsix file
+
 npm run compile ; vsce package
 
 ## 🤝 Katkıda Bulunma
