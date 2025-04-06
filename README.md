@@ -71,7 +71,7 @@ ollama pull codellama
 # Extension ayarlarından AI model tercihlerinizi yapılandırın
 ```
 
-# To compile and create a vsix file
+# To compile and generate a vsix file
 
 npm run compile ; vsce package
 
