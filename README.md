@@ -4,81 +4,59 @@
 
 ## 🎯 Vision
 
-Smile AI, VSCode için geliştirilmiş, tamamen yerel AI modelleri kullanarak çalışan güçlü bir kod asistanıdır. Cursor benzeri kapsamlı özelliklere sahip olan bu asistan, internet bağlantısı gerektirmeden çalışabilir ve yerel AI modelleri (Ollama, LM Studio vb.) kullanarak geliştiricilere coding assistant desteği sağlar.
+Smile AI is a powerful code assistant developed for VSCode that operates using completely local AI models. Similar to Cursor with comprehensive features, this assistant can work without requiring an internet connection and provides coding assistant support using local AI models (Ollama, LM Studio, etc.).
 
-## 🌟 Temel Özellikler
+## 🌟 Core Features
 
-### 🤖 Local AI Entegrasyonu
-- Ollama ve LM Studio gibi yerel AI modelleri ile entegrasyon
-- Özelleştirilebilir model seçimi ve yapılandırması
-- Düşük kaynak tüketimi için optimize edilmiş AI kullanımı
+### 🤖 Local AI Integration
+- Integration with local AI models like Ollama and LM Studio
+- Customizable model selection and configuration 
+- Optimized AI usage for low resource consumption
 
-### 💡 Akıllı Kod Asistanı
-- Kod önerileri ve tamamlama
-- Kod açıklama ve dokümantasyon oluşturma
-- Bug tespiti ve çözüm önerileri
-- Kod refactoring önerileri
-- Test senaryoları oluşturma
+### 💡 Smart Code Assistant
+- Code suggestions and completion
+- Code explanation and documentation generation
+- Bug detection and solution suggestions
+- Code refactoring suggestions
+- Test scenario creation
 
-### 🔄 Agent Yetenekleri
-- Karmaşık görevleri alt görevlere bölme
-- Çoklu dosya düzenleme ve yönetimi
-- Akıllı bağlam anlama ve sürdürme
-- Değişiklik önerilerini preview olarak gösterme
-- Adım adım kod değişikliklerini uygulama
+### 🔄 Agent Capabilities
+- Breaking complex tasks into subtasks
+- Multi-file editing and management
+- Smart context understanding and maintenance
+- Showing change suggestions as previews
+- Step-by-step code change implementation
 
-### 🛠️ Geliştirici Deneyimi
-- Sezgisel kullanıcı arayüzü
-- Özelleştirilebilir klavye kısayolları
-- Detaylı değişiklik önizlemeleri
-- Gerçek zamanlı kod analizi
-- Çoklu dil desteği
+### 🛠️ Developer Experience
+- Intuitive user interface
+- Customizable keyboard shortcuts
+- Detailed change previews
+- Real-time code analysis
+- Multi-language support
 
-## 🔧 Teknik Mimari
+## 🔧 Technical Architecture
 
-### AI Motor Katmanı
-- Local LLM entegrasyonu (Ollama, LM Studio)
-- Model yönetimi ve optimizasyonu
-- Bağlam yönetimi ve hafıza optimizasyonu
+### AI Engine Layer
+- Local LLM integration (Ollama, LM Studio)
+- Model management and optimization
+- Context management and memory optimization
 
-### Agent Sistemi
-- Görev planlama ve yönetimi
-- Alt görev oluşturma ve izleme
-- Dosya sistemi entegrasyonu
-- Kod analiz motoru
+### Agent System
+- Task planning and management
+- Subtask creation and monitoring
+- File system integration
+- Code analysis engine
 
-### VSCode Entegrasyonu
-- Extension API entegrasyonu
-- Editör servisleri
-- Dil servisleri
-- Diagnostik servisleri
+### VSCode Integration
+- Extension API integration
+- Editor services
+- Language services
+- Diagnostic services
 
-### Kullanıcı Arayüzü
-- Komut paleti entegrasyonu
-- Webview panelleri
-- Durum çubuğu bildirimleri
-- Kod lens ve dekorasyon desteği
+### User Interface
+- Command palette integration
+- Webview panels
+- Status bar notifications
+- Code lens and decoration support
 
-## 🚀 Başlangıç
-
-```bash
-# Extension'ı yükleyin
-code --install-extension smile-ai
-
-# Local AI modelini hazırlayın (Ollama örneği)
-ollama pull codellama
-
-# Extension ayarlarından AI model tercihlerinizi yapılandırın
-```
-
-# To compile and generate a vsix file
-
-npm run compile ; vsce package
-
-## 🤝 Katkıda Bulunma
-
-Projeye katkıda bulunmak için lütfen [CONTRIBUTING.md](CONTRIBUTING.md) dosyasını inceleyin.
-
-## 📄 Lisans
-
-Bu proje [MIT](LICENSE) lisansı altında lisanslanmıştır.
+## 🚀 Getting Started
