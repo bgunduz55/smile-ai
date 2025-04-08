@@ -28,6 +28,13 @@ export interface FileIndexData {
     error?: string;
 }
 
+export interface IndexedFile {
+    uri: vscode.Uri;
+    path: string;
+    context: any;
+    analysis: any;
+}
+
 /**
  * Manages the indexing of the codebase to understand its structure,
  * symbols, and relationships.
@@ -36,8 +43,15 @@ export class CodebaseIndex {
     protected static instance: CodebaseIndex;
     protected indexData: Map<string, FileIndexData> = new Map();
     protected isIndexing: boolean = false;
+    private files: Map<string, IndexedFile>;
+    private symbols: Map<string, vscode.SymbolInformation[]>;
+    private dependencies: Map<string, string[]>;
 
-    protected constructor() {}
+    protected constructor() {
+        this.files = new Map();
+        this.symbols = new Map();
+        this.dependencies = new Map();
+    }
 
     public static getInstance(): CodebaseIndex {
         if (!CodebaseIndex.instance) {
@@ -653,5 +667,79 @@ export class CodebaseIndex {
             default:
                 return vscode.SymbolKind.Variable;
         }
+    }
+
+    public addFile(file: IndexedFile): void {
+        this.files.set(file.path, file);
+    }
+
+    public getFile(path: string): IndexedFile | undefined {
+        return this.files.get(path);
+    }
+
+    public getAllFiles(): IndexedFile[] {
+        return Array.from(this.files.values());
+    }
+
+    public addSymbols(filePath: string, symbols: vscode.SymbolInformation[]): void {
+        this.symbols.set(filePath, symbols);
+    }
+
+    public getSymbols(filePath: string): vscode.SymbolInformation[] | undefined {
+        return this.symbols.get(filePath);
+    }
+
+    public addDependencies(filePath: string, deps: string[]): void {
+        this.dependencies.set(filePath, deps);
+    }
+
+    public getDependencies(filePath: string): string[] | undefined {
+        return this.dependencies.get(filePath);
+    }
+
+    public clear(): void {
+        this.files.clear();
+        this.symbols.clear();
+        this.dependencies.clear();
+    }
+
+    public getFilesWithSymbol(symbolName: string): IndexedFile[] {
+        const result: IndexedFile[] = [];
+        this.symbols.forEach((symbols, filePath) => {
+            if (symbols.some(s => s.name === symbolName)) {
+                const file = this.files.get(filePath);
+                if (file) {
+                    result.push(file);
+                }
+            }
+        });
+        return result;
+    }
+
+    public getRelatedFiles(filePath: string): IndexedFile[] {
+        const result: Set<IndexedFile> = new Set();
+        
+        // Add direct dependencies
+        const deps = this.dependencies.get(filePath);
+        if (deps) {
+            deps.forEach(dep => {
+                const file = this.files.get(dep);
+                if (file) {
+                    result.add(file);
+                }
+            });
+        }
+
+        // Add files that depend on this file
+        this.dependencies.forEach((deps, path) => {
+            if (deps.includes(filePath)) {
+                const file = this.files.get(path);
+                if (file) {
+                    result.add(file);
+                }
+            }
+        });
+
+        return Array.from(result);
     }
 }
