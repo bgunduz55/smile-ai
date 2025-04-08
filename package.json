@@ -40,7 +40,7 @@
           "icon": "resources/smile-ai-logo.png"
         },
         {
-          "type": "treeView",
+          "type": "tree",
           "id": "smile-ai.futureImprovements",
           "name": "Future Improvements",
           "icon": "resources/lightbulb.svg"
@@ -405,6 +405,7 @@
     "@types/uuid": "^10.0.0",
     "axios": "^1.6.2",
     "diff": "^5.1.0",
+    "ignore": "^5.3.1",
     "marked": "^11.2.0",
     "smile-ai": "file:",
     "uuid": "^11.0.5",
