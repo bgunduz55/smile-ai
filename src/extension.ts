@@ -16,6 +16,8 @@ import { DebuggingExecutor } from './agent/executors/DebuggingExecutor';
 import { OptimizationExecutor } from './agent/executors/OptimizationExecutor';
 import { SecurityExecutor } from './agent/executors/SecurityExecutor';
 import { ReviewExecutor } from './agent/executors/ReviewExecutor';
+import { ImprovementTreeProvider } from './views/ImprovementTreeProvider';
+import { AIAssistantPanel } from './views/AIAssistantPanel';
 
 // Export the main extension class
 export class SmileAIExtension {
@@ -26,6 +28,7 @@ export class SmileAIExtension {
     private codebaseIndexer: CodebaseIndexer;
     private statusBarItem: vscode.StatusBarItem;
     private taskExecutors: Map<TaskType, TaskExecutor>;
+    private improvementProvider: ImprovementTreeProvider;
 
     constructor(context: vscode.ExtensionContext) {
         this.context = context;
@@ -47,7 +50,33 @@ export class SmileAIExtension {
         // Initialize managers and providers
         ImprovementManager.initialize(this.context);
         
+        // Initialize tree view provider
+        this.improvementProvider = new ImprovementTreeProvider(ImprovementManager.getInstance());
+        vscode.window.registerTreeDataProvider('smile-ai.futureImprovements', this.improvementProvider);
+
+        // Register webview provider
+        context.subscriptions.push(
+            vscode.window.registerWebviewViewProvider('smile-ai.assistant', {
+                resolveWebviewView: (webviewView: vscode.WebviewView) => {
+                    AIAssistantPanel.show(webviewView, context, this.aiEngine, this.codebaseIndexer);
+                }
+            })
+        );
+        
         this.taskExecutors = new Map();
+
+        // Register commands
+        context.subscriptions.push(
+            vscode.commands.registerCommand('smile-ai.openChat', () => {
+                vscode.commands.executeCommand('workbench.view.extension.smile-ai');
+            }),
+            vscode.commands.registerCommand('smile-ai.openComposer', () => {
+                vscode.commands.executeCommand('workbench.view.extension.smile-ai');
+            }),
+            vscode.commands.registerCommand('smile-ai.addModel', () => {
+                vscode.window.showInformationMessage('Add Model functionality coming soon!');
+            })
+        );
         
         this.initializeComponents();
     }

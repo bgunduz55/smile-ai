@@ -244,94 +244,141 @@ export class AIAssistantPanel {
         };
     }
 
-    private async handleUserMessage(text: string) {
+    private async handleUserMessage(text: string): Promise<void> {
+        // Parse @ mentions for file/folder attachments
+        const attachments = this.parseAttachments(text);
+        
+        // Process attachments
+        for (const attachment of attachments) {
+            if (attachment.type === 'file') {
+                this.codebaseIndexer.attachFile(attachment.path);
+            } else {
+                this.codebaseIndexer.attachFolder(attachment.path);
+            }
+        }
+
+        // Remove attachment syntax from message
+        const cleanMessage = text.replace(/@(file|folder):"[^"]*"/g, '').trim();
+
+        // Add user message to chat
+        this.chatMessages.push({
+            role: 'user',
+            content: cleanMessage,
+            attachments: attachments
+        });
+
+        // Update UI
+        this.updateChatView();
+
+        // Process with AI
+        await this.processWithAI(cleanMessage, attachments);
+    }
+
+    private parseAttachments(text: string): Array<{type: 'file' | 'folder', path: string}> {
+        const attachments: Array<{type: 'file' | 'folder', path: string}> = [];
+        const regex = /@(file|folder):"([^"]*)"/g;
+        let match;
+
+        while ((match = regex.exec(text)) !== null) {
+            const type = match[1] as 'file' | 'folder';
+            const path = match[2];
+            
+            // Convert to absolute path if relative
+            const absolutePath = path.startsWith('/') ? path : 
+                vscode.workspace.workspaceFolders?.[0] ? 
+                    path.join(vscode.workspace.workspaceFolders[0].uri.fsPath, path) : 
+                    path;
+
+            attachments.push({
+                type,
+                path: absolutePath
+            });
+        }
+
+        return attachments;
+    }
+
+    private async processWithAI(message: string, attachments: Array<{type: 'file' | 'folder', path: string}>): Promise<void> {
         try {
-            const activeModel = this.modelManager.getActiveModel();
-            if (!activeModel) {
-                throw new Error('Lütfen önce bir AI model seçin');
-            }
+            // Show loading state
+            this.webviewView.webview.postMessage({ command: 'showLoading' });
 
-            const context = await this.getCurrentContext();
-            const userMessage: Message = {
-                role: 'user',
-                content: text,
-                timestamp: Date.now(),
-                context
-            };
+            // Get context from attached files
+            const context = await this.getContextFromAttachments(attachments);
 
-            if (this.currentView === 'chat') {
-                if (!this.currentChatSession) {
-                    const session: ChatSession = {
-                        id: `chat_${Date.now()}`,
-                        title: text.length > 50 ? text.substring(0, 47) + '...' : text,
-                        messages: [],
-                        created: Date.now(),
-                        lastUpdated: Date.now()
-                    };
-                    await this.chatHistoryManager.addSession(session);
-                    this.currentChatSession = session;
-                } else {
-                    this.currentChatSession.title = text.length > 50 ? text.substring(0, 47) + '...' : text;
-                    await this.chatHistoryManager.updateSessionTitle(this.currentChatSession.id, this.currentChatSession.title);
-                }
-                this.chatMessages.push(userMessage);
-                this.updateMessages('chat', this.chatMessages);
-                if (this.currentChatSession) {
-                    await this.chatHistoryManager.addMessage(this.currentChatSession.id, userMessage);
-                }
-            } else if (this.currentView === 'composer') {
-                if (!this.currentComposerSession) {
-                    const session: ChatSession = {
-                        id: `composer_${Date.now()}`,
-                        title: text.length > 50 ? text.substring(0, 47) + '...' : text,
-                        messages: [],
-                        created: Date.now(),
-                        lastUpdated: Date.now()
-                    };
-                    await this.chatHistoryManager.addSession(session);
-                    this.currentComposerSession = session;
-                } else {
-                    this.currentComposerSession.title = text.length > 50 ? text.substring(0, 47) + '...' : text;
-                    await this.chatHistoryManager.updateSessionTitle(this.currentComposerSession.id, this.currentComposerSession.title);
-                }
-                this.composerMessages.push(userMessage);
-                this.updateMessages('composer', this.composerMessages);
-                if (this.currentComposerSession) {
-                    await this.chatHistoryManager.addMessage(this.currentComposerSession.id, userMessage);
-                }
-            }
+            // Get AI response
+            const response = await this.aiEngine.processMessage(message, {
+                context,
+                attachments,
+                codebaseIndex: this.codebaseIndexer.getIndex()
+            });
 
-            const request: AIRequest = {
-                messages: this.currentView === 'chat' ? this.chatMessages : this.composerMessages
-            };
-
-            const response = await this.aiEngine.generateResponse(request);
-            const aiMessage: Message = {
+            // Add AI response to chat
+            this.chatMessages.push({
                 role: 'assistant',
-                content: response.message,
-                timestamp: Date.now(),
-                context
-            };
+                content: response
+            });
 
-            if (this.currentView === 'chat') {
-                this.chatMessages.push(aiMessage);
-                this.updateMessages('chat', this.chatMessages);
-                if (this.currentChatSession) {
-                    await this.chatHistoryManager.addMessage(this.currentChatSession.id, aiMessage);
-                }
-                this.scrollToBottom('messageContainer');
-            } else if (this.currentView === 'composer') {
-                this.composerMessages.push(aiMessage);
-                this.updateMessages('composer', this.composerMessages);
-                if (this.currentComposerSession) {
-                    await this.chatHistoryManager.addMessage(this.currentComposerSession.id, aiMessage);
-                }
-                this.scrollToBottom('composerContainer');
-            }
-
+            // Update UI
+            this.updateChatView();
         } catch (error) {
-            console.error('Message handling error:', error);
-            vscode.window.showErrorMessage('Mesaj işlenirken bir hata oluştu');
+            console.error('Error processing message:', error);
+            this.webviewView.webview.postMessage({ 
+                command: 'showError',
+                error: 'Failed to process message. Please try again.'
+            });
+        } finally {
+            this.webviewView.webview.postMessage({ command: 'hideLoading' });
+        }
+    }
+
+    private async getContextFromAttachments(attachments: Array<{type: 'file' | 'folder', path: string}>): Promise<any> {
+        const context: any = {
+            files: {},
+            folders: {}
+        };
+
+        for (const attachment of attachments) {
+            if (attachment.type === 'file') {
+                try {
+                    const uri = vscode.Uri.file(attachment.path);
+                    const fileContent = await vscode.workspace.fs.readFile(uri);
+                    context.files[attachment.path] = {
+                        content: fileContent.toString(),
+                        analysis: await this.analyzeFile(uri)
+                    };
+                } catch (error) {
+                    console.warn(`Failed to read file ${attachment.path}:`, error);
+                }
+            } else {
+                try {
+                    const uri = vscode.Uri.file(attachment.path);
+                    const entries = await vscode.workspace.fs.readDirectory(uri);
+                    context.folders[attachment.path] = {
+                        entries: entries.map(([name, type]) => ({
+                            name,
+                            type: type === vscode.FileType.Directory ? 'directory' : 'file'
+                        }))
+                    };
+                } catch (error) {
+                    console.warn(`Failed to read folder ${attachment.path}:`, error);
+                }
+            }
+        }
+
+        return context;
+    }
+
+    private async analyzeFile(uri: vscode.Uri): Promise<any> {
+        try {
+            const document = await vscode.workspace.openTextDocument(uri);
+            return {
+                symbols: await vscode.commands.executeCommand('vscode.executeDocumentSymbolProvider', uri),
+                diagnostics: vscode.languages.getDiagnostics(uri)
+            };
+        } catch (error) {
+            console.warn(`Failed to analyze file ${uri.fsPath}:`, error);
+            return null;
         }
     }
 
