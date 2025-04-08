@@ -47,7 +47,7 @@ export class CodebaseIndex {
     private symbols: Map<string, vscode.SymbolInformation[]>;
     private dependencies: Map<string, string[]>;
 
-    protected constructor() {
+    public constructor() {
         this.files = new Map();
         this.symbols = new Map();
         this.dependencies = new Map();

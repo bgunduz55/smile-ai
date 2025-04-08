@@ -64,7 +64,7 @@ export class CodebaseIndexer {
             location: vscode.ProgressLocation.Notification,
             title: "Indexing workspace...",
             cancellable: true
-        }, async (progress, token) => {
+        }, async (progress) => {
             try {
                 const workspaceFolders = vscode.workspace.workspaceFolders;
                 if (!workspaceFolders) {
@@ -161,5 +161,29 @@ export class CodebaseIndexer {
         this.index.clear();
         this.attachedFiles.clear();
         this.attachedFolders.clear();
+    }
+
+    public async findSymbolAtPosition(uri: vscode.Uri, position: vscode.Position): Promise<vscode.SymbolInformation | undefined> {
+        const symbols = await vscode.commands.executeCommand<vscode.SymbolInformation[]>(
+            'vscode.executeDocumentSymbolProvider',
+            uri
+        );
+
+        if (!symbols) return undefined;
+
+        return symbols.find(symbol => {
+            const range = symbol.location.range;
+            return range.contains(position);
+        });
+    }
+
+    public async findReferences(uri: vscode.Uri, position: vscode.Position): Promise<vscode.Location[]> {
+        const references = await vscode.commands.executeCommand<vscode.Location[]>(
+            'vscode.executeReferenceProvider',
+            uri,
+            position
+        );
+
+        return references || [];
     }
 }
