@@ -1,6 +1,7 @@
 import axios from 'axios';
 import { AIMessage, AIRequest, AIResponse } from './types';
 import { CodebaseIndex } from '../indexing/CodebaseIndex';
+import * as vscode from 'vscode';
 
 export interface AIEngineConfig {
     provider: {
@@ -262,8 +263,17 @@ export class AIEngine {
         const embeddingModelName = this.config.embeddingModelName || provider.modelName;
         const endpoint = provider.apiEndpoint;
 
+        // Skip embeddings if the indexing.generateEmbeddings setting is false
+        const config = vscode.workspace.getConfiguration('smile-ai');
+        const generateEmbeddings = config.get<boolean>('indexing.generateEmbeddings');
+        if (!generateEmbeddings) {
+            console.log('Embeddings generation is disabled in settings, skipping.');
+            return [];
+        }
+
         if (provider.name !== 'ollama') {
-            throw new Error(`Embeddings are currently only supported for Ollama provider, not ${provider.name}.`);
+            console.warn(`Embeddings are currently only supported for Ollama provider, not ${provider.name}. Continuing without embeddings.`);
+            return [];
         }
 
         const embeddingEndpoint = `${endpoint}/api/embeddings`;
@@ -282,7 +292,8 @@ export class AIEngine {
             if (response.data?.embedding && Array.isArray(response.data.embedding)) {
                 return response.data.embedding;
             } else {
-                throw new Error('Invalid response format received from embedding endpoint.');
+                console.warn('Invalid response format received from embedding endpoint. Continuing without embeddings.');
+                return [];
             }
         } catch (error: any) {
             console.error('Error generating embeddings:', error);
@@ -294,17 +305,30 @@ export class AIEngine {
                 const dataError = error.response.data?.error;
                 userMessage = `Error from ${providerName} embedding endpoint (Status ${status}): ${dataError || error.response.statusText}.`;
                 if (status === 404) {
-                     userMessage += `\nPlease ensure embedding model '${embeddingModelName}' is available/pulled in Ollama at ${endpoint}.`;
+                    userMessage += `\nPlease ensure embedding model '${embeddingModelName}' is available/pulled in Ollama at ${endpoint}.`;
+                    // Log the error but don't throw - let the extension continue without embeddings
+                    console.warn(userMessage + ' Continuing without embeddings.');
+                    return [];
                 } else {
                     userMessage += `\nPlease check your Ollama setup and model name.`;
                 }
             } else if (error.request) {
                 userMessage = `Could not connect to ${providerName} at ${endpoint} for embeddings.`;
                 userMessage += `\nPlease ensure the ${providerName} service is running.`;
+                console.warn(userMessage + ' Continuing without embeddings.');
+                return [];
             } else {
                 userMessage = `Failed to communicate with ${providerName} for embeddings: ${error.message}.`;
             }
-            throw new Error(userMessage);
+            
+            // For critical errors, still throw
+            if (error.message.includes('critical')) {
+                throw new Error(userMessage);
+            }
+            
+            // Otherwise log and continue without embeddings
+            console.warn(userMessage + ' Continuing without embeddings.');
+            return [];
         }
     }
 

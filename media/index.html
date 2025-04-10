@@ -23,6 +23,13 @@
                 Settings
             </button>
             <div style="flex: 1"></div>
+            <div class="chat-mode">
+                <select id="chatMode">
+                    <option value="chat">Chat</option>
+                    <option value="agent">Agent</option>
+                    <option value="ask">Ask</option>
+                </select>
+            </div>
             <button class="toolbar-button" id="addModel">
                 <i class="codicon codicon-add"></i>
                 Add AI Model
@@ -57,16 +64,34 @@
                         Test kodunu dahil et
                     </label>
                 </div>
-                <textarea
-                    class="input-box"
-                    id="messageInput"
-                    placeholder="Kod üretmek için talimatlarınızı yazın... (Enter ile gönder)"
-                    rows="1"
-                ></textarea>
-                <button class="send-button" id="sendButton">
-                    <i class="codicon codicon-send"></i>
-                    Send
-                </button>
+                
+                <div class="attachment-toolbar">
+                    <button class="attachment-button" id="attachFile">
+                        <i class="codicon codicon-file-add"></i>
+                        Dosya Ekle
+                    </button>
+                    <button class="attachment-button" id="attachFolder">
+                        <i class="codicon codicon-folder-add"></i>
+                        Klasör Ekle
+                    </button>
+                </div>
+                
+                <div class="current-attachments">
+                    <!-- Attached files/folders will be shown here -->
+                </div>
+                
+                <div class="input-row">
+                    <textarea
+                        class="input-box"
+                        id="messageInput"
+                        placeholder="Ask, search, build anything... (Enter ile gönder, Shift+Enter ile yeni satır)"
+                        rows="1"
+                    ></textarea>
+                    <button class="send-button" id="sendButton">
+                        <i class="codicon codicon-send"></i>
+                        Send
+                    </button>
+                </div>
             </div>
         </div>
     </div>

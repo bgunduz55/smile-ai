@@ -10,7 +10,7 @@
     "url": "https://github.com/bgunduz55/smile-ai"
   },
   "engines": {
-    "vscode": "^1.85.0"
+    "vscode": "^1.99.0"
   },
   "categories": [
     "Programming Languages",
@@ -44,6 +44,18 @@
           "id": "smile-ai.futureImprovements",
           "name": "Future Improvements",
           "icon": "resources/lightbulb.svg"
+        },
+        {
+          "type": "tree",
+          "id": "smile-ai-codebase",
+          "name": "Codebase",
+          "icon": "resources/folder.svg"
+        },
+        {
+          "type": "tree",
+          "id": "smile-ai-improvements",
+          "name": "Improvements",
+          "icon": "resources/improvements.svg" 
         }
       ]
     },
@@ -222,12 +234,13 @@
           "type": "array",
           "default": [
             {
-              "name": "CodeLlama",
+              "name": "gemma3-12b",
               "provider": "ollama",
-              "modelName": "codellama",
+              "modelName": "gemma3:12b",
               "apiEndpoint": "http://localhost:11434",
               "maxTokens": 2048,
-              "temperature": 0.7
+              "temperature": 0.7,
+              "embeddingModelName": "nomic-embed-text"
             }
           ],
           "description": "Configured AI models",
@@ -358,26 +371,21 @@
           "type": "boolean",
           "scope": "resource",
           "default": false,
-          "description": "Enable generation and storage of embeddings for code symbols during indexing. Requires a compatible embedding model (e.g., Ollama) and significantly increases indexing time."
+          "description": "Enable generation and storage of embeddings for code symbols during indexing. Requires a compatible embedding model (e.g., Ollama with 'nomic-embed-text') and significantly increases indexing time."
         }
       }
     }
   },
   "scripts": {
     "vscode:prepublish": "npm run package",
-    "compile": "webpack",
-    "watch": "webpack --watch",
-    "package": "webpack --mode production --devtool hidden-source-map",
+    "compile": "webpack --config webpack.config.js && webpack --config webpack.webview.config.js",
+    "watch": "webpack --watch --config webpack.config.js & webpack --watch --config webpack.webview.config.js",
+    "package": "webpack --mode production --devtool hidden-source-map --config webpack.config.js && webpack --mode production --devtool hidden-source-map --config webpack.webview.config.js",
     "compile-tests": "tsc -p . --outDir out",
     "watch-tests": "tsc -p . -w --outDir out",
     "pretest": "npm run compile-tests && npm run compile && npm run lint",
     "lint": "eslint src --ext ts",
-    "test": "jest",
-    "test:watch": "jest --watch",
-    "test:coverage": "jest --coverage",
-    "test:debug": "node --inspect-brk node_modules/.bin/jest --runInBand",
-    "build": "tsc -p ./",
-    "dev": "tsc -watch -p ./"
+    "test": "node ./out/test/runTest.js"
   },
   "devDependencies": {
     "@types/diff": "^7.0.1",
@@ -385,20 +393,23 @@
     "@types/jest": "^29.5.12",
     "@types/marked": "^5.0.2",
     "@types/mocha": "^10.0.6",
-    "@types/node": "20.x",
-    "@types/vscode": "^1.85.0",
+    "@types/node": "^20.17.30",
+    "@types/vscode": "^1.99.1",
     "@typescript-eslint/eslint-plugin": "^6.15.0",
     "@typescript-eslint/parser": "^6.15.0",
     "@vscode/test-electron": "^2.3.8",
+    "concurrently": "^9.1.2",
+    "css-loader": "^7.1.2",
     "eslint": "^8.56.0",
     "glob": "^10.3.10",
     "jest": "^29.7.0",
     "jest-environment-node": "^29.7.0",
     "mocha": "^10.2.0",
+    "style-loader": "^4.0.0",
     "ts-jest": "^29.1.2",
-    "ts-loader": "^9.5.1",
-    "typescript": "^5.3.3",
-    "webpack": "^5.89.0",
+    "ts-loader": "^9.5.2",
+    "typescript": "^5.8.3",
+    "webpack": "^5.99.5",
     "webpack-cli": "^5.1.4"
   },
   "dependencies": {

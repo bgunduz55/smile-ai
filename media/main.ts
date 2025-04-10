@@ -1,11 +1,15 @@
-declare const acquireVsCodeApi: () => any;
+declare const acquireVsCodeApi: () => {
+    postMessage: (message: any) => void;
+    getState: () => any;
+    setState: (state: any) => void;
+};
 
 const vscode = acquireVsCodeApi();
 
 // DOM Elements
-const messageInputElement = document.getElementById('messageInput') as HTMLTextAreaElement;
-const sendButtonElement = document.getElementById('sendButton') as HTMLButtonElement;
-const messagesContainerElement = document.getElementById('messages') as HTMLDivElement;
+const messageInput = document.getElementById('messageInput') as HTMLTextAreaElement;
+const sendButton = document.getElementById('sendButton') as HTMLButtonElement;
+const messagesContainer = document.getElementById('messages') as HTMLDivElement;
 const addModelButtonElement = document.getElementById('addModel') as HTMLButtonElement;
 const includeImportsElement = document.getElementById('includeImports') as HTMLInputElement;
 const includeTipsElement = document.getElementById('includeTips') as HTMLInputElement;
@@ -16,39 +20,53 @@ const fileAttachmentTemplateElement = document.getElementById('file-attachment-t
 const attachFileButtonElement = document.getElementById('attachFile') as HTMLButtonElement;
 const attachFolderButtonElement = document.getElementById('attachFolder') as HTMLButtonElement;
 const chatModeSelectElement = document.getElementById('chatMode') as HTMLSelectElement;
+const openChatButtonElement = document.getElementById('openChat') as HTMLButtonElement;
+const openComposerButtonElement = document.getElementById('openComposer') as HTMLButtonElement;
+const toolbarButtons = document.querySelectorAll('.toolbar-button[data-view]');
 
-if (!messageInputElement || !sendButtonElement || !messagesContainerElement || !addModelButtonElement || 
-    !includeImportsElement || !includeTipsElement || !includeTestsElement ||
-    !messageTemplateElement || !codeBlockTemplateElement || !fileAttachmentTemplateElement ||
-    !attachFileButtonElement || !attachFolderButtonElement || !chatModeSelectElement) {
-    throw new Error('Required DOM elements not found');
+// Check for missing required elements
+// We need to check specifically for the elements that are essential for functionality
+if (!messageInput || !sendButton || !messagesContainer) {
+    console.error('Essential DOM elements not found');
 }
 
 // Event Listeners
-messageInputElement.addEventListener('keydown', (e: KeyboardEvent) => {
+messageInput?.addEventListener('keypress', (e: KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault();
         sendMessage();
-    } else if (e.key === 'Enter' && e.shiftKey) {
-        // Allow multiline input with Shift+Enter
-        const start = messageInputElement.selectionStart;
-        const end = messageInputElement.selectionEnd;
-        const value = messageInputElement.value;
-        messageInputElement.value = value.substring(0, start) + '\n' + value.substring(end);
-        messageInputElement.selectionStart = messageInputElement.selectionEnd = start + 1;
-        e.preventDefault();
     }
 });
 
-sendButtonElement.addEventListener('click', sendMessage);
-addModelButtonElement.addEventListener('click', () => {
+sendButton?.addEventListener('click', sendMessage);
+addModelButtonElement?.addEventListener('click', () => {
     vscode.postMessage({ command: 'addModel' });
 });
 
+openChatButtonElement?.addEventListener('click', () => {
+    vscode.postMessage({ command: 'openChat' });
+});
+
+openComposerButtonElement?.addEventListener('click', () => {
+    vscode.postMessage({ command: 'openComposer' });
+});
+
+// Toolbar view switching
+toolbarButtons.forEach(button => {
+    button.addEventListener('click', () => {
+        const view = (button as HTMLElement).dataset.view;
+        if (view) {
+            toolbarButtons.forEach(btn => btn.classList.remove('active'));
+            button.classList.add('active');
+            vscode.postMessage({ command: 'switchView', view });
+        }
+    });
+});
+
 // Auto-resize textarea
-messageInputElement.addEventListener('input', () => {
-    messageInputElement.style.height = 'auto';
-    messageInputElement.style.height = `${messageInputElement.scrollHeight}px`;
+messageInput?.addEventListener('input', () => {
+    messageInput.style.height = 'auto';
+    messageInput.style.height = `${messageInput.scrollHeight}px`;
 });
 
 // File and folder attachment handling
@@ -64,28 +82,32 @@ attachFolderButtonElement?.addEventListener('click', () => {
 
 // Enhanced message sending with attachments and chat mode
 function sendMessage() {
-    const text = messageInputElement.value.trim();
-    if (!text) return;
+    const content = messageInput?.value.trim();
+    if (content) {
+        const options = {
+            includeImports: includeImportsElement?.checked ?? true,
+            includeTips: includeTipsElement?.checked ?? true,
+            includeTests: includeTestsElement?.checked ?? true,
+            chatMode: chatModeSelectElement?.value ?? 'chat'
+        };
 
-    const options = {
-        includeImports: includeImportsElement.checked,
-        includeTips: includeTipsElement.checked,
-        includeTests: includeTestsElement.checked,
-        chatMode: chatModeSelectElement.value
-    };
-
-    vscode.postMessage({
-        command: 'sendMessage',
-        text,
-        options,
-        attachments: currentAttachments
-    });
-
-    // Reset after sending
-    messageInputElement.value = '';
-    messageInputElement.style.height = 'auto';
-    currentAttachments = [];
-    updateAttachmentUI();
+        vscode.postMessage({
+            command: 'sendMessage',
+            text: content,
+            options: options,
+            attachments: currentAttachments
+        });
+        
+        // Clear input after sending
+        if (messageInput) {
+            messageInput.value = '';
+            messageInput.style.height = 'auto';
+        }
+        
+        // Clear attachments after sending
+        currentAttachments = [];
+        updateAttachmentUI();
+    }
 }
 
 // Update attachment UI
@@ -99,11 +121,22 @@ function updateAttachmentUI() {
         element.className = 'attachment-item';
         element.innerHTML = `
             <i class="codicon codicon-${attachment.type === 'file' ? 'file-code' : 'folder'}"></i>
-            <span>${attachment.path.split('/').pop()}</span>
+            <span>${attachment.path.split('/').pop() || attachment.path.split('\\').pop()}</span>
             <button class="remove-attachment" data-path="${attachment.path}">
                 <i class="codicon codicon-close"></i>
             </button>
         `;
+        
+        // Add event listener for removing attachment
+        const removeButton = element.querySelector('.remove-attachment');
+        removeButton?.addEventListener('click', () => {
+            const path = (removeButton as HTMLElement).dataset.path;
+            if (path) {
+                currentAttachments = currentAttachments.filter(a => a.path !== path);
+                updateAttachmentUI();
+            }
+        });
+        
         attachmentsContainer.appendChild(element);
     });
 }
@@ -113,6 +146,7 @@ interface VSCodeMessage {
     message?: any;
     error?: string;
     path?: string;
+    models?: any[];
 }
 
 // Handle messages from extension
@@ -148,12 +182,18 @@ window.addEventListener('message', (event: MessageEvent<VSCodeMessage>) => {
                 updateAttachmentUI();
             }
             break;
+        case 'updateModels':
+            if (message.models) {
+                // Update models dropdown if implemented
+            }
+            break;
     }
 });
 
 interface ChatMessage {
     role: 'user' | 'assistant' | 'system';
     content: string;
+    timestamp?: number;
     attachments?: Array<{
         type: 'file' | 'folder';
         path: string;
@@ -161,10 +201,14 @@ interface ChatMessage {
 }
 
 function addMessage(message: ChatMessage) {
+    if (!messageTemplateElement || !messagesContainer) return;
+
     const messageElement = messageTemplateElement.content.cloneNode(true) as DocumentFragment;
     const messageDiv = messageElement.querySelector('.message') as HTMLDivElement;
     const avatar = messageElement.querySelector('.avatar i') as HTMLElement;
     const content = messageElement.querySelector('.markdown-content') as HTMLDivElement;
+
+    if (!messageDiv || !avatar || !content) return;
 
     messageDiv.classList.add(message.role);
     avatar.classList.add(message.role === 'user' ? 'codicon-account' : 'codicon-hubot');
@@ -174,7 +218,7 @@ function addMessage(message: ChatMessage) {
     content.innerHTML = formattedContent;
 
     // Add file attachments if any
-    if (message.attachments && message.attachments.length > 0) {
+    if (message.attachments && message.attachments.length > 0 && fileAttachmentTemplateElement) {
         const attachmentsContainer = document.createElement('div');
         attachmentsContainer.className = 'attachments';
 
@@ -183,8 +227,11 @@ function addMessage(message: ChatMessage) {
             const filename = attachmentElement.querySelector('.filename') as HTMLElement;
             const icon = attachmentElement.querySelector('.icon') as HTMLElement;
 
-            filename.textContent = attachment.path.split('/').pop() || '';
-            icon.classList.add(attachment.type === 'file' ? 'codicon-file-code' : 'codicon-folder');
+            if (filename && icon) {
+                const pathParts = attachment.path.split(/[\/\\]/);
+                filename.textContent = pathParts[pathParts.length - 1] || '';
+                icon.classList.add(attachment.type === 'file' ? 'codicon-file-code' : 'codicon-folder');
+            }
 
             attachmentsContainer.appendChild(attachmentElement);
         });
@@ -192,23 +239,49 @@ function addMessage(message: ChatMessage) {
         content.appendChild(attachmentsContainer);
     }
 
-    messagesContainerElement.appendChild(messageElement);
-    messagesContainerElement.scrollTop = messagesContainerElement.scrollHeight;
+    messagesContainer.appendChild(messageElement);
+    messagesContainer.scrollTop = messagesContainer.scrollHeight;
+    
+    // Add click handler for code blocks copy functionality
+    const codeBlocks = messagesContainer.querySelectorAll('.code-block .copy-button');
+    codeBlocks.forEach(button => {
+        button.addEventListener('click', (e) => {
+            const codeBlock = (e.target as HTMLElement).closest('.code-block');
+            const codeContent = codeBlock?.querySelector('code')?.textContent;
+            if (codeContent) {
+                navigator.clipboard.writeText(codeContent)
+                    .then(() => {
+                        // Optionally show feedback for successful copy
+                        const copyButton = (e.target as HTMLElement).closest('.copy-button') as HTMLElement;
+                        if (copyButton) {
+                            const originalHTML = copyButton.innerHTML;
+                            copyButton.innerHTML = '<i class="codicon codicon-check"></i>';
+                            setTimeout(() => {
+                                copyButton.innerHTML = originalHTML;
+                            }, 1000);
+                        }
+                    });
+            }
+        });
+    });
 }
 
 function formatMessage(content: string): string {
     // Basic markdown-like formatting
     return content
         .replace(/```(\w*)\n([\s\S]*?)```/g, (_, lang, code) => {
+            if (!codeBlockTemplateElement) return `<pre><code>${code}</code></pre>`;
+            
             const codeBlock = codeBlockTemplateElement.content.cloneNode(true) as DocumentFragment;
-            const pre = codeBlock.querySelector('pre') as HTMLPreElement;
             const codeElement = codeBlock.querySelector('code') as HTMLElement;
             
-            if (lang) {
-                codeElement.classList.add(`language-${lang}`);
+            if (codeElement) {
+                if (lang) {
+                    codeElement.classList.add(`language-${lang}`);
+                }
+                
+                codeElement.textContent = code.trim();
             }
-            
-            codeElement.textContent = code.trim();
             
             const temp = document.createElement('div');
             temp.appendChild(codeBlock);
@@ -221,6 +294,8 @@ function formatMessage(content: string): string {
 }
 
 function showLoading() {
+    if (!messagesContainer) return;
+    
     const loadingDiv = document.createElement('div');
     loadingDiv.className = 'message assistant loading';
     loadingDiv.innerHTML = `
@@ -231,18 +306,22 @@ function showLoading() {
             <div class="markdown-content">Thinking...</div>
         </div>
     `;
-    messagesContainerElement.appendChild(loadingDiv);
-    messagesContainerElement.scrollTop = messagesContainerElement.scrollHeight;
+    messagesContainer.appendChild(loadingDiv);
+    messagesContainer.scrollTop = messagesContainer.scrollHeight;
 }
 
 function hideLoading() {
-    const loadingElement = messagesContainerElement.querySelector('.loading');
+    if (!messagesContainer) return;
+    
+    const loadingElement = messagesContainer.querySelector('.loading');
     if (loadingElement) {
         loadingElement.remove();
     }
 }
 
 function showError(error: string) {
+    if (!messagesContainer) return;
+    
     const errorDiv = document.createElement('div');
     errorDiv.className = 'message system error';
     errorDiv.innerHTML = `
@@ -250,9 +329,9 @@ function showError(error: string) {
             <i class="codicon codicon-error"></i>
         </div>
         <div class="message-content">
-            <div class="markdown-content">${error}</div>
+            <div class="markdown-content">Error: ${error}</div>
         </div>
     `;
-    messagesContainerElement.appendChild(errorDiv);
-    messagesContainerElement.scrollTop = messagesContainerElement.scrollHeight;
+    messagesContainer.appendChild(errorDiv);
+    messagesContainer.scrollTop = messagesContainer.scrollHeight;
 } 
