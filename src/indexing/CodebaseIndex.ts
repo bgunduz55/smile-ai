@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import * as ts from 'typescript'; // Import TypeScript Compiler API
 import { AIEngine } from '../ai-engine/AIEngine'; // Import AIEngine
 import { cosineSimilarity } from '../utils/vectorUtils'; // Import helper
+import { IndexedFile } from './CodebaseIndexer';
 
 /**
  * Represents information about a symbol found in the codebase.
@@ -28,11 +29,10 @@ export interface FileIndexData {
     error?: string;
 }
 
-export interface IndexedFile {
+export interface IndexedDocument {
     uri: vscode.Uri;
-    path: string;
-    context: any;
-    analysis: any;
+    content: string;
+    embedding: number[];
 }
 
 /**
@@ -43,15 +43,14 @@ export class CodebaseIndex {
     protected static instance: CodebaseIndex;
     protected indexData: Map<string, FileIndexData> = new Map();
     protected isIndexing: boolean = false;
-    private files: Map<string, IndexedFile>;
-    private symbols: Map<string, vscode.SymbolInformation[]>;
-    private dependencies: Map<string, string[]>;
+    private files: Map<string, IndexedFile> = new Map();
+    private symbols: Map<string, vscode.SymbolInformation[]> = new Map();
+    private dependencies: Map<string, string[]> = new Map();
+    private documents: Map<string, IndexedFile> = new Map();
+    private generateEmbeddingsEnabled: boolean = false;
+    protected aiEngine?: AIEngine;
 
-    protected constructor() {
-        this.files = new Map();
-        this.symbols = new Map();
-        this.dependencies = new Map();
-    }
+    public constructor() {}
 
     public static getInstance(): CodebaseIndex {
         if (!CodebaseIndex.instance) {
@@ -122,9 +121,6 @@ export class CodebaseIndex {
             });
         }
     }
-
-    private generateEmbeddingsEnabled: boolean = false; // Setting cache
-    protected aiEngine?: AIEngine; // Optional AI Engine reference
 
     /**
      * Initiates the indexing process for the entire workspace using a full ts.Program.
@@ -673,8 +669,8 @@ export class CodebaseIndex {
         this.files.set(file.path, file);
     }
 
-    public getFile(path: string): IndexedFile | undefined {
-        return this.files.get(path);
+    public getFile(filePath: string): IndexedFile | undefined {
+        return this.files.get(filePath);
     }
 
     public getAllFiles(): IndexedFile[] {
@@ -698,9 +694,11 @@ export class CodebaseIndex {
     }
 
     public clear(): void {
+        this.documents.clear();
         this.files.clear();
         this.symbols.clear();
         this.dependencies.clear();
+        this.indexData.clear();
     }
 
     public getFilesWithSymbol(symbolName: string): IndexedFile[] {
@@ -741,5 +739,48 @@ export class CodebaseIndex {
         });
 
         return Array.from(result);
+    }
+
+    public addDocument(document: IndexedFile): void {
+        this.documents.set(document.uri.fsPath, document);
+    }
+
+    public getDocument(uri: vscode.Uri): IndexedFile | undefined {
+        return this.documents.get(uri.fsPath);
+    }
+
+    public getAllDocuments(): IndexedFile[] {
+        return Array.from(this.documents.values());
+    }
+
+    public searchSimilar(embedding: number[], limit: number = 5): IndexedFile[] {
+        const documents = Array.from(this.documents.values());
+        const scores = documents.map(doc => ({
+            document: doc,
+            score: this.cosineSimilarity(embedding, doc.embedding)
+        }));
+
+        return scores
+            .sort((a, b) => b.score - a.score)
+            .slice(0, limit)
+            .map(result => result.document);
+    }
+
+    private cosineSimilarity(a: number[], b: number[]): number {
+        if (a.length !== b.length) {
+            throw new Error('Vectors must have the same length');
+        }
+
+        let dotProduct = 0;
+        let normA = 0;
+        let normB = 0;
+
+        for (let i = 0; i < a.length; i++) {
+            dotProduct += a[i] * b[i];
+            normA += a[i] * a[i];
+            normB += b[i] * b[i];
+        }
+
+        return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
     }
 }
