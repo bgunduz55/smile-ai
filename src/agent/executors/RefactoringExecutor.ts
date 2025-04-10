@@ -165,7 +165,16 @@ export class RefactoringExecutor extends BaseExecutor implements TaskExecutor {
                 Math.floor((selection.start.line + selection.end.line) / 2),
                 Math.floor((selection.start.character + selection.end.character) / 2)
             );
-            targetSymbol = this.codebaseIndexer.findSymbolAtPosition(filePath, midPointPos);
+            const symbol = await this.codebaseIndexer.findSymbolAtPosition(document.uri, midPointPos);
+            targetSymbol = symbol ? {
+                name: symbol.name,
+                kind: symbol.kind,
+                location: symbol.location,
+                startLine: symbol.location.range.start.line + 1,
+                startChar: symbol.location.range.start.character,
+                endLine: symbol.location.range.end.line + 1,
+                endChar: symbol.location.range.end.character
+            } : undefined;
 
             if (targetSymbol && 
                 targetSymbol.startLine <= selection.start.line + 1 && targetSymbol.endLine >= selection.end.line + 1 &&
@@ -186,7 +195,16 @@ export class RefactoringExecutor extends BaseExecutor implements TaskExecutor {
             }
         } else {
             const cursorPos = editor.selection.active;
-            targetSymbol = this.codebaseIndexer.findSymbolAtPosition(filePath, cursorPos);
+            const symbol = await this.codebaseIndexer.findSymbolAtPosition(document.uri, cursorPos);
+            targetSymbol = symbol ? {
+                name: symbol.name,
+                kind: symbol.kind,
+                location: symbol.location,
+                startLine: symbol.location.range.start.line + 1,
+                startChar: symbol.location.range.start.character,
+                endLine: symbol.location.range.end.line + 1,
+                endChar: symbol.location.range.end.character
+            } : undefined;
 
             if (targetSymbol) {
                 console.log(`Refactoring symbol at cursor: ${targetSymbol.name}`);
@@ -203,7 +221,7 @@ export class RefactoringExecutor extends BaseExecutor implements TaskExecutor {
         // --- Find References --- 
         let references: vscode.Location[] = [];
         if (targetSymbol) {
-            references = this.codebaseIndexer.findReferences(targetSymbol);
+            references = await this.codebaseIndexer.findReferences(document.uri, editor.selection.active);
             console.log(`Found ${references.length} references for symbol ${targetSymbol.name}`);
         }
         // ---------------------

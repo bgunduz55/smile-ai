@@ -3,49 +3,33 @@ import { AIEngine } from '../ai-engine/AIEngine';
 import { ModelManager } from '../utils/ModelManager';
 import { CodebaseIndexer } from '../indexing/CodebaseIndexer';
 import { FileAnalyzer } from '../utils/FileAnalyzer';
-import { ChatHistoryManager, ChatSession } from '../utils/ChatHistoryManager';
-import { AIMessage, AIRequest } from '../ai-engine/types';
-
-interface Message extends AIMessage {
-    role: 'user' | 'assistant';
-    content: string;
-    timestamp: number;
-    context?: {
-        file?: string;
-        selection?: string;
-        codebase?: any;
-    };
-}
+import { Message } from '../types/chat';
 
 export class AIAssistantPanel {
+    public static currentPanel: AIAssistantPanel | undefined;
     private readonly webviewView: vscode.WebviewView;
     private readonly context: vscode.ExtensionContext;
     private readonly disposables: vscode.Disposable[] = [];
     private aiEngine: AIEngine;
-    private chatMessages: Message[] = [];
-    private composerMessages: Message[] = [];
-    private currentView: string = 'chat';
+    private messages: Message[] = [];
     private modelManager: ModelManager;
     private codebaseIndexer: CodebaseIndexer;
     private fileAnalyzer: FileAnalyzer;
     private isIndexing: boolean = false;
-    private chatHistoryManager: ChatHistoryManager;
-    private currentChatSession: ChatSession | undefined;
-    private currentComposerSession: ChatSession | undefined;
 
-    private constructor(
+    constructor(
         webviewView: vscode.WebviewView,
         context: vscode.ExtensionContext,
         aiEngine: AIEngine,
+        modelManager: ModelManager,
         codebaseIndexer: CodebaseIndexer
     ) {
         this.webviewView = webviewView;
         this.context = context;
         this.aiEngine = aiEngine;
-        this.modelManager = ModelManager.getInstance();
+        this.modelManager = modelManager;
         this.codebaseIndexer = codebaseIndexer;
         this.fileAnalyzer = FileAnalyzer.getInstance();
-        this.chatHistoryManager = ChatHistoryManager.getInstance(context);
         
         // Aktif modeli kontrol et ve AI Engine'i başlat
         const activeModel = this.modelManager.getActiveModel();
@@ -84,58 +68,42 @@ export class AIAssistantPanel {
         // İlk indexlemeyi başlat
         this.indexCodebase();
         this.setupWebview();
-        this.loadLastSession();
-    }
-
-    public static show(
-        webviewView: vscode.WebviewView,
-        context: vscode.ExtensionContext,
-        aiEngine: AIEngine,
-        codebaseIndexer: CodebaseIndexer
-    ) {
-        new AIAssistantPanel(webviewView, context, aiEngine, codebaseIndexer);
     }
 
     private setupWebview() {
-        this.webviewView.webview.options = {
+        const webview = this.webviewView.webview;
+
+        // Set options
+        webview.options = {
             enableScripts: true,
             localResourceRoots: [
-                vscode.Uri.joinPath(this.context.extensionUri, 'media')
+                vscode.Uri.joinPath(this.context.extensionUri, 'media'),
+                vscode.Uri.joinPath(this.context.extensionUri, 'dist')
             ]
         };
 
-        // Webview içeriğini ayarla
-        this.getWebviewContent().then(content => {
-            this.webviewView.webview.html = content;
-        });
+        // Get URIs
+        const cssUri = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'media', 'main.css'));
+        const mainUri = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'media', 'main.js'));
 
-        // Mesaj dinleyicisini ayarla
-        this.webviewView.webview.onDidReceiveMessage(
-            async (message: any) => {
+        // Set HTML content
+        webview.html = this.getWebviewContent(cssUri.toString(), mainUri.toString());
+
+        // Handle messages from webview
+        webview.onDidReceiveMessage(
+            async (message) => {
                 switch (message.command) {
                     case 'sendMessage':
-                        await this.handleUserMessage(message.text);
+                        await this.handleUserMessage(message.text, message.options);
                         break;
-                    case 'viewChanged':
-                        this.handleViewChange(message.view);
+                    case 'addModel':
+                        await this.handleAddModel();
                         break;
-                    case 'saveModelSettings':
-                        await this.handleModelSettings(message.settings);
+                    case 'attachFile':
+                        await this.handleAttachFile();
                         break;
-                    case 'testModelConnection':
-                        await this.testModelConnection(message.settings);
-                        break;
-                    case 'updateSetting':
-                        await this.handleSettingUpdate(message.key, message.value);
-                        break;
-                    case 'reindex':
-                        await this.indexCodebase();
-                        break;
-                    case 'createNewSession':
-                        await this.createNewSession(message.view);
-                        break;
-                    case 'switchSession':
-                        await this.switchSession(message.sessionId);
+                    case 'attachFolder':
+                        await this.handleAttachFolder();
                         break;
                 }
             },
@@ -145,44 +113,141 @@ export class AIAssistantPanel {
 
         // İlk yükleme
         this.updateModels();
-        this.updateSettings();
-        this.updateSessionList();
     }
 
-    private async getWebviewContent(): Promise<string> {
-        const styleUri = this.webviewView.webview.asWebviewUri(
-            vscode.Uri.joinPath(this.context.extensionUri, 'media', 'assistant.css')
-        );
+    private getWebviewContent(cssUri: string, mainUri: string): string {
+        return `<!DOCTYPE html>
+        <html lang="en">
+        <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${this.webviewView.webview.cspSource} 'unsafe-inline' https:; script-src ${this.webviewView.webview.cspSource} 'unsafe-eval'; img-src ${this.webviewView.webview.cspSource} https:; connect-src https: http: ws:; font-src https:;">
+            <title>Smile AI Assistant</title>
+            <link rel="stylesheet" href="${cssUri}">
+            <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@vscode/codicons/dist/codicon.css">
+        </head>
+        <body>
+            <div class="container">
+                <div class="toolbar">
+                    <button class="toolbar-button active" data-view="chat">
+                        <i class="codicon codicon-comment-discussion"></i>
+                        Chat
+                    </button>
+                    <button class="toolbar-button" data-view="composer">
+                        <i class="codicon codicon-edit"></i>
+                        Composer
+                    </button>
+                    <button class="toolbar-button" data-view="settings">
+                        <i class="codicon codicon-gear"></i>
+                        Settings
+                    </button>
+                    <div style="flex: 1"></div>
+                    <div class="chat-mode">
+                        <select id="chatMode">
+                            <option value="chat">Chat</option>
+                            <option value="agent">Agent</option>
+                            <option value="ask">Ask</option>
+                        </select>
+                    </div>
+                    <button class="toolbar-button" id="addModel">
+                        <i class="codicon codicon-add"></i>
+                        Add AI Model
+                    </button>
+                    <button class="toolbar-button" id="openChat">
+                        <i class="codicon codicon-comment"></i>
+                        Open Chat
+                    </button>
+                    <button class="toolbar-button" id="openComposer">
+                        <i class="codicon codicon-edit"></i>
+                        Open Composer
+                    </button>
+                </div>
 
-        const htmlPath = vscode.Uri.joinPath(this.context.extensionUri, 'media', 'assistant.html');
-        let html = '';
-        
-        try {
-            const uint8Array = await vscode.workspace.fs.readFile(htmlPath);
-            html = Buffer.from(uint8Array).toString('utf-8');
+                <div class="chat-container">
+                    <div class="messages" id="messages">
+                        <!-- Messages will be inserted here -->
+                    </div>
 
-            // Template değişkenlerini değiştir
-            html = html.replace(/\{\{styleUri\}\}/g, styleUri.toString());
-            html = html.replace(/\{\{cspSource\}\}/g, this.webviewView.webview.cspSource);
+                    <div class="input-container">
+                        <div class="checkbox-container">
+                            <label>
+                                <input type="checkbox" id="includeImports" checked>
+                                Import'ları dahil et
+                            </label>
+                            <label>
+                                <input type="checkbox" id="includeTips" checked>
+                                Tip tanımlarını dahil et
+                            </label>
+                            <label>
+                                <input type="checkbox" id="includeTests" checked>
+                                Test kodunu dahil et
+                            </label>
+                        </div>
+                        
+                        <div class="attachment-toolbar">
+                            <button class="attachment-button" id="attachFile">
+                                <i class="codicon codicon-file-add"></i>
+                                Dosya Ekle
+                            </button>
+                            <button class="attachment-button" id="attachFolder">
+                                <i class="codicon codicon-folder-add"></i>
+                                Klasör Ekle
+                            </button>
+                        </div>
+                        
+                        <div class="current-attachments">
+                            <!-- Attached files/folders will be shown here -->
+                        </div>
+                        
+                        <div class="input-row">
+                            <textarea
+                                class="input-box"
+                                id="messageInput"
+                                placeholder="Ask, search, build anything... (Enter ile gönder, Shift+Enter ile yeni satır)"
+                                rows="1"
+                            ></textarea>
+                            <button class="send-button" id="sendButton">
+                                <i class="codicon codicon-send"></i>
+                                Send
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
 
-            return html;
-        } catch (error) {
-            console.error('HTML template okuma hatası:', error);
-            return `<!DOCTYPE html>
-                <html>
-                <head>
-                    <meta charset="UTF-8">
-                    <style>
-                        body { font-family: sans-serif; padding: 20px; }
-                        .error { color: red; }
-                    </style>
-                </head>
-                <body>
-                    <h1 class="error">Hata</h1>
-                    <p>Template yüklenemedi. Lütfen extension'ı yeniden yükleyin.</p>
-                </body>
-                </html>`;
-        }
+            <template id="message-template">
+                <div class="message">
+                    <div class="avatar">
+                        <i class="codicon"></i>
+                    </div>
+                    <div class="message-content">
+                        <div class="markdown-content"></div>
+                    </div>
+                </div>
+            </template>
+
+            <template id="code-block-template">
+                <div class="code-block">
+                    <div class="header">
+                        <span class="filename"></span>
+                        <button class="copy-button">
+                            <i class="codicon codicon-copy"></i>
+                        </button>
+                    </div>
+                    <pre><code></code></pre>
+                </div>
+            </template>
+
+            <template id="file-attachment-template">
+                <div class="file-attachment">
+                    <i class="codicon codicon-file-code icon"></i>
+                    <span class="filename"></span>
+                </div>
+            </template>
+
+            <script src="${mainUri}"></script>
+        </body>
+        </html>`;
     }
 
     private async indexCodebase() {
@@ -227,100 +292,67 @@ export class AIAssistantPanel {
         }
     }
 
-    private async getCurrentContext(): Promise<any> {
-        const editor = vscode.window.activeTextEditor;
-        if (!editor) return {};
-
-        const document = editor.document;
-        const selection = editor.selection;
-        const selectedText = document.getText(selection);
-
-        const fileContext = await this.fileAnalyzer.analyzeFile(document.uri);
-
-        return {
-            file: document.fileName,
-            selection: selectedText,
-            fileContext
-        };
-    }
-
-    private async handleUserMessage(text: string): Promise<void> {
-        // Parse @ mentions for file/folder attachments
-        const attachments = this.parseAttachments(text);
-        
-        // Process attachments
-        for (const attachment of attachments) {
-            if (attachment.type === 'file') {
-                this.codebaseIndexer.attachFile(attachment.path);
-            } else {
-                this.codebaseIndexer.attachFolder(attachment.path);
-            }
-        }
-
-        // Remove attachment syntax from message
-        const cleanMessage = text.replace(/@(file|folder):"[^"]*"/g, '').trim();
-
-        // Add user message to chat
-        this.chatMessages.push({
-            role: 'user',
-            content: cleanMessage,
-            attachments: attachments
-        });
-
-        // Update UI
-        this.updateChatView();
-
-        // Process with AI
-        await this.processWithAI(cleanMessage, attachments);
-    }
-
-    private parseAttachments(text: string): Array<{type: 'file' | 'folder', path: string}> {
-        const attachments: Array<{type: 'file' | 'folder', path: string}> = [];
-        const regex = /@(file|folder):"([^"]*)"/g;
-        let match;
-
-        while ((match = regex.exec(text)) !== null) {
-            const type = match[1] as 'file' | 'folder';
-            const path = match[2];
-            
-            // Convert to absolute path if relative
-            const absolutePath = path.startsWith('/') ? path : 
-                vscode.workspace.workspaceFolders?.[0] ? 
-                    path.join(vscode.workspace.workspaceFolders[0].uri.fsPath, path) : 
-                    path;
-
-            attachments.push({
-                type,
-                path: absolutePath
-            });
-        }
-
-        return attachments;
-    }
-
-    private async processWithAI(message: string, attachments: Array<{type: 'file' | 'folder', path: string}>): Promise<void> {
+    private async handleUserMessage(text: string, options: any) {
         try {
-            // Show loading state
+            // Add user message
+            const userMessage: Message = {
+                role: 'user',
+                content: text,
+                timestamp: Date.now()
+            };
+            
+            // Add attachments if there are any
+            if (options.attachments && options.attachments.length > 0) {
+                userMessage.attachments = options.attachments;
+            }
+
+            this.messages.push(userMessage);
+            this.webviewView.webview.postMessage({ 
+                command: 'addMessage', 
+                message: userMessage 
+            });
+
+            // Process with AI based on chat mode
             this.webviewView.webview.postMessage({ command: 'showLoading' });
 
-            // Get context from attached files
-            const context = await this.getContextFromAttachments(attachments);
+            let aiResponse;
+            try {
+                switch (options.chatMode) {
+                    case 'agent':
+                        aiResponse = await this.aiEngine.processAgentMessage(text, {
+                            options,
+                            codebaseIndex: this.codebaseIndexer.getIndex()
+                        });
+                        break;
+                    case 'ask':
+                        aiResponse = await this.aiEngine.processAskMessage(text, {
+                            options,
+                            codebaseIndex: this.codebaseIndexer.getIndex()
+                        });
+                        break;
+                    default:
+                        aiResponse = await this.aiEngine.processMessage(text, {
+                            options,
+                            codebaseIndex: this.codebaseIndexer.getIndex()
+                        });
+                }
+            } catch (aiError) {
+                console.error('AI Engine error:', aiError);
+                aiResponse = "Sorry, I encountered an error processing your request. Please try again.";
+            }
 
-            // Get AI response
-            const response = await this.aiEngine.processMessage(message, {
-                context,
-                attachments,
-                codebaseIndex: this.codebaseIndexer.getIndex()
-            });
-
-            // Add AI response to chat
-            this.chatMessages.push({
+            const assistantMessage: Message = {
                 role: 'assistant',
-                content: response
+                content: aiResponse,
+                timestamp: Date.now()
+            };
+
+            this.messages.push(assistantMessage);
+            this.webviewView.webview.postMessage({ 
+                command: 'addMessage', 
+                message: assistantMessage 
             });
 
-            // Update UI
-            this.updateChatView();
         } catch (error) {
             console.error('Error processing message:', error);
             this.webviewView.webview.postMessage({ 
@@ -332,264 +364,62 @@ export class AIAssistantPanel {
         }
     }
 
-    private async getContextFromAttachments(attachments: Array<{type: 'file' | 'folder', path: string}>): Promise<any> {
-        const context: any = {
-            files: {},
-            folders: {}
-        };
-
-        for (const attachment of attachments) {
-            if (attachment.type === 'file') {
-                try {
-                    const uri = vscode.Uri.file(attachment.path);
-                    const fileContent = await vscode.workspace.fs.readFile(uri);
-                    context.files[attachment.path] = {
-                        content: fileContent.toString(),
-                        analysis: await this.analyzeFile(uri)
-                    };
-                } catch (error) {
-                    console.warn(`Failed to read file ${attachment.path}:`, error);
-                }
-            } else {
-                try {
-                    const uri = vscode.Uri.file(attachment.path);
-                    const entries = await vscode.workspace.fs.readDirectory(uri);
-                    context.folders[attachment.path] = {
-                        entries: entries.map(([name, type]) => ({
-                            name,
-                            type: type === vscode.FileType.Directory ? 'directory' : 'file'
-                        }))
-                    };
-                } catch (error) {
-                    console.warn(`Failed to read folder ${attachment.path}:`, error);
-                }
-            }
-        }
-
-        return context;
+    private async handleAddModel() {
+        await this.modelManager.promptAddModel();
+        this.updateModels();
     }
 
-    private async analyzeFile(uri: vscode.Uri): Promise<any> {
+    private async handleAttachFile() {
         try {
-            const document = await vscode.workspace.openTextDocument(uri);
-            return {
-                symbols: await vscode.commands.executeCommand('vscode.executeDocumentSymbolProvider', uri),
-                diagnostics: vscode.languages.getDiagnostics(uri)
-            };
+            const result = await vscode.window.showOpenDialog({
+                canSelectFiles: true,
+                canSelectFolders: false,
+                canSelectMany: false,
+                openLabel: 'Attach File'
+            });
+
+            if (result && result[0]) {
+                this.webviewView.webview.postMessage({
+                    command: 'fileAttached',
+                    path: result[0].fsPath
+                });
+            }
         } catch (error) {
-            console.warn(`Failed to analyze file ${uri.fsPath}:`, error);
-            return null;
+            console.error('Error attaching file:', error);
         }
     }
 
-    private scrollToBottom(containerId: string) {
-        this.webviewView.webview.postMessage({
-            type: 'scrollToBottom',
-            containerId
-        });
-    }
-
-    private handleViewChange(view: string) {
-        this.currentView = view;
-        if (view === 'chat') {
-            this.updateMessages('chat', this.chatMessages);
-            this.updateSessionList();
-        } else if (view === 'composer') {
-            this.updateMessages('composer', this.composerMessages);
-            this.updateSessionList();
-        }
-        
-        // Update webview with current view
-        this.webviewView.webview.postMessage({
-            type: 'viewChanged',
-            view: this.currentView
-        });
-    }
-
-    private async handleSettingUpdate(key: string, value: any) {
-        const config = vscode.workspace.getConfiguration('smile-ai');
-        await config.update(key, value, vscode.ConfigurationTarget.Global);
-        this.updateSettings();
-    }
-
-    private async handleModelSettings(settings: any) {
+    private async handleAttachFolder() {
         try {
-            // Model ayarlarını kaydet
-            const config = vscode.workspace.getConfiguration('smile-ai');
-            await config.update('models', [
-                {
-                    name: settings.modelName,
-                    provider: settings.provider,
-                    modelName: settings.modelName,
-                    apiEndpoint: settings.apiEndpoint,
-                    maxTokens: settings.maxTokens,
-                    temperature: settings.temperature
-                }
-            ], vscode.ConfigurationTarget.Global);
-
-            // Aktif model olarak ayarla
-            await config.update('activeModel', settings.modelName, vscode.ConfigurationTarget.Global);
-
-            // AI Engine'i güncelle
-            this.aiEngine = new AIEngine({
-                provider: {
-                    name: settings.provider,
-                    modelName: settings.modelName,
-                    apiEndpoint: settings.apiEndpoint
-                },
-                maxTokens: settings.maxTokens,
-                temperature: settings.temperature
+            const result = await vscode.window.showOpenDialog({
+                canSelectFiles: false,
+                canSelectFolders: true,
+                canSelectMany: false,
+                openLabel: 'Attach Folder'
             });
 
-            vscode.window.showInformationMessage('Model ayarları kaydedildi');
-        } catch (error: any) {
-            vscode.window.showErrorMessage(`Model ayarları kaydedilemedi: ${error.message}`);
-        }
-    }
-
-    private async testModelConnection(settings: any) {
-        try {
-            const testEngine = new AIEngine({
-                provider: {
-                    name: settings.provider,
-                    modelName: settings.modelName,
-                    apiEndpoint: settings.apiEndpoint
-                },
-                maxTokens: 100,
-                temperature: 0.7
-            });
-
-            const response = await testEngine.generateResponse({
-                messages: [{
-                    role: 'user',
-                    content: 'Test message',
-                    timestamp: Date.now()
-                }],
-                maxTokens: 10,
-                temperature: 0.7,
-                context: {
-                    prompt: 'Test message'
-                }
-            });
-
-            if (response) {
-                vscode.window.showInformationMessage('Model bağlantısı başarılı!');
+            if (result && result[0]) {
+                this.webviewView.webview.postMessage({
+                    command: 'folderAttached',
+                    path: result[0].fsPath
+                });
             }
-        } catch (error: any) {
-            vscode.window.showErrorMessage(`Model bağlantı hatası: ${error.message}`);
+        } catch (error) {
+            console.error('Error attaching folder:', error);
         }
     }
 
-    private updateModels() {
-        const models = this.modelManager.getModels();
-        const activeModel = this.modelManager.getActiveModel();
-
+    private async updateModels() {
+        const models = await this.modelManager.getModels();
         this.webviewView.webview.postMessage({
-            type: 'updateModels',
-            models: models.map(model => ({
-                ...model,
-                active: activeModel?.name === model.name
-            }))
+            command: 'updateModels',
+            models
         });
     }
 
-    private updateMessages(view: string, messages: Message[]) {
-        this.webviewView.webview.postMessage({
-            type: 'updateMessages',
-            messages: messages,
-            view: view
-        });
-    }
+    public dispose() {
+        AIAssistantPanel.currentPanel = undefined;
 
-    private updateSettings() {
-        const config = vscode.workspace.getConfiguration('smile-ai');
-        const settings = {
-            appearance: config.get('appearance'),
-            behavior: config.get('behavior'),
-            shortcuts: config.get('shortcuts')
-        };
-
-        this.webviewView.webview.postMessage({
-            type: 'updateSettings',
-            settings
-        });
-    }
-
-    private async updateSessionList() {
-        const sessions = await this.chatHistoryManager.getSessions();
-        const chatSessions = Array.from(sessions.values()).filter(s => s.id.startsWith('chat_'));
-        const composerSessions = Array.from(sessions.values()).filter(s => s.id.startsWith('composer_'));
-
-        this.webviewView.webview.postMessage({
-            type: 'updateSessions',
-            sessions: {
-                chatSessions: chatSessions.sort((a, b) => b.lastUpdated - a.lastUpdated),
-                composerSessions: composerSessions.sort((a, b) => b.lastUpdated - a.lastUpdated)
-            }
-        });
-    }
-
-    private async loadLastSession() {
-        const sessions = await this.chatHistoryManager.getSessions();
-        if (sessions.size > 0) {
-            const sessionsArray = Array.from(sessions.values());
-            const lastChatSession = sessionsArray
-                .filter(s => s.id.startsWith('chat_'))
-                .sort((a, b) => b.lastUpdated - a.lastUpdated)[0];
-            const lastComposerSession = sessionsArray
-                .filter(s => s.id.startsWith('composer_'))
-                .sort((a, b) => b.lastUpdated - a.lastUpdated)[0];
-
-            if (lastChatSession) {
-                this.currentChatSession = lastChatSession;
-                this.chatMessages = lastChatSession.messages as Message[];
-            }
-            if (lastComposerSession) {
-                this.currentComposerSession = lastComposerSession;
-                this.composerMessages = lastComposerSession.messages as Message[];
-            }
-
-            this.updateMessages('chat', this.chatMessages);
-            this.updateSessionList();
-        }
-    }
-
-    private async createNewSession(view: string) {
-        const session: ChatSession = {
-            id: `${view}_${Date.now()}`,
-            title: view === 'chat' ? 'Yeni sohbet' : 'Yeni kod oturumu',
-            messages: [],
-            created: Date.now(),
-            lastUpdated: Date.now()
-        };
-
-        await this.chatHistoryManager.addSession(session);
-        
-        if (view === 'chat') {
-            this.currentChatSession = session;
-            this.chatMessages = [];
-            this.updateMessages('chat', this.chatMessages);
-        } else if (view === 'composer') {
-            this.currentComposerSession = session;
-            this.composerMessages = [];
-            this.updateMessages('composer', this.composerMessages);
-        }
-        
-        this.updateSessionList();
-    }
-
-    private async switchSession(sessionId: string) {
-        const session = await this.chatHistoryManager.getSession(sessionId);
-        if (!session) return;
-
-        if (sessionId.startsWith('chat_')) {
-            this.currentChatSession = session;
-            this.chatMessages = session.messages as Message[];
-            this.updateMessages('chat', this.chatMessages);
-        } else if (sessionId.startsWith('composer_')) {
-            this.currentComposerSession = session;
-            this.composerMessages = session.messages as Message[];
-            this.updateMessages('composer', this.composerMessages);
-        }
+        this.disposables.forEach(d => d.dispose());
     }
 } 

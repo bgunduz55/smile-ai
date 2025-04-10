@@ -1,12 +1,40 @@
 import axios from 'axios';
+import { AIMessage, AIRequest, AIResponse } from './types';
+import { CodebaseIndex } from '../indexing/CodebaseIndex';
 import * as vscode from 'vscode';
-import { AIConfig, AIMessage, AIRequest, AIResponse } from './types';
+
+export interface AIEngineConfig {
+    provider: {
+        name: string;
+        modelName: string;
+        apiEndpoint: string;
+    };
+    maxTokens?: number;
+    temperature?: number;
+    embeddingModelName?: string;
+}
+
+export interface ProcessMessageOptions {
+    context?: any;
+    attachments?: Array<{type: 'file' | 'folder', path: string}>;
+    options?: {
+        includeImports?: boolean;
+        includeTips?: boolean;
+        includeTests?: boolean;
+    };
+    codebaseIndex?: CodebaseIndex;
+}
+
+export interface ProcessOptions {
+    options?: any;
+    codebaseIndex?: any;
+}
 
 export class AIEngine {
-    private config: AIConfig;
+    private config: AIEngineConfig;
     private conversationHistory: AIMessage[] = [];
 
-    constructor(config: AIConfig) {
+    constructor(config: AIEngineConfig) {
         this.config = config;
     }
 
@@ -22,48 +50,106 @@ export class AIEngine {
         }
     }
 
-    public async sendRequest(request: AIRequest): Promise<AIResponse> {
-        try {
-            if (!this.config.provider.apiEndpoint) {
-                throw new Error('API endpoint yapılandırılmamış');
-            }
+    public async processMessage(message: string, options: ProcessOptions): Promise<string> {
+        // Normal chat mode processing
+        return await this.sendRequest(message, options, 'chat');
+    }
 
-            const response = await fetch(this.config.provider.apiEndpoint + '/api/chat', {
+    public async processAgentMessage(message: string, options: ProcessOptions): Promise<string> {
+        // Agent mode processing - more autonomous and can take actions
+        return await this.sendRequest(message, options, 'agent');
+    }
+
+    public async processAskMessage(message: string, options: ProcessOptions): Promise<string> {
+        // Ask mode processing - focused on answering questions about code
+        return await this.sendRequest(message, options, 'ask');
+    }
+
+    private async sendRequest(message: string, options: ProcessOptions, mode: 'chat' | 'agent' | 'ask'): Promise<string> {
+        try {
+            // Construct the request based on the mode
+            const requestBody = {
+                model: this.config.provider.modelName,
+                messages: [
+                    {
+                        role: 'system',
+                        content: this.getSystemPrompt(mode)
+                    },
+                    {
+                        role: 'user',
+                        content: message
+                    }
+                ],
+                max_tokens: this.config.maxTokens || 2048,
+                temperature: this.config.temperature || 0.7,
+                options: options.options,
+                codebaseIndex: options.codebaseIndex
+            };
+
+            // Make the API request
+            const response = await fetch(this.config.provider.apiEndpoint, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json'
                 },
-                body: JSON.stringify({
-                    model: this.config.provider.modelName,
-                    messages: request.messages,
-                    max_tokens: this.config.maxTokens,
-                    temperature: this.config.temperature
-                })
+                body: JSON.stringify(requestBody)
             });
 
             if (!response.ok) {
-                throw new Error(`AI model yanıt hatası: ${response.statusText}`);
+                throw new Error(`API request failed: ${response.statusText}`);
             }
 
-            const data = await response.json() as { message: string };
-            return {
-                message: data.message
-            };
+            const data: any = await response.json();
+            return data.choices[0].message.content;
+
         } catch (error) {
-            if (error instanceof Error) {
-                console.error('AI isteği hatası:', error);
-                vscode.window.showErrorMessage(`AI isteği başarısız: ${error.message}`);
-            }
+            console.error('Error in AI request:', error);
             throw error;
         }
     }
 
-    public updateConfig(newConfig: Partial<AIConfig>) {
+    private getSystemPrompt(mode: 'chat' | 'agent' | 'ask'): string {
+        switch (mode) {
+            case 'agent':
+                return `You are an AI coding agent that can autonomously perform tasks. You can:
+                - Analyze code and suggest improvements
+                - Create new files and implement features
+                - Debug issues and fix problems
+                - Refactor code following best practices
+                Please be proactive and take initiative when helping the user.`;
+            
+            case 'ask':
+                return `You are an AI assistant focused on answering questions about code. You:
+                - Provide clear and concise explanations
+                - Use code examples when relevant
+                - Explain concepts in depth when needed
+                - Reference documentation and best practices
+                Focus on helping users understand their code better.`;
+            
+            default:
+                return `You are an AI coding assistant that helps with programming tasks. You can:
+                - Write and modify code
+                - Answer questions
+                - Provide suggestions
+                - Help with debugging
+                Aim to be helpful while following the user's lead.`;
+        }
+    }
+
+    public updateConfig(newConfig: Partial<AIEngineConfig>) {
         this.config = { ...this.config, ...newConfig };
     }
 
-    public getConfig(): AIConfig {
+    public getConfig(): AIEngineConfig {
         return this.config;
+    }
+
+    public clearContext(): void {
+        this.conversationHistory = [];
+    }
+
+    public getContext(): AIMessage[] {
+        return this.conversationHistory;
     }
 
     public async generateResponse(request: AIRequest): Promise<AIResponse> {
@@ -172,21 +258,22 @@ export class AIEngine {
         }
     }
 
-    public clearContext(): void {
-        this.conversationHistory = [];
-    }
-
-    public getContext(): AIMessage[] {
-        return this.conversationHistory;
-    }
-
     public async generateEmbeddings(text: string): Promise<number[]> {
         const { provider } = this.config;
         const embeddingModelName = this.config.embeddingModelName || provider.modelName;
         const endpoint = provider.apiEndpoint;
 
+        // Skip embeddings if the indexing.generateEmbeddings setting is false
+        const config = vscode.workspace.getConfiguration('smile-ai');
+        const generateEmbeddings = config.get<boolean>('indexing.generateEmbeddings');
+        if (!generateEmbeddings) {
+            console.log('Embeddings generation is disabled in settings, skipping.');
+            return [];
+        }
+
         if (provider.name !== 'ollama') {
-            throw new Error(`Embeddings are currently only supported for Ollama provider, not ${provider.name}.`);
+            console.warn(`Embeddings are currently only supported for Ollama provider, not ${provider.name}. Continuing without embeddings.`);
+            return [];
         }
 
         const embeddingEndpoint = `${endpoint}/api/embeddings`;
@@ -205,7 +292,8 @@ export class AIEngine {
             if (response.data?.embedding && Array.isArray(response.data.embedding)) {
                 return response.data.embedding;
             } else {
-                throw new Error('Invalid response format received from embedding endpoint.');
+                console.warn('Invalid response format received from embedding endpoint. Continuing without embeddings.');
+                return [];
             }
         } catch (error: any) {
             console.error('Error generating embeddings:', error);
@@ -217,17 +305,30 @@ export class AIEngine {
                 const dataError = error.response.data?.error;
                 userMessage = `Error from ${providerName} embedding endpoint (Status ${status}): ${dataError || error.response.statusText}.`;
                 if (status === 404) {
-                     userMessage += `\nPlease ensure embedding model '${embeddingModelName}' is available/pulled in Ollama at ${endpoint}.`;
+                    userMessage += `\nPlease ensure embedding model '${embeddingModelName}' is available/pulled in Ollama at ${endpoint}.`;
+                    // Log the error but don't throw - let the extension continue without embeddings
+                    console.warn(userMessage + ' Continuing without embeddings.');
+                    return [];
                 } else {
                     userMessage += `\nPlease check your Ollama setup and model name.`;
                 }
             } else if (error.request) {
                 userMessage = `Could not connect to ${providerName} at ${endpoint} for embeddings.`;
                 userMessage += `\nPlease ensure the ${providerName} service is running.`;
+                console.warn(userMessage + ' Continuing without embeddings.');
+                return [];
             } else {
                 userMessage = `Failed to communicate with ${providerName} for embeddings: ${error.message}.`;
             }
-            throw new Error(userMessage);
+            
+            // For critical errors, still throw
+            if (error.message.includes('critical')) {
+                throw new Error(userMessage);
+            }
+            
+            // Otherwise log and continue without embeddings
+            console.warn(userMessage + ' Continuing without embeddings.');
+            return [];
         }
     }
 
