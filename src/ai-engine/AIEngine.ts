@@ -1,6 +1,7 @@
 import axios from 'axios';
 import { AIMessage, AIRequest, AIResponse } from './types';
 import { CodebaseIndex } from '../indexing/CodebaseIndex';
+import { IndexedFile } from '../indexing/CodebaseIndexer';
 
 export interface AIEngineConfig {
     provider: {
@@ -74,6 +75,19 @@ export class AIEngine {
         try {
             console.log(`Sending ${mode} request to ${this.config.provider.name} at ${this.config.provider.apiEndpoint}`);
             
+            // Check if user is asking about the codebase
+            const isCodebaseQuery = message.toLowerCase().includes('codebase') || 
+                                  message.startsWith('@') || 
+                                  message.includes('code base') || 
+                                  message.includes('kod taban');
+            
+            // Prepare relevant codebase context if needed
+            let codebaseContext = '';
+            if (isCodebaseQuery && options.codebaseIndex) {
+                console.log("Detected codebase query, preparing codebase context");
+                codebaseContext = this.prepareCodebaseContext(message, options.codebaseIndex);
+            }
+            
             // Check if we're using Ollama and use the correct endpoint
             let endpoint = this.config.provider.apiEndpoint;
             
@@ -83,10 +97,16 @@ export class AIEngine {
                 endpoint = `${this.config.provider.apiEndpoint}/v1/chat/completions`;
             }
             
+            // Construct system prompt with codebase context if available
+            let systemPrompt = this.getSystemPrompt(mode);
+            if (codebaseContext) {
+                systemPrompt += `\n\nHere is information about the codebase:\n${codebaseContext}`;
+            }
+            
             // Construct the request body with options
             const requestBody = this.config.provider.name === 'ollama' ? {
                 model: this.config.provider.modelName,
-                prompt: `${this.getSystemPrompt(mode)}\n\nUser: ${message}\n\nAssistant:`,
+                prompt: `${systemPrompt}\n\nUser: ${message}\n\nAssistant:`,
                 stream: false,
                 options: options.options || {},
             } : {
@@ -94,7 +114,7 @@ export class AIEngine {
                 messages: [
                     {
                         role: 'system',
-                        content: this.getSystemPrompt(mode)
+                        content: systemPrompt
                     },
                     {
                         role: 'user',
@@ -111,7 +131,7 @@ export class AIEngine {
 
             // Try to make API request with timeout
             const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 30000); // Increased timeout to 30 seconds
+            const timeoutId = setTimeout(() => controller.abort(), 90000); // Increased timeout to 90 seconds
             
             try {
                 // Make the API request
@@ -356,6 +376,74 @@ export class AIEngine {
         } catch (error) {
             console.error('Error generating embedding:', error);
             throw new Error('Failed to generate embedding');
+        }
+    }
+
+    private prepareCodebaseContext(_query: string, codebaseIndex: CodebaseIndex): string {
+        if (!codebaseIndex) {
+            return '';
+        }
+        
+        try {
+            // Extract project name functionality planned but not implemented yet
+            
+            // Get relevant files for the query
+            const files = codebaseIndex.getAllDocuments();
+            if (!files || files.length === 0) {
+                return "Codebase is indexed but no files were found.";
+            }
+            
+            // Prepare an overview of the codebase structure
+            let result = `Found ${files.length} files in the codebase.\n\n`;
+            
+            // Group files by directory for better structure understanding
+            const filesByDir = new Map<string, string[]>();
+            files.forEach((file: IndexedFile) => {
+                const filePath = file.path;
+                const dir = filePath.substring(0, filePath.lastIndexOf('/') + 1) || '/';
+                if (!filesByDir.has(dir)) {
+                    filesByDir.set(dir, []);
+                }
+                filesByDir.get(dir)?.push(filePath);
+            });
+            
+            // Add directory structure to the context
+            result += "Directory structure:\n";
+            filesByDir.forEach((files, dir) => {
+                result += `- ${dir}: ${files.length} files\n`;
+            });
+            
+            // Add high-level description of key files
+            result += "\nKey files:\n";
+            
+            // Find interesting files (like README, index, etc.)
+            const keyFiles = files.filter((file: IndexedFile) => 
+                file.path.toLowerCase().includes('readme') || 
+                file.path.toLowerCase().includes('index') ||
+                file.path.toLowerCase().includes('overview') ||
+                file.path.toLowerCase().includes('config') ||
+                file.path.toLowerCase().includes('main')
+            );
+            
+            // Add snippets from key files
+            keyFiles.forEach((file: IndexedFile) => {
+                const preview = file.content.substring(0, 300) + (file.content.length > 300 ? '...' : '');
+                result += `\n## ${file.path}\n${preview}\n`;
+            });
+            
+            // Add list of all file types in the codebase
+            const fileExtensions = new Set<string>();
+            files.forEach((file: IndexedFile) => {
+                const ext = file.path.split('.').pop() || '';
+                if (ext) fileExtensions.add(ext);
+            });
+            
+            result += `\nFile types: ${Array.from(fileExtensions).join(', ')}`;
+            
+            return result;
+        } catch (error) {
+            console.error("Error preparing codebase context:", error);
+            return "Error accessing codebase information.";
         }
     }
 } 
