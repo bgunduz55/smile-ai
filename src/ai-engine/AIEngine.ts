@@ -131,7 +131,7 @@ export class AIEngine {
 
             // Try to make API request with timeout
             const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 30000); // Increased timeout to 30 seconds
+            const timeoutId = setTimeout(() => controller.abort(), 90000); // Increased timeout to 90 seconds
             
             try {
                 // Make the API request
