@@ -51,8 +51,14 @@ export class AIEngine {
     }
 
     public async processMessage(message: string, options: ProcessOptions): Promise<string> {
-        // Normal chat mode processing
-        return await this.sendRequest(message, options, 'chat');
+        try {
+            // Pass options to sendRequest
+            return await this.sendRequest(message, options, 'chat');
+        } catch (error) {
+            console.error('Error in processMessage:', error);
+            // Provide a fallback response so the chat UI at least works
+            return `I received your message: "${message}"\n\nHowever, I couldn't connect to the AI provider. Please make sure Ollama is running at ${this.config.provider.apiEndpoint} and the model ${this.config.provider.modelName} is available.`;
+        }
     }
 
     public async processAgentMessage(message: string, options: ProcessOptions): Promise<string> {
@@ -67,7 +73,18 @@ export class AIEngine {
 
     private async sendRequest(message: string, options: ProcessOptions, mode: 'chat' | 'agent' | 'ask'): Promise<string> {
         try {
-            // Construct the request based on the mode
+            console.log(`Sending ${mode} request to ${this.config.provider.name} at ${this.config.provider.apiEndpoint}`);
+            
+            // Check if we're using Ollama and use the correct endpoint
+            let endpoint = this.config.provider.apiEndpoint;
+            
+            if (this.config.provider.name === 'ollama') {
+                endpoint = `${this.config.provider.apiEndpoint}/api/chat`;
+            } else if (this.config.provider.name === 'lmstudio') {
+                endpoint = `${this.config.provider.apiEndpoint}/v1/chat/completions`;
+            }
+            
+            // Construct the request body with options
             const requestBody = {
                 model: this.config.provider.modelName,
                 messages: [
@@ -82,29 +99,53 @@ export class AIEngine {
                 ],
                 max_tokens: this.config.maxTokens || 2048,
                 temperature: this.config.temperature || 0.7,
-                options: options.options,
-                codebaseIndex: options.codebaseIndex
+                options: options.options || {},
+                codebaseIndex: options.codebaseIndex || null
             };
 
-            // Make the API request
-            const response = await fetch(this.config.provider.apiEndpoint, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify(requestBody)
-            });
+            console.log('Request body:', JSON.stringify(requestBody));
 
-            if (!response.ok) {
-                throw new Error(`API request failed: ${response.statusText}`);
+            // Try to make API request with timeout
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 second timeout
+            
+            try {
+                // Make the API request
+                const response = await fetch(endpoint, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(requestBody),
+                    signal: controller.signal
+                });
+                
+                clearTimeout(timeoutId);
+
+                if (!response.ok) {
+                    throw new Error(`API request failed: ${response.statusText}`);
+                }
+
+                const data = await response.json();
+                
+                // Process response based on provider
+                if (this.config.provider.name === 'ollama') {
+                    return data.message?.content || 'No response content received';
+                } else {
+                    return data.choices?.[0]?.message?.content || 'No response content received';
+                }
+            } catch (fetchError) {
+                console.error('Fetch error:', fetchError);
+                // Provide a fallback response
+                return `I received your request in ${mode} mode, but I couldn't connect to the AI provider.\n\nPlease make sure ${this.config.provider.name} is running at ${this.config.provider.apiEndpoint} with the model "${this.config.provider.modelName}" available.`;
+            } finally {
+                clearTimeout(timeoutId);
             }
-
-            const data: any = await response.json();
-            return data.choices[0].message.content;
-
         } catch (error) {
-            console.error('Error in AI request:', error);
-            throw error;
+            console.error('Error in sendRequest:', error);
+            
+            // Always return a helpful response instead of throwing
+            return `I received your message: "${message.substring(0, 50)}${message.length > 50 ? '...' : ''}"\n\nHowever, there was an error processing your request. ${error instanceof Error ? error.message : 'Please try again later.'}`;
         }
     }
 

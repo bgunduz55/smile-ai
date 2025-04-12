@@ -16,6 +16,7 @@ export class AIAssistantPanel {
     private codebaseIndexer: CodebaseIndexer;
     private fileAnalyzer: FileAnalyzer;
     private isIndexing: boolean = false;
+    private isAIEngineReady: boolean = false;
 
     constructor(
         webviewView: vscode.WebviewView,
@@ -24,6 +25,7 @@ export class AIAssistantPanel {
         modelManager: ModelManager,
         codebaseIndexer: CodebaseIndexer
     ) {
+        console.log('Initializing AIAssistantPanel');
         this.webviewView = webviewView;
         this.context = context;
         this.aiEngine = aiEngine;
@@ -31,21 +33,42 @@ export class AIAssistantPanel {
         this.codebaseIndexer = codebaseIndexer;
         this.fileAnalyzer = FileAnalyzer.getInstance();
         
-        // Aktif modeli kontrol et ve AI Engine'i başlat
-        const activeModel = this.modelManager.getActiveModel();
-        if (activeModel) {
-            this.aiEngine = new AIEngine({
-                provider: {
-                    name: activeModel.provider,
-                    modelName: activeModel.modelName,
-                    apiEndpoint: activeModel.apiEndpoint
-                },
-                maxTokens: activeModel.maxTokens || 2048,
-                temperature: activeModel.temperature || 0.7
-            });
-        } else {
-            // Eğer aktif model yoksa, varsayılan olarak Ollama'yı dene
-            this.modelManager.promptAddModel().then(() => {
+        // Initialize components independently
+        this.initializeAIEngine()
+            .catch((error: Error) => this.handleError('AI Engine initialization failed', error));
+        
+        // Setup webview asynchronously
+        this.setupWebview()
+            .catch((error: Error) => this.handleError('Webview setup failed', error));
+        
+        // Set up event listeners
+        this.setupEventListeners();
+        
+        // Start indexing in the background
+        this.indexCodebase()
+            .catch((error: Error) => this.handleError('Codebase indexing failed', error));
+    }
+
+    private async initializeAIEngine(): Promise<void> {
+        try {
+            const activeModel = this.modelManager.getActiveModel();
+            console.log('Active model:', activeModel);
+            
+            if (activeModel) {
+                this.aiEngine = new AIEngine({
+                    provider: {
+                        name: activeModel.provider,
+                        modelName: activeModel.modelName,
+                        apiEndpoint: activeModel.apiEndpoint
+                    },
+                    maxTokens: activeModel.maxTokens || 2048,
+                    temperature: activeModel.temperature || 0.7
+                });
+                this.isAIEngineReady = true;
+            } else {
+                // Prompt for model configuration without blocking
+                this.showModelConfigurationRequired();
+                await this.modelManager.promptAddModel();
                 const model = this.modelManager.getActiveModel();
                 if (model) {
                     this.aiEngine = new AIEngine({
@@ -57,197 +80,125 @@ export class AIAssistantPanel {
                         maxTokens: model.maxTokens || 2048,
                         temperature: model.temperature || 0.7
                     });
+                    this.isAIEngineReady = true;
+                }
+            }
+        } catch (error) {
+            this.isAIEngineReady = false;
+            throw error;
+        }
+    }
+
+    private setupEventListeners(): void {
+        // Workspace event listeners
+        this.disposables.push(
+            vscode.workspace.onDidChangeTextDocument(
+                this.handleDocumentChange.bind(this)
+            ),
+            vscode.window.onDidChangeActiveTextEditor(
+                this.handleEditorChange.bind(this)
+            )
+        );
+    }
+
+    private showModelConfigurationRequired(): void {
+        const message = "AI model configuration required";
+        const configureButton = "Configure";
+        
+        vscode.window.showWarningMessage(message, configureButton)
+            .then(selection => {
+                if (selection === configureButton) {
+                    this.modelManager.promptAddModel()
+                        .catch(error => this.handleError('Model configuration failed', error));
+                }
+            });
+    }
+
+    private handleError(context: string, error: any): void {
+        console.error(`${context}:`, error);
+        
+        // Send error to webview if available
+        if (this.webviewView?.webview) {
+            this.webviewView.webview.postMessage({
+                command: 'showError',
+                error: {
+                    message: `${context}: ${error.message || 'Unknown error'}`,
+                    details: error.stack
                 }
             });
         }
-
-        // Workspace değişikliklerini dinle
-        vscode.workspace.onDidChangeTextDocument(this.handleDocumentChange, this);
-        vscode.window.onDidChangeActiveTextEditor(this.handleEditorChange, this);
-
-        // İlk indexlemeyi başlat
-        this.indexCodebase();
-        this.setupWebview();
+        
+        // Show error in VS Code UI
+        vscode.window.showErrorMessage(`${context}: ${error.message || 'Unknown error'}`);
     }
 
-    private setupWebview() {
-        const webview = this.webviewView.webview;
+    private async handleUserMessage(text: string, options: any): Promise<void> {
+        if (!this.isAIEngineReady) {
+            this.showModelConfigurationRequired();
+            return;
+        }
 
-        // Set options
-        webview.options = {
-            enableScripts: true,
-            localResourceRoots: [
-                vscode.Uri.joinPath(this.context.extensionUri, 'media'),
-                vscode.Uri.joinPath(this.context.extensionUri, 'dist')
-            ]
-        };
+        try {
+            // Add user message to UI immediately
+            const userMessage: Message = {
+                role: 'user',
+                content: text,
+                timestamp: Date.now()
+            };
+            this.messages.push(userMessage);
+            this.webviewView.webview.postMessage({
+                command: 'addMessage',
+                message: userMessage
+            });
 
-        // Get URIs
-        const cssUri = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'media', 'main.css'));
-        const mainUri = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'media', 'main.js'));
+            // Show loading state
+            this.webviewView.webview.postMessage({
+                command: 'showLoading'
+            });
 
-        // Set HTML content
-        webview.html = this.getWebviewContent(cssUri.toString(), mainUri.toString());
+            // Process message with chat mode
+            console.log('Processing message with chat mode:', text);
+            const response = await this.aiEngine.processMessage(text, {
+                options: options,
+                codebaseIndex: this.codebaseIndexer.getIndex()
+            });
 
-        // Handle messages from webview
-        webview.onDidReceiveMessage(
-            async (message) => {
-                switch (message.command) {
-                    case 'sendMessage':
-                        await this.handleUserMessage(message.text, message.options);
-                        break;
-                    case 'addModel':
-                        await this.handleAddModel();
-                        break;
-                    case 'attachFile':
-                        await this.handleAttachFile();
-                        break;
-                    case 'attachFolder':
-                        await this.handleAttachFolder();
-                        break;
-                }
-            },
-            undefined,
-            this.disposables
-        );
+            // Add assistant response
+            const assistantMessage: Message = {
+                role: 'assistant',
+                content: response,
+                timestamp: Date.now()
+            };
+            this.messages.push(assistantMessage);
 
-        // İlk yükleme
-        this.updateModels();
-    }
+            // Hide loading and show response
+            this.webviewView.webview.postMessage({
+                command: 'hideLoading'
+            });
+            this.webviewView.webview.postMessage({
+                command: 'addMessage',
+                message: assistantMessage
+            });
+        } catch (error) {
+            // Hide loading state
+            this.webviewView.webview.postMessage({
+                command: 'hideLoading'
+            });
 
-    private getWebviewContent(cssUri: string, mainUri: string): string {
-        return `<!DOCTYPE html>
-        <html lang="en">
-        <head>
-            <meta charset="UTF-8">
-            <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${this.webviewView.webview.cspSource} 'unsafe-inline' https:; script-src ${this.webviewView.webview.cspSource} 'unsafe-eval'; img-src ${this.webviewView.webview.cspSource} https:; connect-src https: http: ws:; font-src https:;">
-            <title>Smile AI Assistant</title>
-            <link rel="stylesheet" href="${cssUri}">
-            <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@vscode/codicons/dist/codicon.css">
-        </head>
-        <body>
-            <div class="container">
-                <div class="toolbar">
-                    <button class="toolbar-button active" data-view="chat">
-                        <i class="codicon codicon-comment-discussion"></i>
-                        Chat
-                    </button>
-                    <button class="toolbar-button" data-view="composer">
-                        <i class="codicon codicon-edit"></i>
-                        Composer
-                    </button>
-                    <button class="toolbar-button" data-view="settings">
-                        <i class="codicon codicon-gear"></i>
-                        Settings
-                    </button>
-                    <div style="flex: 1"></div>
-                    <div class="chat-mode">
-                        <select id="chatMode">
-                            <option value="chat">Chat</option>
-                            <option value="agent">Agent</option>
-                            <option value="ask">Ask</option>
-                        </select>
-                    </div>
-                    <button class="toolbar-button" id="addModel">
-                        <i class="codicon codicon-add"></i>
-                        Add AI Model
-                    </button>
-                    <button class="toolbar-button" id="openChat">
-                        <i class="codicon codicon-comment"></i>
-                        Open Chat
-                    </button>
-                    <button class="toolbar-button" id="openComposer">
-                        <i class="codicon codicon-edit"></i>
-                        Open Composer
-                    </button>
-                </div>
+            // Show error message in chat
+            const errorMessage: Message = {
+                role: 'assistant',
+                content: `I encountered an error while processing your request: ${error instanceof Error ? error.message : 'Unknown error'}\n\nPlease try again or check your AI model configuration.`,
+                timestamp: Date.now()
+            };
+            this.messages.push(errorMessage);
+            this.webviewView.webview.postMessage({
+                command: 'addMessage',
+                message: errorMessage
+            });
 
-                <div class="chat-container">
-                    <div class="messages" id="messages">
-                        <!-- Messages will be inserted here -->
-                    </div>
-
-                    <div class="input-container">
-                        <div class="checkbox-container">
-                            <label>
-                                <input type="checkbox" id="includeImports" checked>
-                                Import'ları dahil et
-                            </label>
-                            <label>
-                                <input type="checkbox" id="includeTips" checked>
-                                Tip tanımlarını dahil et
-                            </label>
-                            <label>
-                                <input type="checkbox" id="includeTests" checked>
-                                Test kodunu dahil et
-                            </label>
-                        </div>
-                        
-                        <div class="attachment-toolbar">
-                            <button class="attachment-button" id="attachFile">
-                                <i class="codicon codicon-file-add"></i>
-                                Dosya Ekle
-                            </button>
-                            <button class="attachment-button" id="attachFolder">
-                                <i class="codicon codicon-folder-add"></i>
-                                Klasör Ekle
-                            </button>
-                        </div>
-                        
-                        <div class="current-attachments">
-                            <!-- Attached files/folders will be shown here -->
-                        </div>
-                        
-                        <div class="input-row">
-                            <textarea
-                                class="input-box"
-                                id="messageInput"
-                                placeholder="Ask, search, build anything... (Enter ile gönder, Shift+Enter ile yeni satır)"
-                                rows="1"
-                            ></textarea>
-                            <button class="send-button" id="sendButton">
-                                <i class="codicon codicon-send"></i>
-                                Send
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <template id="message-template">
-                <div class="message">
-                    <div class="avatar">
-                        <i class="codicon"></i>
-                    </div>
-                    <div class="message-content">
-                        <div class="markdown-content"></div>
-                    </div>
-                </div>
-            </template>
-
-            <template id="code-block-template">
-                <div class="code-block">
-                    <div class="header">
-                        <span class="filename"></span>
-                        <button class="copy-button">
-                            <i class="codicon codicon-copy"></i>
-                        </button>
-                    </div>
-                    <pre><code></code></pre>
-                </div>
-            </template>
-
-            <template id="file-attachment-template">
-                <div class="file-attachment">
-                    <i class="codicon codicon-file-code icon"></i>
-                    <span class="filename"></span>
-                </div>
-            </template>
-
-            <script src="${mainUri}"></script>
-        </body>
-        </html>`;
+            this.handleError('Message processing failed', error instanceof Error ? error : new Error('Unknown error'));
+        }
     }
 
     private async indexCodebase() {
@@ -289,78 +240,6 @@ export class AIAssistantPanel {
                     fileContext
                 }
             });
-        }
-    }
-
-    private async handleUserMessage(text: string, options: any) {
-        try {
-            // Add user message
-            const userMessage: Message = {
-                role: 'user',
-                content: text,
-                timestamp: Date.now()
-            };
-            
-            // Add attachments if there are any
-            if (options.attachments && options.attachments.length > 0) {
-                userMessage.attachments = options.attachments;
-            }
-
-            this.messages.push(userMessage);
-            this.webviewView.webview.postMessage({ 
-                command: 'addMessage', 
-                message: userMessage 
-            });
-
-            // Process with AI based on chat mode
-            this.webviewView.webview.postMessage({ command: 'showLoading' });
-
-            let aiResponse;
-            try {
-                switch (options.chatMode) {
-                    case 'agent':
-                        aiResponse = await this.aiEngine.processAgentMessage(text, {
-                            options,
-                            codebaseIndex: this.codebaseIndexer.getIndex()
-                        });
-                        break;
-                    case 'ask':
-                        aiResponse = await this.aiEngine.processAskMessage(text, {
-                            options,
-                            codebaseIndex: this.codebaseIndexer.getIndex()
-                        });
-                        break;
-                    default:
-                        aiResponse = await this.aiEngine.processMessage(text, {
-                            options,
-                            codebaseIndex: this.codebaseIndexer.getIndex()
-                        });
-                }
-            } catch (aiError) {
-                console.error('AI Engine error:', aiError);
-                aiResponse = "Sorry, I encountered an error processing your request. Please try again.";
-            }
-
-            const assistantMessage: Message = {
-                role: 'assistant',
-                content: aiResponse,
-                timestamp: Date.now()
-            };
-
-            this.messages.push(assistantMessage);
-            this.webviewView.webview.postMessage({ 
-                command: 'addMessage', 
-                message: assistantMessage 
-            });
-
-        } catch (error) {
-            console.error('Error processing message:', error);
-            this.webviewView.webview.postMessage({ 
-                command: 'showError',
-                error: 'Failed to process message. Please try again.'
-            });
-        } finally {
-            this.webviewView.webview.postMessage({ command: 'hideLoading' });
         }
     }
 
@@ -415,6 +294,104 @@ export class AIAssistantPanel {
             command: 'updateModels',
             models
         });
+    }
+
+    private async setupWebview(): Promise<void> {
+        const webview = this.webviewView.webview;
+
+        // Set options
+        webview.options = {
+            enableScripts: true,
+            localResourceRoots: [
+                vscode.Uri.joinPath(this.context.extensionUri, 'media'),
+                vscode.Uri.joinPath(this.context.extensionUri, 'dist')
+            ]
+        };
+
+        // Get URIs
+        const cssUri = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'media', 'main.css'));
+        const mainUri = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'media', 'main.js'));
+
+        try {
+            console.log('Setting up webview in AIAssistantPanel');
+            
+            // Create a welcome message
+            const welcomeMessage: Message = {
+                role: 'system',
+                content: 'Welcome to Smile AI! I\'m ready to help you with your code. You can ask questions, get explanations, or request code changes.',
+                timestamp: Date.now()
+            };
+            
+            // Add to our internal messages list
+            this.messages.push(welcomeMessage);
+            
+            // Set HTML content with updated CSP and service worker handling
+            webview.html = `<!DOCTYPE html>
+            <html lang="en">
+            <head>
+                <meta charset="UTF-8">
+                <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                <meta http-equiv="Content-Security-Policy" content="default-src 'self' ${webview.cspSource}; script-src 'self' 'unsafe-inline' ${webview.cspSource}; style-src 'self' 'unsafe-inline' ${webview.cspSource} https:; img-src 'self' ${webview.cspSource} https: data:; connect-src 'self' https: http: ws:; font-src https:;">
+                <title>Smile AI Assistant</title>
+                <link rel="stylesheet" href="${cssUri}">
+                <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@vscode/codicons/dist/codicon.css">
+                <script>
+                    // Unregister any existing service workers
+                    if ('serviceWorker' in navigator) {
+                        navigator.serviceWorker.getRegistrations().then(function(registrations) {
+                            for(let registration of registrations) {
+                                registration.unregister();
+                            }
+                        });
+                    }
+                </script>
+                <script src="${mainUri}" defer></script>
+            </head>
+            <body>
+                <div class="container">
+                    <div class="messages" id="messages"></div>
+                    <div class="input-container">
+                        <textarea id="messageInput" placeholder="Type your message..."></textarea>
+                        <button id="sendButton">Send</button>
+                    </div>
+                </div>
+            </body>
+            </html>`;
+            
+            // Wait a bit for the webview to initialize before sending messages
+            setTimeout(() => {
+                console.log('Sending welcome message to webview');
+                webview.postMessage({ 
+                    command: 'addMessage', 
+                    message: welcomeMessage
+                });
+            }, 1000);
+        } catch (error) {
+            console.error('Error setting up webview:', error);
+        }
+
+        // Handle messages from webview
+        webview.onDidReceiveMessage(
+            async (message) => {
+                console.log('Received message from webview:', message);
+                switch (message.command) {
+                    case 'sendMessage':
+                        await this.handleUserMessage(message.text, message.options || {});
+                        break;
+                    case 'addModel':
+                        await this.handleAddModel();
+                        break;
+                    case 'attachFile':
+                        await this.handleAttachFile();
+                        break;
+                    case 'attachFolder':
+                        await this.handleAttachFolder();
+                        break;
+                }
+            },
+            undefined,
+            this.disposables
+        );
     }
 
     public dispose() {
