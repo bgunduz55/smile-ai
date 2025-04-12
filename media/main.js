@@ -1,1 +1,328 @@
-(()=>{"use strict";const e=acquireVsCodeApi(),t=document.getElementById("messageInput"),n=document.getElementById("sendButton"),o=document.getElementById("messages"),c=document.getElementById("addModel"),s=document.getElementById("includeImports"),a=document.getElementById("includeTips"),d=document.getElementById("includeTests"),i=document.getElementById("message-template"),l=document.getElementById("code-block-template"),r=document.getElementById("file-attachment-template"),m=document.getElementById("attachFile"),p=document.getElementById("attachFolder"),u=document.getElementById("chatMode"),g=document.getElementById("openChat"),h=document.getElementById("openComposer"),v=document.querySelectorAll(".toolbar-button[data-view]");t&&n&&o||console.error("Essential DOM elements not found"),t?.addEventListener("keypress",(e=>{"Enter"!==e.key||e.shiftKey||(e.preventDefault(),f())})),n?.addEventListener("click",f),c?.addEventListener("click",(()=>{e.postMessage({command:"addModel"})})),g?.addEventListener("click",(()=>{e.postMessage({command:"openChat"})})),h?.addEventListener("click",(()=>{e.postMessage({command:"openComposer"})})),v.forEach((t=>{t.addEventListener("click",(()=>{const n=t.dataset.view;n&&(v.forEach((e=>e.classList.remove("active"))),t.classList.add("active"),e.postMessage({command:"switchView",view:n}))}))})),t?.addEventListener("input",(()=>{t.style.height="auto",t.style.height=`${t.scrollHeight}px`}));let E=[];function f(){const n=t?.value.trim();if(n){const o={includeImports:s?.checked??!0,includeTips:a?.checked??!0,includeTests:d?.checked??!0,chatMode:u?.value??"chat"};e.postMessage({command:"sendMessage",text:n,options:o,attachments:E}),t&&(t.value="",t.style.height="auto"),E=[],y()}}function y(){const e=document.querySelector(".current-attachments");e&&(e.innerHTML="",E.forEach((t=>{const n=document.createElement("div");n.className="attachment-item",n.innerHTML=`\n            <i class="codicon codicon-${"file"===t.type?"file-code":"folder"}"></i>\n            <span>${t.path.split("/").pop()||t.path.split("\\").pop()}</span>\n            <button class="remove-attachment" data-path="${t.path}">\n                <i class="codicon codicon-close"></i>\n            </button>\n        `;const o=n.querySelector(".remove-attachment");o?.addEventListener("click",(()=>{const e=o.dataset.path;e&&(E=E.filter((t=>t.path!==e)),y())})),e.appendChild(n)})))}m?.addEventListener("click",(()=>{e.postMessage({command:"attachFile"})})),p?.addEventListener("click",(()=>{e.postMessage({command:"attachFolder"})})),window.addEventListener("message",(e=>{const t=e.data;switch(console.log("Received message from extension:",t),t.command){case"addMessage":t.message&&(console.log("Adding message to UI:",t.message),function(e){if(!i||!o)return;const t=i.content.cloneNode(!0),n=t.querySelector(".message"),c=t.querySelector(".avatar i"),s=t.querySelector(".markdown-content");if(!n||!c||!s)return;n.classList.add(e.role),c.classList.add("user"===e.role?"codicon-account":"codicon-hubot");const a=function(e){return e.replace(/```(\w*)\n([\s\S]*?)```/g,((e,t,n)=>{if(!l)return`<pre><code>${n}</code></pre>`;const o=l.content.cloneNode(!0),c=o.querySelector("code");c&&(t&&c.classList.add(`language-${t}`),c.textContent=n.trim());const s=document.createElement("div");return s.appendChild(o),s.innerHTML})).replace(/`([^`]+)`/g,"<code>$1</code>").replace(/\*\*([^*]+)\*\*/g,"<strong>$1</strong>").replace(/\*([^*]+)\*/g,"<em>$1</em>").replace(/\n/g,"<br>")}(e.content);if(s.innerHTML=a,e.attachments&&e.attachments.length>0&&r){const t=document.createElement("div");t.className="attachments",e.attachments.forEach((e=>{const n=r.content.cloneNode(!0),o=n.querySelector(".filename"),c=n.querySelector(".icon");if(o&&c){const t=e.path.split(/[\/\\]/);o.textContent=t[t.length-1]||"",c.classList.add("file"===e.type?"codicon-file-code":"codicon-folder")}t.appendChild(n)})),s.appendChild(t)}o.appendChild(t),o.scrollTop=o.scrollHeight,o.querySelectorAll(".code-block .copy-button").forEach((e=>{e.addEventListener("click",(e=>{const t=e.target.closest(".code-block"),n=t?.querySelector("code")?.textContent;n&&navigator.clipboard.writeText(n).then((()=>{const t=e.target.closest(".copy-button");if(t){const e=t.innerHTML;t.innerHTML='<i class="codicon codicon-check"></i>',setTimeout((()=>{t.innerHTML=e}),1e3)}}))}))}))}(t.message));break;case"showLoading":console.log("Showing loading state"),function(){if(!o)return;const e=document.createElement("div");e.className="message assistant loading",e.innerHTML='\n        <div class="avatar">\n            <i class="codicon codicon-loading codicon-modifier-spin"></i>\n        </div>\n        <div class="message-content">\n            <div class="markdown-content">Thinking...</div>\n        </div>\n    ',o.appendChild(e),o.scrollTop=o.scrollHeight}();break;case"hideLoading":console.log("Hiding loading state"),function(){if(!o)return;const e=o.querySelector(".loading");e&&e.remove()}();break;case"showError":t.error&&(console.log("Showing error:",t.error),function(e){if(!o)return;const t=document.createElement("div");t.className="message system error",t.innerHTML=`\n        <div class="avatar">\n            <i class="codicon codicon-error"></i>\n        </div>\n        <div class="message-content">\n            <div class="markdown-content">Error: ${e}</div>\n        </div>\n    `,o.appendChild(t),o.scrollTop=o.scrollHeight}(t.error));break;case"fileAttached":t.path&&(console.log("File attached:",t.path),E.push({type:"file",path:t.path}),y());break;case"folderAttached":t.path&&(console.log("Folder attached:",t.path),E.push({type:"folder",path:t.path}),y());break;case"updateModels":t.models&&console.log("Updating models list:",t.models)}}))})();
+(() => {
+    "use strict";
+    
+    const vscode = acquireVsCodeApi();
+    const messageInput = document.getElementById("messageInput");
+    const sendButton = document.getElementById("sendButton");
+    const messagesContainer = document.getElementById("messages");
+    const addModelButton = document.getElementById("addModel");
+    const includeImportsCheckbox = document.getElementById("includeImports");
+    const includeTipsCheckbox = document.getElementById("includeTips");
+    const includeTestsCheckbox = document.getElementById("includeTests");
+    const messageTemplate = document.getElementById("message-template");
+    const codeBlockTemplate = document.getElementById("code-block-template");
+    const fileAttachmentTemplate = document.getElementById("file-attachment-template");
+    const attachFileButton = document.getElementById("attachFile");
+    const attachFolderButton = document.getElementById("attachFolder");
+    const chatModeSelect = document.getElementById("chatMode");
+    const openChatButton = document.getElementById("openChat");
+    const openComposerButton = document.getElementById("openComposer");
+    const toolbarButtons = document.querySelectorAll(".toolbar-button[data-view]");
+
+    // Check for essential elements
+    if (!messageInput || !sendButton || !messagesContainer) {
+        console.error("Essential DOM elements not found");
+    }
+
+    // Event Listeners
+    messageInput?.addEventListener("keypress", (e) => {
+        if (e.key === "Enter" && !e.shiftKey) {
+            e.preventDefault();
+            handleSendMessage();
+        }
+    });
+
+    sendButton?.addEventListener("click", handleSendMessage);
+
+    addModelButton?.addEventListener("click", () => {
+        vscode.postMessage({ command: "addModel" });
+    });
+
+    openChatButton?.addEventListener("click", () => {
+        vscode.postMessage({ command: "openChat" });
+    });
+
+    openComposerButton?.addEventListener("click", () => {
+        vscode.postMessage({ command: "openComposer" });
+    });
+
+    toolbarButtons.forEach((button) => {
+        button.addEventListener("click", () => {
+            const view = button.dataset.view;
+            if (view) {
+                toolbarButtons.forEach((btn) => btn.classList.remove("active"));
+                button.classList.add("active");
+                vscode.postMessage({ command: "switchView", view });
+            }
+        });
+    });
+
+    messageInput?.addEventListener("input", () => {
+        messageInput.style.height = "auto";
+        messageInput.style.height = `${messageInput.scrollHeight}px`;
+    });
+
+    let attachments = [];
+    let isLoading = false;
+    let hasError = false;
+    let state = { messages: [] };
+
+    // Restore previous state
+    const previousState = vscode.getState();
+    if (previousState) {
+        state = previousState;
+        state.messages.forEach(message => addMessageToUI(message));
+    }
+
+    function handleSendMessage() {
+        const text = messageInput?.value.trim();
+        if (text) {
+            const options = {
+                includeImports: includeImportsCheckbox?.checked ?? true,
+                includeTips: includeTipsCheckbox?.checked ?? true,
+                includeTests: includeTestsCheckbox?.checked ?? true,
+                chatMode: chatModeSelect?.value ?? "chat"
+            };
+
+            vscode.postMessage({
+                command: "sendMessage",
+                text,
+                options,
+                attachments
+            });
+
+            if (messageInput) {
+                messageInput.value = "";
+                messageInput.style.height = "auto";
+            }
+
+            attachments = [];
+            updateAttachments();
+        }
+    }
+
+    function updateAttachments() {
+        const attachmentsContainer = document.querySelector(".current-attachments");
+        if (!attachmentsContainer) return;
+
+        attachmentsContainer.innerHTML = "";
+        attachments.forEach((attachment) => {
+            const item = document.createElement("div");
+            item.className = "attachment-item";
+            item.innerHTML = `
+                <i class="codicon codicon-${attachment.type === "file" ? "file-code" : "folder"}"></i>
+                <span>${attachment.path.split("/").pop() || attachment.path.split("\\").pop()}</span>
+                <button class="remove-attachment" data-path="${attachment.path}">
+                    <i class="codicon codicon-close"></i>
+                </button>
+            `;
+
+            const removeButton = item.querySelector(".remove-attachment");
+            removeButton?.addEventListener("click", () => {
+                const path = removeButton.dataset.path;
+                if (path) {
+                    attachments = attachments.filter(a => a.path !== path);
+                    updateAttachments();
+                }
+            });
+
+            attachmentsContainer.appendChild(item);
+        });
+    }
+
+    attachFileButton?.addEventListener("click", () => {
+        vscode.postMessage({ command: "attachFile" });
+    });
+
+    attachFolderButton?.addEventListener("click", () => {
+        vscode.postMessage({ command: "attachFolder" });
+    });
+
+    function formatMarkdown(content) {
+        return content
+            .replace(/```(\w*)\n([\s\S]*?)```/g, (match, lang, code) => {
+                if (!codeBlockTemplate) {
+                    return `<pre><code>${code}</code></pre>`;
+                }
+
+                const template = codeBlockTemplate.content.cloneNode(true);
+                const codeElement = template.querySelector("code");
+
+                if (codeElement) {
+                    if (lang) {
+                        codeElement.classList.add(`language-${lang}`);
+                    }
+                    codeElement.textContent = code.trim();
+                }
+
+                const wrapper = document.createElement("div");
+                wrapper.appendChild(template);
+                return wrapper.innerHTML;
+            })
+            .replace(/`([^`]+)`/g, "<code>$1</code>")
+            .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+            .replace(/\*([^*]+)\*/g, "<em>$1</em>")
+            .replace(/\n/g, "<br>");
+    }
+
+    function addMessageToUI(message) {
+        if (!messageTemplate || !messagesContainer) return;
+
+        const template = messageTemplate.content.cloneNode(true);
+        const messageElement = template.querySelector(".message");
+        const avatarIcon = template.querySelector(".avatar i");
+        const contentElement = template.querySelector(".markdown-content");
+
+        if (!messageElement || !avatarIcon || !contentElement) return;
+
+        messageElement.classList.add(message.role);
+        avatarIcon.classList.add(message.role === "user" ? "codicon-account" : "codicon-hubot");
+
+        const formattedContent = formatMarkdown(message.content);
+        contentElement.innerHTML = formattedContent;
+
+        if (message.attachments && message.attachments.length > 0 && fileAttachmentTemplate) {
+            const attachmentsContainer = document.createElement("div");
+            attachmentsContainer.className = "attachments";
+
+            message.attachments.forEach((attachment) => {
+                const attachmentTemplate = fileAttachmentTemplate.content.cloneNode(true);
+                const filename = attachmentTemplate.querySelector(".filename");
+                const icon = attachmentTemplate.querySelector(".icon");
+
+                if (filename && icon) {
+                    const parts = attachment.path.split(/[\/\\]/);
+                    filename.textContent = parts[parts.length - 1] || "";
+                    icon.classList.add(attachment.type === "file" ? "codicon-file-code" : "codicon-folder");
+                }
+
+                attachmentsContainer.appendChild(attachmentTemplate);
+            });
+
+            contentElement.appendChild(attachmentsContainer);
+        }
+
+        messagesContainer.appendChild(template);
+        messagesContainer.scrollTop = messagesContainer.scrollHeight;
+
+        // Add copy button functionality
+        messagesContainer.querySelectorAll(".code-block .copy-button").forEach((button) => {
+            button.addEventListener("click", (e) => {
+                const codeBlock = e.target.closest(".code-block");
+                const code = codeBlock?.querySelector("code")?.textContent;
+
+                if (code) {
+                    navigator.clipboard.writeText(code).then(() => {
+                        const copyButton = e.target.closest(".copy-button");
+                        if (copyButton) {
+                            const originalContent = copyButton.innerHTML;
+                            copyButton.innerHTML = '<i class="codicon codicon-check"></i>';
+                            setTimeout(() => {
+                                copyButton.innerHTML = originalContent;
+                            }, 1000);
+                        }
+                    });
+                }
+            });
+        });
+    }
+
+    function showLoading() {
+        if (!messagesContainer) return;
+
+        const loadingMessage = document.createElement("div");
+        loadingMessage.className = "message assistant loading";
+        loadingMessage.innerHTML = `
+            <div class="avatar">
+                <i class="codicon codicon-loading codicon-modifier-spin"></i>
+            </div>
+            <div class="message-content">
+                <div class="markdown-content">Thinking...</div>
+            </div>
+        `;
+
+        messagesContainer.appendChild(loadingMessage);
+        messagesContainer.scrollTop = messagesContainer.scrollHeight;
+    }
+
+    function hideLoading() {
+        if (!messagesContainer) return;
+
+        const loadingElement = messagesContainer.querySelector(".loading");
+        if (loadingElement) {
+            loadingElement.remove();
+        }
+    }
+
+    function showError(error) {
+        if (!messagesContainer) return;
+
+        const errorMessage = document.createElement("div");
+        errorMessage.className = "message system error";
+        errorMessage.innerHTML = `
+            <div class="avatar">
+                <i class="codicon codicon-error"></i>
+            </div>
+            <div class="message-content">
+                <div class="markdown-content">Error: ${error}</div>
+            </div>
+        `;
+
+        messagesContainer.appendChild(errorMessage);
+        messagesContainer.scrollTop = messagesContainer.scrollHeight;
+    }
+
+    // Handle messages from extension
+    window.addEventListener("message", (event) => {
+        const message = event.data;
+        console.log("Received message from extension:", message);
+
+        switch (message.command) {
+            case "addMessage":
+                if (message.message) {
+                    console.log("Adding message to UI:", message.message);
+                    addMessageToUI(message.message);
+                }
+                break;
+
+            case "showLoading":
+                console.log("Showing loading state");
+                showLoading();
+                break;
+
+            case "hideLoading":
+                console.log("Hiding loading state");
+                hideLoading();
+                break;
+
+            case "showError":
+                if (message.error) {
+                    console.log("Showing error:", message.error);
+                    showError(message.error);
+                }
+                break;
+
+            case "fileAttached":
+                if (message.path) {
+                    console.log("File attached:", message.path);
+                    attachments.push({ type: "file", path: message.path });
+                    updateAttachments();
+                }
+                break;
+
+            case "folderAttached":
+                if (message.path) {
+                    console.log("Folder attached:", message.path);
+                    attachments.push({ type: "folder", path: message.path });
+                    updateAttachments();
+                }
+                break;
+
+            case "updateModels":
+                if (message.models) {
+                    console.log("Updating models list:", message.models);
+                }
+                break;
+        }
+    });
+})();

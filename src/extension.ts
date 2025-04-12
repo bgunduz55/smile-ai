@@ -43,18 +43,34 @@ export class SmileAIExtension {
         this.modelManager = ModelManager.getInstance();
         this.improvementManager = ImprovementManager.getInstance();
         
-        // Initialize AI Engine
-        const aiConfig: AIEngineConfig = {
-            provider: {
-                name: 'ollama',
-                modelName: 'gemma3:12b',
-                apiEndpoint: 'http://localhost:11434'
-            },
-            maxTokens: 2048,
-            temperature: 0.7,
-            embeddingModelName: 'nomic-embed-text'
-        };
-        this.aiEngine = new AIEngine(aiConfig);
+        // Initialize AI Engine with active model from ModelManager
+        const activeModel = this.modelManager.getActiveModel();
+        if (!activeModel) {
+            // Eğer aktif model yoksa varsayılan ayarları kullan
+            const aiConfig: AIEngineConfig = {
+                provider: {
+                    name: 'ollama',
+                    modelName: 'qwen2.5-coder:7b',
+                    apiEndpoint: 'http://localhost:11434'
+                },
+                maxTokens: 2048,
+                temperature: 0.7,
+                embeddingModelName: 'nomic-embed-text'
+            };
+            this.aiEngine = new AIEngine(aiConfig);
+        } else {
+            const aiConfig: AIEngineConfig = {
+                provider: {
+                    name: activeModel.provider,
+                    modelName: activeModel.modelName,
+                    apiEndpoint: activeModel.apiEndpoint
+                },
+                maxTokens: activeModel.maxTokens || 2048,
+                temperature: activeModel.temperature || 0.7,
+                embeddingModelName: activeModel.embeddingModelName || 'nomic-embed-text'
+            };
+            this.aiEngine = new AIEngine(aiConfig);
+        }
         
         // Initialize CodebaseIndexer
         this.codebaseIndexer = CodebaseIndexer.getInstance(this.aiEngine);

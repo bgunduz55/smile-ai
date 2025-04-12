@@ -53,11 +53,33 @@ export class ModelManager {
             console.log('LM Studio not available');
         }
 
+        // Eğer hiç model yoksa veya aktif model bulunamadıysa varsayılan modeli ekle
+        if (this.models.length === 0 || !this.models.some(m => m.name === activeModelName)) {
+            const defaultModel: AIModel = {
+                name: 'qwen2.5-coder:7b',
+                provider: 'ollama',
+                modelName: 'qwen2.5-coder:7b',
+                apiEndpoint: 'http://localhost:11434',
+                maxTokens: 2048,
+                temperature: 0.7,
+                embeddingModelName: 'nomic-embed-text'
+            };
+            
+            // Varsayılan modeli ekle ve aktif model olarak ayarla
+            await this.addModel(defaultModel);
+            await this.setActiveModel(defaultModel.name);
+            return;
+        }
+
+        // Aktif modeli ayarla
         if (activeModelName) {
             this.activeModel = this.models.find(m => m.name === activeModelName);
-        } else if (this.models.length > 0) {
+        } 
+        
+        // Aktif model hala ayarlanmadıysa ilk modeli kullan
+        if (!this.activeModel && this.models.length > 0) {
             this.activeModel = this.models[0];
-            this.setActiveModel(this.models[0].name);
+            await this.setActiveModel(this.models[0].name);
         }
     }
 

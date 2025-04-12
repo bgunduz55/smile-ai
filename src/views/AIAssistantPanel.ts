@@ -16,6 +16,7 @@ export class AIAssistantPanel {
     private codebaseIndexer: CodebaseIndexer;
     private fileAnalyzer: FileAnalyzer;
     private isIndexing: boolean = false;
+    private isAIEngineReady: boolean = false;
 
     constructor(
         webviewView: vscode.WebviewView,
@@ -24,7 +25,7 @@ export class AIAssistantPanel {
         modelManager: ModelManager,
         codebaseIndexer: CodebaseIndexer
     ) {
-        console.log('Initializing AIAssistantPanel'); // Debug log
+        console.log('Initializing AIAssistantPanel');
         this.webviewView = webviewView;
         this.context = context;
         this.aiEngine = aiEngine;
@@ -32,22 +33,42 @@ export class AIAssistantPanel {
         this.codebaseIndexer = codebaseIndexer;
         this.fileAnalyzer = FileAnalyzer.getInstance();
         
-        // Aktif modeli kontrol et ve AI Engine'i başlat
-        const activeModel = this.modelManager.getActiveModel();
-        console.log('Active model:', activeModel); // Debug log
-        if (activeModel) {
-            this.aiEngine = new AIEngine({
-                provider: {
-                    name: activeModel.provider,
-                    modelName: activeModel.modelName,
-                    apiEndpoint: activeModel.apiEndpoint
-                },
-                maxTokens: activeModel.maxTokens || 2048,
-                temperature: activeModel.temperature || 0.7
-            });
-        } else {
-            // Eğer aktif model yoksa, varsayılan olarak Ollama'yı dene
-            this.modelManager.promptAddModel().then(() => {
+        // Initialize components independently
+        this.initializeAIEngine()
+            .catch((error: Error) => this.handleError('AI Engine initialization failed', error));
+        
+        // Setup webview asynchronously
+        this.setupWebview()
+            .catch((error: Error) => this.handleError('Webview setup failed', error));
+        
+        // Set up event listeners
+        this.setupEventListeners();
+        
+        // Start indexing in the background
+        this.indexCodebase()
+            .catch((error: Error) => this.handleError('Codebase indexing failed', error));
+    }
+
+    private async initializeAIEngine(): Promise<void> {
+        try {
+            const activeModel = this.modelManager.getActiveModel();
+            console.log('Active model:', activeModel);
+            
+            if (activeModel) {
+                this.aiEngine = new AIEngine({
+                    provider: {
+                        name: activeModel.provider,
+                        modelName: activeModel.modelName,
+                        apiEndpoint: activeModel.apiEndpoint
+                    },
+                    maxTokens: activeModel.maxTokens || 2048,
+                    temperature: activeModel.temperature || 0.7
+                });
+                this.isAIEngineReady = true;
+            } else {
+                // Prompt for model configuration without blocking
+                this.showModelConfigurationRequired();
+                await this.modelManager.promptAddModel();
                 const model = this.modelManager.getActiveModel();
                 if (model) {
                     this.aiEngine = new AIEngine({
@@ -59,20 +80,223 @@ export class AIAssistantPanel {
                         maxTokens: model.maxTokens || 2048,
                         temperature: model.temperature || 0.7
                     });
+                    this.isAIEngineReady = true;
+                }
+            }
+        } catch (error) {
+            this.isAIEngineReady = false;
+            throw error;
+        }
+    }
+
+    private setupEventListeners(): void {
+        // Workspace event listeners
+        this.disposables.push(
+            vscode.workspace.onDidChangeTextDocument(
+                this.handleDocumentChange.bind(this)
+            ),
+            vscode.window.onDidChangeActiveTextEditor(
+                this.handleEditorChange.bind(this)
+            )
+        );
+    }
+
+    private showModelConfigurationRequired(): void {
+        const message = "AI model configuration required";
+        const configureButton = "Configure";
+        
+        vscode.window.showWarningMessage(message, configureButton)
+            .then(selection => {
+                if (selection === configureButton) {
+                    this.modelManager.promptAddModel()
+                        .catch(error => this.handleError('Model configuration failed', error));
+                }
+            });
+    }
+
+    private handleError(context: string, error: any): void {
+        console.error(`${context}:`, error);
+        
+        // Send error to webview if available
+        if (this.webviewView?.webview) {
+            this.webviewView.webview.postMessage({
+                command: 'showError',
+                error: {
+                    message: `${context}: ${error.message || 'Unknown error'}`,
+                    details: error.stack
                 }
             });
         }
-
-        // Workspace değişikliklerini dinle
-        vscode.workspace.onDidChangeTextDocument(this.handleDocumentChange, this);
-        vscode.window.onDidChangeActiveTextEditor(this.handleEditorChange, this);
-
-        // İlk indexlemeyi başlat
-        this.indexCodebase();
-        this.setupWebview();
+        
+        // Show error in VS Code UI
+        vscode.window.showErrorMessage(`${context}: ${error.message || 'Unknown error'}`);
     }
 
-    private setupWebview() {
+    private async handleUserMessage(text: string, options: any): Promise<void> {
+        if (!this.isAIEngineReady) {
+            this.showModelConfigurationRequired();
+            return;
+        }
+
+        try {
+            // Add user message to UI immediately
+            const userMessage: Message = {
+                role: 'user',
+                content: text,
+                timestamp: Date.now()
+            };
+            this.messages.push(userMessage);
+            this.webviewView.webview.postMessage({
+                command: 'addMessage',
+                message: userMessage
+            });
+
+            // Show loading state
+            this.webviewView.webview.postMessage({
+                command: 'showLoading'
+            });
+
+            // Process message with chat mode
+            console.log('Processing message with chat mode:', text);
+            const response = await this.aiEngine.processMessage(text, {
+                options: options,
+                codebaseIndex: this.codebaseIndexer.getIndex()
+            });
+
+            // Add assistant response
+            const assistantMessage: Message = {
+                role: 'assistant',
+                content: response,
+                timestamp: Date.now()
+            };
+            this.messages.push(assistantMessage);
+
+            // Hide loading and show response
+            this.webviewView.webview.postMessage({
+                command: 'hideLoading'
+            });
+            this.webviewView.webview.postMessage({
+                command: 'addMessage',
+                message: assistantMessage
+            });
+        } catch (error) {
+            // Hide loading state
+            this.webviewView.webview.postMessage({
+                command: 'hideLoading'
+            });
+
+            // Show error message in chat
+            const errorMessage: Message = {
+                role: 'assistant',
+                content: `I encountered an error while processing your request: ${error instanceof Error ? error.message : 'Unknown error'}\n\nPlease try again or check your AI model configuration.`,
+                timestamp: Date.now()
+            };
+            this.messages.push(errorMessage);
+            this.webviewView.webview.postMessage({
+                command: 'addMessage',
+                message: errorMessage
+            });
+
+            this.handleError('Message processing failed', error instanceof Error ? error : new Error('Unknown error'));
+        }
+    }
+
+    private async indexCodebase() {
+        if (this.isIndexing) return;
+        
+        this.isIndexing = true;
+        try {
+            await this.codebaseIndexer.indexWorkspace();
+            this.webviewView.webview.postMessage({
+                type: 'indexingComplete'
+            });
+        } catch (error) {
+            console.error('Indexing error:', error);
+        } finally {
+            this.isIndexing = false;
+        }
+    }
+
+    private async handleDocumentChange(event: vscode.TextDocumentChangeEvent) {
+        if (event.document === vscode.window.activeTextEditor?.document) {
+            const fileContext = await this.fileAnalyzer.analyzeFile(event.document.uri);
+            this.webviewView.webview.postMessage({
+                type: 'contextUpdate',
+                context: {
+                    file: event.document.fileName,
+                    fileContext
+                }
+            });
+        }
+    }
+
+    private async handleEditorChange(editor: vscode.TextEditor | undefined) {
+        if (editor) {
+            const fileContext = await this.fileAnalyzer.analyzeFile(editor.document.uri);
+            this.webviewView.webview.postMessage({
+                type: 'contextUpdate',
+                context: {
+                    file: editor.document.fileName,
+                    fileContext
+                }
+            });
+        }
+    }
+
+    private async handleAddModel() {
+        await this.modelManager.promptAddModel();
+        this.updateModels();
+    }
+
+    private async handleAttachFile() {
+        try {
+            const result = await vscode.window.showOpenDialog({
+                canSelectFiles: true,
+                canSelectFolders: false,
+                canSelectMany: false,
+                openLabel: 'Attach File'
+            });
+
+            if (result && result[0]) {
+                this.webviewView.webview.postMessage({
+                    command: 'fileAttached',
+                    path: result[0].fsPath
+                });
+            }
+        } catch (error) {
+            console.error('Error attaching file:', error);
+        }
+    }
+
+    private async handleAttachFolder() {
+        try {
+            const result = await vscode.window.showOpenDialog({
+                canSelectFiles: false,
+                canSelectFolders: true,
+                canSelectMany: false,
+                openLabel: 'Attach Folder'
+            });
+
+            if (result && result[0]) {
+                this.webviewView.webview.postMessage({
+                    command: 'folderAttached',
+                    path: result[0].fsPath
+                });
+            }
+        } catch (error) {
+            console.error('Error attaching folder:', error);
+        }
+    }
+
+    private async updateModels() {
+        const models = await this.modelManager.getModels();
+        this.webviewView.webview.postMessage({
+            command: 'updateModels',
+            models
+        });
+    }
+
+    private async setupWebview(): Promise<void> {
         const webview = this.webviewView.webview;
 
         // Set options
@@ -168,186 +392,6 @@ export class AIAssistantPanel {
             undefined,
             this.disposables
         );
-    }
-
-    private async indexCodebase() {
-        if (this.isIndexing) return;
-        
-        this.isIndexing = true;
-        try {
-            await this.codebaseIndexer.indexWorkspace();
-            this.webviewView.webview.postMessage({
-                type: 'indexingComplete'
-            });
-        } catch (error) {
-            console.error('Indexing error:', error);
-        } finally {
-            this.isIndexing = false;
-        }
-    }
-
-    private async handleDocumentChange(event: vscode.TextDocumentChangeEvent) {
-        if (event.document === vscode.window.activeTextEditor?.document) {
-            const fileContext = await this.fileAnalyzer.analyzeFile(event.document.uri);
-            this.webviewView.webview.postMessage({
-                type: 'contextUpdate',
-                context: {
-                    file: event.document.fileName,
-                    fileContext
-                }
-            });
-        }
-    }
-
-    private async handleEditorChange(editor: vscode.TextEditor | undefined) {
-        if (editor) {
-            const fileContext = await this.fileAnalyzer.analyzeFile(editor.document.uri);
-            this.webviewView.webview.postMessage({
-                type: 'contextUpdate',
-                context: {
-                    file: editor.document.fileName,
-                    fileContext
-                }
-            });
-        }
-    }
-
-    private async handleUserMessage(text: string, options: any) {
-        try {
-            console.log('Handling user message:', text); // Debug log
-            
-            // Add user message
-            const userMessage: Message = {
-                role: 'user',
-                content: text,
-                timestamp: Date.now()
-            };
-            
-            // Add attachments if there are any
-            if (options?.attachments && options.attachments.length > 0) {
-                userMessage.attachments = options.attachments;
-            }
-
-            this.messages.push(userMessage);
-            
-            console.log('Sending user message to webview'); // Debug log
-            this.webviewView.webview.postMessage({ 
-                command: 'addMessage', 
-                message: userMessage 
-            });
-
-            // Show loading indicator
-            this.webviewView.webview.postMessage({ command: 'showLoading' });
-
-            // Process with AI based on chat mode
-            let aiResponse = "";
-            try {
-                console.log('Processing message with chat mode:', options?.chatMode || 'chat'); // Debug log
-                switch (options?.chatMode) {
-                    case 'agent':
-                        aiResponse = await this.aiEngine.processAgentMessage(text, {
-                            options,
-                            codebaseIndex: this.codebaseIndexer.getIndex()
-                        });
-                        break;
-                    case 'ask':
-                        aiResponse = await this.aiEngine.processAskMessage(text, {
-                            options,
-                            codebaseIndex: this.codebaseIndexer.getIndex()
-                        });
-                        break;
-                    default:
-                        aiResponse = await this.aiEngine.processMessage(text, {
-                            options,
-                            codebaseIndex: this.codebaseIndexer.getIndex()
-                        });
-                }
-            } catch (aiError) {
-                console.error('AI Engine error:', aiError);
-                aiResponse = "Sorry, I encountered an error processing your request. Please try again.";
-            }
-
-            // Hide loading indicator first
-            this.webviewView.webview.postMessage({ command: 'hideLoading' });
-
-            // Then send assistant message
-            const assistantMessage: Message = {
-                role: 'assistant',
-                content: aiResponse,
-                timestamp: Date.now()
-            };
-
-            this.messages.push(assistantMessage);
-            
-            console.log('Sending assistant response to webview', assistantMessage); // Debug log
-            this.webviewView.webview.postMessage({ 
-                command: 'addMessage', 
-                message: assistantMessage 
-            });
-
-        } catch (error) {
-            console.error('Error processing message:', error);
-            this.webviewView.webview.postMessage({ 
-                command: 'hideLoading' 
-            });
-            this.webviewView.webview.postMessage({ 
-                command: 'showError',
-                error: 'Failed to process message. Please try again.'
-            });
-        }
-    }
-
-    private async handleAddModel() {
-        await this.modelManager.promptAddModel();
-        this.updateModels();
-    }
-
-    private async handleAttachFile() {
-        try {
-            const result = await vscode.window.showOpenDialog({
-                canSelectFiles: true,
-                canSelectFolders: false,
-                canSelectMany: false,
-                openLabel: 'Attach File'
-            });
-
-            if (result && result[0]) {
-                this.webviewView.webview.postMessage({
-                    command: 'fileAttached',
-                    path: result[0].fsPath
-                });
-            }
-        } catch (error) {
-            console.error('Error attaching file:', error);
-        }
-    }
-
-    private async handleAttachFolder() {
-        try {
-            const result = await vscode.window.showOpenDialog({
-                canSelectFiles: false,
-                canSelectFolders: true,
-                canSelectMany: false,
-                openLabel: 'Attach Folder'
-            });
-
-            if (result && result[0]) {
-                this.webviewView.webview.postMessage({
-                    command: 'folderAttached',
-                    path: result[0].fsPath
-                });
-            }
-        } catch (error) {
-            console.error('Error attaching folder:', error);
-        }
-    }
-
-    private async updateModels() {
-        const models = await this.modelManager.getModels();
-        this.webviewView.webview.postMessage({
-            command: 'updateModels',
-            models
-        });
     }
 
     public dispose() {
