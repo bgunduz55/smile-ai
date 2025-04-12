@@ -4,6 +4,7 @@ declare const acquireVsCodeApi: () => {
     setState: (state: any) => void;
 };
 
+// Initialize VS Code API once
 const vscode = acquireVsCodeApi();
 
 // DOM Elements
@@ -38,7 +39,10 @@ messageInput?.addEventListener('keypress', (e: KeyboardEvent) => {
     }
 });
 
-sendButton?.addEventListener('click', sendMessage);
+sendButton?.addEventListener('click', () => {
+    sendMessage();
+});
+
 addModelButtonElement?.addEventListener('click', () => {
     vscode.postMessage({ command: 'addModel' });
 });
@@ -80,9 +84,11 @@ attachFolderButtonElement?.addEventListener('click', () => {
     vscode.postMessage({ command: 'attachFolder' });
 });
 
-// Enhanced message sending with attachments and chat mode
+// Message sending function
 function sendMessage() {
     const content = messageInput?.value.trim();
+    console.log('Sending message:', content); // Debug log
+    
     if (content) {
         const options = {
             includeImports: includeImportsElement?.checked ?? true,
@@ -152,38 +158,46 @@ interface VSCodeMessage {
 // Handle messages from extension
 window.addEventListener('message', (event: MessageEvent<VSCodeMessage>) => {
     const message = event.data;
+    console.log('Received message from extension:', message);
 
     switch (message.command) {
         case 'addMessage':
             if (message.message) {
+                console.log('Adding message to UI:', message.message); // Debug message
                 addMessage(message.message);
             }
             break;
         case 'showLoading':
+            console.log('Showing loading state'); // Debug message
             showLoading();
             break;
         case 'hideLoading':
+            console.log('Hiding loading state'); // Debug message
             hideLoading();
             break;
         case 'showError':
             if (message.error) {
+                console.log('Showing error:', message.error); // Debug message
                 showError(message.error);
             }
             break;
         case 'fileAttached':
             if (message.path) {
+                console.log('File attached:', message.path); // Debug message
                 currentAttachments.push({ type: 'file', path: message.path });
                 updateAttachmentUI();
             }
             break;
         case 'folderAttached':
             if (message.path) {
+                console.log('Folder attached:', message.path); // Debug message
                 currentAttachments.push({ type: 'folder', path: message.path });
                 updateAttachmentUI();
             }
             break;
         case 'updateModels':
             if (message.models) {
+                console.log('Updating models list:', message.models); // Debug message
                 // Update models dropdown if implemented
             }
             break;

@@ -20,16 +20,13 @@ import { ImprovementTreeProvider } from './views/ImprovementTreeProvider';
 import { AIAssistantPanel } from './views/AIAssistantPanel';
 import { ModelManager } from './utils/ModelManager';
 import { AIEngineConfig } from './ai-engine/AIEngineConfig';
-import { ChatView } from './views/ChatView';
-import { CodebaseView } from './views/CodebaseView';
-import { ImprovementsView } from './views/ImprovementsView';
 
 // Export the main extension class
 export class SmileAIExtension {
     private readonly aiEngine: AIEngine;
     private readonly fileAnalyzer: FileAnalyzer;
     private readonly codeAnalyzer: CodeAnalyzer;
-    private readonly codebaseIndexer: CodebaseIndexer;
+    public readonly codebaseIndexer: CodebaseIndexer;
     private readonly statusBarItem: vscode.StatusBarItem;
     private readonly taskExecutors: Map<TaskType, TaskExecutor>;
     private readonly improvementProvider: ImprovementTreeProvider;
@@ -46,18 +43,34 @@ export class SmileAIExtension {
         this.modelManager = ModelManager.getInstance();
         this.improvementManager = ImprovementManager.getInstance();
         
-        // Initialize AI Engine
-        const aiConfig: AIEngineConfig = {
-            provider: {
-                name: 'ollama',
-                modelName: 'gemma3:12b',
-                apiEndpoint: 'http://localhost:11434'
-            },
-            maxTokens: 2048,
-            temperature: 0.7,
-            embeddingModelName: 'nomic-embed-text'
-        };
-        this.aiEngine = new AIEngine(aiConfig);
+        // Initialize AI Engine with active model from ModelManager
+        const activeModel = this.modelManager.getActiveModel();
+        if (!activeModel) {
+            // Eğer aktif model yoksa varsayılan ayarları kullan
+            const aiConfig: AIEngineConfig = {
+                provider: {
+                    name: 'ollama',
+                    modelName: 'qwen2.5-coder:7b',
+                    apiEndpoint: 'http://localhost:11434'
+                },
+                maxTokens: 2048,
+                temperature: 0.7,
+                embeddingModelName: 'nomic-embed-text'
+            };
+            this.aiEngine = new AIEngine(aiConfig);
+        } else {
+            const aiConfig: AIEngineConfig = {
+                provider: {
+                    name: activeModel.provider,
+                    modelName: activeModel.modelName,
+                    apiEndpoint: activeModel.apiEndpoint
+                },
+                maxTokens: activeModel.maxTokens || 2048,
+                temperature: activeModel.temperature || 0.7,
+                embeddingModelName: activeModel.embeddingModelName || 'nomic-embed-text'
+            };
+            this.aiEngine = new AIEngine(aiConfig);
+        }
         
         // Initialize CodebaseIndexer
         this.codebaseIndexer = CodebaseIndexer.getInstance(this.aiEngine);
@@ -66,18 +79,20 @@ export class SmileAIExtension {
         this.improvementProvider = new ImprovementTreeProvider(this.improvementManager);
         vscode.window.registerTreeDataProvider('smile-ai.futureImprovements', this.improvementProvider);
 
-        // Register additional tree views
-        const emptyTreeDataProvider = {
-            getTreeItem: (element: vscode.TreeItem): vscode.TreeItem => element,
-            getChildren: (): Thenable<vscode.TreeItem[]> => Promise.resolve([])
-        };
-        vscode.window.registerTreeDataProvider('smile-ai-codebase', emptyTreeDataProvider);
-        vscode.window.registerTreeDataProvider('smile-ai-improvements', emptyTreeDataProvider);
-
         // Register webview provider
         context.subscriptions.push(
             vscode.window.registerWebviewViewProvider('smile-ai.assistant', {
                 resolveWebviewView: (webviewView: vscode.WebviewView) => {
+                    // Set webview options
+                    webviewView.webview.options = {
+                        enableScripts: true,
+                        enableCommandUris: true,
+                        localResourceRoots: [
+                            vscode.Uri.joinPath(context.extensionUri, 'media'),
+                            vscode.Uri.joinPath(context.extensionUri, 'dist')
+                        ]
+                    };
+                    
                     AIAssistantPanel.currentPanel = new AIAssistantPanel(
                         webviewView,
                         context,
@@ -86,7 +101,7 @@ export class SmileAIExtension {
                         this.codebaseIndexer
                     );
                 }
-            })
+            }, { webviewOptions: { retainContextWhenHidden: true } })
         );
         
         this.taskExecutors = new Map();
@@ -254,72 +269,25 @@ let extension: SmileAIExtension | undefined;
 export async function activate(context: vscode.ExtensionContext) {
     console.log('Smile AI active!');
 
-    // Initialize AI Engine first with configuration
-    const aiConfig: AIEngineConfig = {
-        provider: {
-            name: 'ollama',
-            modelName: 'gemma3:12b',
-            apiEndpoint: 'http://localhost:11434'
-        },
-        maxTokens: 2048,
-        temperature: 0.7,
-        embeddingModelName: 'nomic-embed-text'
-    };
-    const aiEngine = new AIEngine(aiConfig);
+    // Create the extension instance
+    extension = new SmileAIExtension(context);
 
-    // Initialize managers using getInstance pattern
-    const modelManager = ModelManager.getInstance();
-    const codebaseIndexer = CodebaseIndexer.getInstance(aiEngine);
-    const improvementManager = ImprovementManager.getInstance();
-
-    // Register views
-    const chatView = ChatView.getInstance(context.extensionUri);
-    const codebaseView = new CodebaseView();
-    const improvementsView = new ImprovementsView(improvementManager);
-
-    // Register commands
+    // Register commands that don't require the extension instance
     context.subscriptions.push(
         vscode.commands.registerCommand('smile-ai.startChat', () => {
-            chatView.show();
-        }),
-        vscode.commands.registerCommand('smile-ai.indexWorkspace', async () => {
-            await codebaseIndexer.indexWorkspace();
+            vscode.commands.executeCommand('smile-ai.assistant.focus');
         }),
         vscode.commands.registerCommand('smile-ai.attachFile', async (uri: vscode.Uri) => {
             if (uri) {
-                await codebaseIndexer.attachFile(uri.fsPath);
+                await extension?.codebaseIndexer.attachFile(uri.fsPath);
             }
         }),
         vscode.commands.registerCommand('smile-ai.attachFolder', async (uri: vscode.Uri) => {
             if (uri) {
-                await codebaseIndexer.attachFolder(uri.fsPath);
+                await extension?.codebaseIndexer.attachFolder(uri.fsPath);
             }
-        }),
-        vscode.commands.registerCommand('smile-ai.addModel', async () => {
-            await modelManager.addModel({
-                name: 'Gemma 3 12B',
-                provider: 'ollama',
-                modelName: 'gemma3:12b',
-                apiEndpoint: 'http://localhost:11434',
-                maxTokens: 2048,
-                temperature: 0.7,
-                embeddingModelName: 'nomic-embed-text'
-            });
-        }),
-        vscode.commands.registerCommand('smile-ai.removeModel', async (modelName: string) => {
-            await modelManager.removeModel(modelName);
-        }),
-        vscode.commands.registerCommand('smile-ai.selectActiveModel', async (modelName: string) => {
-            await modelManager.setActiveModel(modelName);
         })
     );
-
-    // Register views in the container
-    vscode.window.registerTreeDataProvider('smile-ai-codebase', codebaseView);
-    vscode.window.registerTreeDataProvider('smile-ai-improvements', improvementsView);
-
-    // Register webview view
-    vscode.window.registerWebviewViewProvider('smile-ai-chat', chatView);
 
     // Initial indexing
     vscode.window.withProgress({
@@ -327,7 +295,7 @@ export async function activate(context: vscode.ExtensionContext) {
         title: "Indexing workspace...",
         cancellable: false
     }, async (progress) => {
-        await codebaseIndexer.indexWorkspace((message) => {
+        await extension?.codebaseIndexer.indexWorkspace((message) => {
             progress.report({ message });
         });
     });

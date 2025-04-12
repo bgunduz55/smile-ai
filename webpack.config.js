@@ -13,7 +13,11 @@ module.exports = {
     vscode: 'commonjs vscode'
   },
   resolve: {
-    extensions: ['.ts', '.js']
+    extensions: ['.ts', '.js'],
+    fallback: {
+      path: false,
+      fs: false
+    }
   },
   module: {
     rules: [
@@ -22,11 +26,20 @@ module.exports = {
         exclude: /node_modules/,
         use: [
           {
-            loader: 'ts-loader'
+            loader: 'ts-loader',
+            options: {
+              compilerOptions: {
+                module: 'commonjs'
+              }
+            }
           }
         ]
       }
     ]
   },
-  devtool: 'nosources-source-map'
+  devtool: 'nosources-source-map',
+  node: {
+    __dirname: false,
+    __filename: false
+  }
 }; 

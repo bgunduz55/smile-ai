@@ -1,7 +1,7 @@
 export interface Message {
-    role: 'user' | 'assistant';
+    role: 'user' | 'assistant' | 'system';
     content: string;
-    timestamp: number;
+    timestamp?: number;
     attachments?: Array<{
         type: 'file' | 'folder';
         path: string;
