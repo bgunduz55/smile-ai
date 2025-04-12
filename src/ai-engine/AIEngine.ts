@@ -63,7 +63,18 @@ export class AIEngine {
 
     public async processAgentMessage(message: string, options: ProcessOptions): Promise<string> {
         // Agent mode processing - more autonomous and can take actions
-        return await this.sendRequest(message, options, 'agent');
+        try {
+            // First get the response from the AI
+            const response = await this.sendRequest(message, options, 'agent');
+            
+            // Extract file creation commands from the response
+            await this.executeAgentActions(response);
+            
+            return response;
+        } catch (error) {
+            console.error('Error in processAgentMessage:', error);
+            return `I encountered an error while trying to process your request in agent mode: ${error instanceof Error ? error.message : String(error)}`;
+        }
     }
 
     public async processAskMessage(message: string, options: ProcessOptions): Promise<string> {
@@ -444,6 +455,76 @@ export class AIEngine {
         } catch (error) {
             console.error("Error preparing codebase context:", error);
             return "Error accessing codebase information.";
+        }
+    }
+
+    /**
+     * Extracts and executes actions from the agent's response
+     * Currently supports markdown file creation when content is provided in code blocks
+     */
+    private async executeAgentActions(response: string): Promise<void> {
+        // Import vscode dynamically to avoid issues
+        const vscode = require('vscode');
+        
+        // Extract file names and content from markdown code blocks
+        const fileCreationRegex = /```markdown\s*#.*?```|```md\s*#.*?```|`([^`]+\.md)`|I'll create a file named `([^`]+\.md)`/gs;
+        const matches = [...response.matchAll(fileCreationRegex)];
+        
+        if (matches.length === 0) {
+            console.log('No file creation commands found in response');
+            return;
+        }
+        
+        // Look for markdown content in code blocks
+        const markdownContentRegex = /```markdown\s*([\s\S]*?)```|```md\s*([\s\S]*?)```/gs;
+        const contentMatches = [...response.matchAll(markdownContentRegex)];
+        
+        if (contentMatches.length === 0) {
+            console.log('No markdown content found in response');
+            return;
+        }
+        
+        // Extract potential file name from text
+        let fileName = '';
+        const fileNameMatches = response.match(/`([^`]+\.md)`|I'll create a file named `([^`]+\.md)`|file named `([^`]+\.md)`/);
+        if (fileNameMatches) {
+            fileName = fileNameMatches[1] || fileNameMatches[2] || fileNameMatches[3] || '';
+        }
+        
+        if (!fileName) {
+            console.log('Could not extract file name from response');
+            return;
+        }
+        
+        // Get the content from the first markdown block
+        const content = contentMatches[0][1] || contentMatches[0][2] || '';
+        if (!content) {
+            console.log('No content found in markdown block');
+            return;
+        }
+        
+        // Create the file in the workspace
+        try {
+            const workspaceFolders = vscode.workspace.workspaceFolders;
+            if (!workspaceFolders || workspaceFolders.length === 0) {
+                console.error('No workspace folder found');
+                return;
+            }
+            
+            const workspacePath = workspaceFolders[0].uri.fsPath;
+            const filePath = vscode.Uri.file(`${workspacePath}/${fileName}`);
+            
+            console.log(`Creating file: ${filePath.fsPath}`);
+            console.log(`With content: ${content.substring(0, 100)}...`);
+            
+            await vscode.workspace.fs.writeFile(filePath, Buffer.from(content, 'utf8'));
+            console.log(`Successfully created file: ${filePath.fsPath}`);
+            
+            // Show the file in the editor
+            const document = await vscode.workspace.openTextDocument(filePath);
+            await vscode.window.showTextDocument(document);
+        } catch (error) {
+            console.error(`Failed to create file: ${error instanceof Error ? error.message : String(error)}`);
         }
     }
 } 
