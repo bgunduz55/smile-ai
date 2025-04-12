@@ -79,13 +79,18 @@ export class AIEngine {
             let endpoint = this.config.provider.apiEndpoint;
             
             if (this.config.provider.name === 'ollama') {
-                endpoint = `${this.config.provider.apiEndpoint}/api/chat`;
+                endpoint = `${this.config.provider.apiEndpoint}/api/generate`;
             } else if (this.config.provider.name === 'lmstudio') {
                 endpoint = `${this.config.provider.apiEndpoint}/v1/chat/completions`;
             }
             
             // Construct the request body with options
-            const requestBody = {
+            const requestBody = this.config.provider.name === 'ollama' ? {
+                model: this.config.provider.modelName,
+                prompt: `${this.getSystemPrompt(mode)}\n\nUser: ${message}\n\nAssistant:`,
+                stream: false,
+                options: options.options || {},
+            } : {
                 model: this.config.provider.modelName,
                 messages: [
                     {
@@ -107,7 +112,7 @@ export class AIEngine {
 
             // Try to make API request with timeout
             const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 second timeout
+            const timeoutId = setTimeout(() => controller.abort(), 30000); // Increased timeout to 30 seconds
             
             try {
                 // Make the API request
@@ -127,13 +132,21 @@ export class AIEngine {
                 }
 
                 const data = await response.json();
+                console.log('Received response:', data); // Log the response for debugging
                 
                 // Process response based on provider
+                let content = '';
                 if (this.config.provider.name === 'ollama') {
-                    return data.message?.content || 'No response content received';
+                    content = data.response || data.message?.content || 'No response content received';
+                    // Clean up any <think> tags that might be in the response
+                    content = content.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
                 } else {
-                    return data.choices?.[0]?.message?.content || 'No response content received';
+                    content = data.choices?.[0]?.message?.content || 'No response content received';
                 }
+
+                // Log the final content
+                console.log('Processed content:', content);
+                return content;
             } catch (fetchError) {
                 console.error('Fetch error:', fetchError);
                 // Provide a fallback response

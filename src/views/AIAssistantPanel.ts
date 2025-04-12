@@ -349,12 +349,75 @@ export class AIAssistantPanel {
             </head>
             <body>
                 <div class="container">
-                    <div class="messages" id="messages"></div>
-                    <div class="input-container">
-                        <textarea id="messageInput" placeholder="Type your message..."></textarea>
-                        <button id="sendButton">Send</button>
+                    <div class="toolbar">
+                        <button class="toolbar-button active" data-view="chat">
+                            <i class="codicon codicon-comment-discussion"></i>
+                            Chat
+                        </button>
+                        <button class="toolbar-button" data-view="composer">
+                            <i class="codicon codicon-edit"></i>
+                            Composer
+                        </button>
+                        <button class="toolbar-button" data-view="settings">
+                            <i class="codicon codicon-gear"></i>
+                            Settings
+                        </button>
+                        <div style="flex: 1"></div>
+                        <div class="chat-mode">
+                            <select id="chatMode">
+                                <option value="chat">Chat</option>
+                                <option value="agent">Agent</option>
+                                <option value="ask">Ask</option>
+                            </select>
+                        </div>
+                        <button class="toolbar-button" id="addModel">
+                            <i class="codicon codicon-add"></i>
+                            Add AI Model
+                        </button>
+                    </div>
+                    <div class="chat-container">
+                        <div class="messages" id="messages">
+                            <!-- Messages will be inserted here -->
+                        </div>
+                        <div class="input-container">
+                            <div class="input-row">
+                                <textarea
+                                    class="input-box"
+                                    id="messageInput"
+                                    placeholder="Ask, search, build anything... (Enter ile gönder, Shift+Enter ile yeni satır)"
+                                    rows="1"
+                                ></textarea>
+                                <button class="send-button" id="sendButton">
+                                    <i class="codicon codicon-send"></i>
+                                    Send
+                                </button>
+                            </div>
+                        </div>
                     </div>
                 </div>
+
+                <template id="message-template">
+                    <div class="message">
+                        <div class="avatar">
+                            <i class="codicon"></i>
+                        </div>
+                        <div class="message-content">
+                            <div class="markdown-content"></div>
+                        </div>
+                    </div>
+                </template>
+
+                <template id="code-block-template">
+                    <div class="code-block">
+                        <div class="header">
+                            <span class="filename"></span>
+                            <button class="copy-button">
+                                <i class="codicon codicon-copy"></i>
+                            </button>
+                        </div>
+                        <pre><code></code></pre>
+                    </div>
+                </template>
             </body>
             </html>`;
             

@@ -76,37 +76,55 @@ body {
     border-radius: 8px;
     background: var(--vscode-editor-background);
     position: relative;
+    animation: fadeIn 0.3s ease-out;
+    margin-bottom: 8px;
 }
 
 .message.user {
-    background: var(--vscode-editor-selectionBackground);
+    background: var(--cursor-user-bg, #2d2d2d);
     margin-left: 20%;
 }
 
 .message.assistant {
-    background: var(--vscode-editor-inactiveSelectionBackground);
+    background: var(--cursor-assistant-bg, #252526);
     margin-right: 20%;
 }
 
+.message.system {
+    background: rgba(65, 105, 225, 0.1);
+    margin: 8px 0;
+    border-left: 4px solid #4169e1;
+    padding-left: 12px;
+}
+
 .message.error {
-    background: var(--vscode-inputValidation-errorBackground);
-    border: 1px solid var(--vscode-inputValidation-errorBorder);
-    margin: 10px 0;
+    background-color: rgba(255, 0, 0, 0.1);
+    border-left: 4px solid #ff0000;
+    margin: 8px 0;
+    padding: 12px;
 }
 
 .message.loading {
-    background: var(--vscode-editor-inactiveSelectionBackground);
+    background: transparent;
+    padding: 12px;
+    margin: 8px 0;
+}
+
+.loading-content {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    color: var(--vscode-foreground);
     opacity: 0.8;
 }
 
 .loading-spinner {
     width: 20px;
     height: 20px;
-    border: 2px solid var(--vscode-editor-foreground);
+    border: 2px solid var(--vscode-foreground);
     border-radius: 50%;
     border-top-color: transparent;
     animation: spin 1s linear infinite;
-    margin: 10px auto;
 }
 
 @keyframes spin {
@@ -117,45 +135,49 @@ body {
 
 .error-content {
     display: flex;
-    flex-direction: column;
-    gap: 8px;
-    width: 100%;
+    align-items: flex-start;
+    gap: 12px;
 }
 
-.error-icon {
-    font-size: 1.2em;
-    color: var(--vscode-inputValidation-errorBorder);
-}
-
-.error-message {
-    color: var(--vscode-inputValidation-errorForeground);
-    font-weight: bold;
+.error-content .codicon-error {
+    color: #ff0000;
+    font-size: 20px;
+    flex-shrink: 0;
 }
 
 .error-details {
-    font-family: var(--vscode-editor-font-family);
-    font-size: 0.9em;
-    white-space: pre-wrap;
-    background: var(--vscode-input-background);
+    flex-grow: 1;
+}
+
+.error-details pre {
+    background: rgba(0, 0, 0, 0.1);
     padding: 8px;
+    margin: 8px 0;
     border-radius: 4px;
-    max-height: 200px;
-    overflow-y: auto;
+    overflow-x: auto;
 }
 
 .retry-button {
-    align-self: flex-end;
     background: var(--vscode-button-background);
     color: var(--vscode-button-foreground);
     border: none;
-    padding: 4px 8px;
-    border-radius: 2px;
+    padding: 6px 12px;
+    border-radius: 4px;
     cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
     margin-top: 8px;
+    font-size: 12px;
 }
 
 .retry-button:hover {
     background: var(--vscode-button-hoverBackground);
+}
+
+.retry-button:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
 }
 
 .timestamp {
@@ -235,6 +257,7 @@ pre code {
 
 .markdown-content {
     line-height: 1.5;
+    white-space: pre-wrap;
 }
 
 .markdown-content p {
@@ -462,6 +485,40 @@ pre code {
 
 .system.error .avatar {
     background-color: rgba(244, 67, 54, 0.5);
+}
+
+.message .avatar {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    background: var(--vscode-button-background);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+}
+
+.message .avatar i {
+    font-size: 18px;
+    color: var(--vscode-button-foreground);
+}
+
+.message.user .avatar {
+    background: #4d78cc;
+}
+
+.message.assistant .avatar {
+    background: #6a9955;
+}
+
+.message.system .avatar {
+    background: #4169e1;
+}
+
+.message-content {
+    flex: 1;
+    overflow-wrap: break-word;
+    min-width: 0;
 }
 
 /* Responsive adjustments */
