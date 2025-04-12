@@ -156,12 +156,33 @@ export class AIAssistantPanel {
                 command: 'showLoading'
             });
 
-            // Process message with chat mode
-            console.log('Processing message with chat mode:', text);
-            const response = await this.aiEngine.processMessage(text, {
-                options: options,
-                codebaseIndex: this.codebaseIndexer.getIndex()
-            });
+            // Check if the user's message contains action-oriented keywords that suggest agent mode
+            const agentModeKeywords = [
+                'ekle', 'oluştur', 'yarat', 'düzenle', 'güncelle', 'sil', 'değiştir', 
+                'add', 'create', 'make', 'edit', 'update', 'delete', 'change', 'modify',
+                'fix', 'implement', 'write', 'generate', 'build'
+            ];
+            
+            const shouldUseAgentMode = agentModeKeywords.some(keyword => 
+                text.toLowerCase().includes(keyword.toLowerCase())
+            );
+            
+            let response;
+            if (shouldUseAgentMode) {
+                // Process message with agent mode for action-oriented requests
+                console.log('Processing message with agent mode:', text);
+                response = await this.aiEngine.processAgentMessage(text, {
+                    options: options,
+                    codebaseIndex: this.codebaseIndexer.getIndex()
+                });
+            } else {
+                // Process message with chat mode for Q&A
+                console.log('Processing message with chat mode:', text);
+                response = await this.aiEngine.processMessage(text, {
+                    options: options,
+                    codebaseIndex: this.codebaseIndexer.getIndex()
+                });
+            }
 
             // Add assistant response
             const assistantMessage: Message = {
