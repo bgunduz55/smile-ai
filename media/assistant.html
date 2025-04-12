@@ -167,6 +167,24 @@
         </div>
     </div>
 
+    <template id="messageTemplate">
+        <div class="message">
+            <div class="avatar">
+                <i class="codicon"></i>
+            </div>
+            <div class="message-content">
+                <div class="markdown-content"></div>
+            </div>
+        </div>
+    </template>
+
+    <template id="fileAttachmentTemplate">
+        <div class="file-attachment">
+            <i class="codicon icon"></i>
+            <span class="filename"></span>
+        </div>
+    </template>
+
     <script>
         const vscode = acquireVsCodeApi();
         const messageContainer = document.getElementById('messageContainer');

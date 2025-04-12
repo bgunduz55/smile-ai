@@ -56,9 +56,9 @@ export class ModelManager {
         // Eğer hiç model yoksa veya aktif model bulunamadıysa varsayılan modeli ekle
         if (this.models.length === 0 || !this.models.some(m => m.name === activeModelName)) {
             const defaultModel: AIModel = {
-                name: 'qwen2.5-coder:7b',
+                name: 'gemma3:12b',
                 provider: 'ollama',
-                modelName: 'qwen2.5-coder:7b',
+                modelName: 'gemma3:12b',
                 apiEndpoint: 'http://localhost:11434',
                 maxTokens: 2048,
                 temperature: 0.7,
@@ -68,13 +68,14 @@ export class ModelManager {
             // Varsayılan modeli ekle ve aktif model olarak ayarla
             await this.addModel(defaultModel);
             await this.setActiveModel(defaultModel.name);
+            this.activeModel = defaultModel; // Hemen aktif modeli ayarla
             return;
         }
 
         // Aktif modeli ayarla
         if (activeModelName) {
             this.activeModel = this.models.find(m => m.name === activeModelName);
-        } 
+        }
         
         // Aktif model hala ayarlanmadıysa ilk modeli kullan
         if (!this.activeModel && this.models.length > 0) {
