@@ -202,16 +202,32 @@ export class AIAssistantPanel {
     }
 
     private async indexCodebase() {
-        if (this.isIndexing) return;
+        console.log('Starting codebase indexing from AIAssistantPanel');
+        if (this.isIndexing) {
+            console.log('Indexing already in progress');
+            return;
+        }
         
         this.isIndexing = true;
         try {
-            await this.codebaseIndexer.indexWorkspace();
+            // First make sure the AI engine is ready
+            if (!this.isAIEngineReady) {
+                console.log('AI Engine not ready, initializing before indexing');
+                await this.initializeAIEngine();
+            }
+            
+            // Then start indexing
+            await this.codebaseIndexer.indexWorkspace((message) => {
+                console.log('Indexing progress:', message);
+            });
+            
+            console.log('Codebase indexing complete');
             this.webviewView.webview.postMessage({
                 type: 'indexingComplete'
             });
         } catch (error) {
-            console.error('Indexing error:', error);
+            console.error('Codebase indexing error:', error);
+            throw error;
         } finally {
             this.isIndexing = false;
         }
@@ -318,7 +334,7 @@ export class AIAssistantPanel {
             // Create a welcome message
             const welcomeMessage: Message = {
                 role: 'system',
-                content: 'Welcome to Smile AI! I\'m ready to help you with your code. You can ask questions, get explanations, or request code changes.',
+                content: 'Welcome to Smile AI! I\'m ready to help you with your code. You can ask questions, get explanations, or request code changes. I\'m indexing your codebase to provide better assistance.',
                 timestamp: Date.now()
             };
             
@@ -402,6 +418,34 @@ export class AIAssistantPanel {
                     command: 'addMessage', 
                     message: welcomeMessage
                 });
+                
+                // Start indexing in the background
+                this.indexCodebase()
+                    .then(() => {
+                        const indexCompleteMessage: Message = {
+                            role: 'system',
+                            content: 'Codebase indexing complete! I now have a better understanding of your project.',
+                            timestamp: Date.now()
+                        };
+                        this.messages.push(indexCompleteMessage);
+                        webview.postMessage({
+                            command: 'addMessage',
+                            message: indexCompleteMessage
+                        });
+                    })
+                    .catch((error) => {
+                        console.error('Error during codebase indexing:', error);
+                        const indexErrorMessage: Message = {
+                            role: 'system',
+                            content: 'There was an issue indexing your codebase. I\'ll still try to help, but my responses might be less accurate.',
+                            timestamp: Date.now()
+                        };
+                        this.messages.push(indexErrorMessage);
+                        webview.postMessage({
+                            command: 'addMessage',
+                            message: indexErrorMessage
+                        });
+                    });
             }, 1000);
         } catch (error) {
             console.error('Error setting up webview:', error);
