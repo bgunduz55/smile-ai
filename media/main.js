@@ -31,31 +31,8 @@
         if (userInput) userInput.disabled = true;
         if (sendButton) sendButton.disabled = true;
         
-        // Show sending feedback immediately
-        const messagesWrapper = document.getElementById('messages');
-        if (messagesWrapper) {
-            const messageEl = document.createElement('div');
-            messageEl.className = 'message user';
-            messageEl.setAttribute('data-content', text);
-            
-            const avatarEl = document.createElement('div');
-            avatarEl.className = 'avatar';
-            const iconEl = document.createElement('i');
-            iconEl.className = 'codicon codicon-account';
-            avatarEl.appendChild(iconEl);
-            
-            const contentEl = document.createElement('div');
-            contentEl.className = 'message-content';
-            const markdownEl = document.createElement('div');
-            markdownEl.className = 'markdown-content';
-            markdownEl.innerHTML = formatMessageContent(text);
-            contentEl.appendChild(markdownEl);
-            
-            messageEl.appendChild(avatarEl);
-            messageEl.appendChild(contentEl);
-            messagesWrapper.appendChild(messageEl);
-            messagesWrapper.scrollTop = messagesWrapper.scrollHeight;
-        }
+        // Don't add message locally anymore - let the extension handle it
+        // to avoid duplication
         
         // Send to extension
         vscode.postMessage({

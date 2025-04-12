@@ -349,32 +349,6 @@ export class AIAssistantPanel {
             </head>
             <body>
                 <div class="container">
-                    <div class="toolbar">
-                        <button class="toolbar-button active" data-view="chat">
-                            <i class="codicon codicon-comment-discussion"></i>
-                            Chat
-                        </button>
-                        <button class="toolbar-button" data-view="composer">
-                            <i class="codicon codicon-edit"></i>
-                            Composer
-                        </button>
-                        <button class="toolbar-button" data-view="settings">
-                            <i class="codicon codicon-gear"></i>
-                            Settings
-                        </button>
-                        <div style="flex: 1"></div>
-                        <div class="chat-mode">
-                            <select id="chatMode">
-                                <option value="chat">Chat</option>
-                                <option value="agent">Agent</option>
-                                <option value="ask">Ask</option>
-                            </select>
-                        </div>
-                        <button class="toolbar-button" id="addModel">
-                            <i class="codicon codicon-add"></i>
-                            Add AI Model
-                        </button>
-                    </div>
                     <div class="chat-container">
                         <div class="messages" id="messages">
                             <!-- Messages will be inserted here -->
