@@ -58,3 +58,4 @@ Smile AI is a powerful code assistant developed for VSCode that operates using c
 - Webview panels
 - Status bar notifications
 - Code lens and decoration support
+
