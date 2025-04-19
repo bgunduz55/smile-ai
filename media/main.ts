@@ -147,12 +147,30 @@ function updateAttachmentUI() {
     });
 }
 
+// Define ChatMessage interface
+interface ChatMessage {
+    role: "user" | "assistant" | "system";
+    content: string;
+    timestamp: number;
+    attachments?: Array<{
+        type: 'file' | 'folder';
+        path: string;
+    }>;
+}
+
+// Interface for messages from extension
 interface VSCodeMessage {
     command: string;
-    message?: any;
-    error?: string;
+    message?: ChatMessage;
+    error?: {
+        message: string;
+        details?: string;
+    };
     path?: string;
     models?: any[];
+    operations?: FileOperation[];
+    id?: string;
+    diff?: { added: boolean; removed: boolean; value: string; }[];
 }
 
 // Handle messages from extension
@@ -201,18 +219,19 @@ window.addEventListener('message', (event: MessageEvent<VSCodeMessage>) => {
                 // Update models dropdown if implemented
             }
             break;
+        case 'updatePendingOperations':
+            if (message.operations) {
+                pendingOperations = message.operations;
+                updatePendingOperationsUI();
+            }
+            break;
+        case 'operationDiff':
+            if (message.id && message.diff) {
+                updateOperationDiff(message.id, message.diff);
+            }
+            break;
     }
 });
-
-interface ChatMessage {
-    role: 'user' | 'assistant' | 'system';
-    content: string;
-    timestamp?: number;
-    attachments?: Array<{
-        type: 'file' | 'folder';
-        path: string;
-    }>;
-}
 
 function addMessage(message: ChatMessage) {
     if (!messageTemplateElement || !messagesContainer) return;
@@ -333,19 +352,209 @@ function hideLoading() {
     }
 }
 
-function showError(error: string) {
-    if (!messagesContainer) return;
+function showError(error: { message: string; details?: string }) {
+    // Handle error display
+    const errorMessage = {
+        role: 'system' as "user" | "assistant" | "system",
+        content: `Error: ${error.message}`,
+        timestamp: Date.now()
+    };
     
-    const errorDiv = document.createElement('div');
-    errorDiv.className = 'message system error';
-    errorDiv.innerHTML = `
-        <div class="avatar">
-            <i class="codicon codicon-error"></i>
-        </div>
-        <div class="message-content">
-            <div class="markdown-content">Error: ${error}</div>
+    addMessage(errorMessage);
+}
+
+// File operation interfaces
+interface FileOperation {
+    id: string;
+    type: 'add' | 'update' | 'delete';
+    filePath: string;
+    originalContent?: string;
+    newContent?: string;
+    description?: string;
+    created: number;
+}
+
+// Operation state management
+let pendingOperations: FileOperation[] = [];
+
+// File operations UI
+function updatePendingOperationsUI() {
+    const operationsContainer = document.querySelector('.pending-operations') as HTMLElement;
+    if (!operationsContainer) return;
+
+    operationsContainer.innerHTML = '';
+    
+    if (pendingOperations.length === 0) {
+        operationsContainer.style.display = 'none';
+        return;
+    }
+    
+    operationsContainer.style.display = 'block';
+    
+    // Add header with accept/reject all buttons
+    const headerElement = document.createElement('div');
+    headerElement.className = 'operations-header';
+    headerElement.innerHTML = `
+        <h3>Pending File Operations (${pendingOperations.length})</h3>
+        <div class="operation-actions">
+            <button class="accept-all-button">
+                <i class="codicon codicon-check-all"></i> Accept All
+            </button>
+            <button class="reject-all-button">
+                <i class="codicon codicon-close-all"></i> Reject All
+            </button>
         </div>
     `;
-    messagesContainer.appendChild(errorDiv);
-    messagesContainer.scrollTop = messagesContainer.scrollHeight;
+    
+    // Add event listeners for accept/reject all buttons
+    const acceptAllButton = headerElement.querySelector('.accept-all-button');
+    acceptAllButton?.addEventListener('click', () => {
+        vscode.postMessage({
+            command: 'acceptAllOperations'
+        });
+    });
+    
+    const rejectAllButton = headerElement.querySelector('.reject-all-button');
+    rejectAllButton?.addEventListener('click', () => {
+        vscode.postMessage({
+            command: 'rejectAllOperations'
+        });
+    });
+    
+    operationsContainer.appendChild(headerElement);
+    
+    // Add each operation
+    pendingOperations.forEach(operation => {
+        const element = document.createElement('div');
+        element.className = 'operation-item';
+        element.dataset.id = operation.id;
+        
+        // Get path parts for display
+        const fileName = operation.filePath.split('/').pop() || operation.filePath.split('\\').pop() || '';
+        const dirPath = operation.filePath.replace(fileName, '');
+        
+        // Get operation icon
+        let operationIcon = '';
+        let operationLabel = '';
+        switch (operation.type) {
+            case 'add':
+                operationIcon = 'codicon-add';
+                operationLabel = 'Add';
+                break;
+            case 'update':
+                operationIcon = 'codicon-edit';
+                operationLabel = 'Update';
+                break;
+            case 'delete':
+                operationIcon = 'codicon-trash';
+                operationLabel = 'Delete';
+                break;
+        }
+        
+        element.innerHTML = `
+            <div class="operation-header">
+                <div class="operation-info">
+                    <span class="operation-type">
+                        <i class="codicon ${operationIcon}"></i> ${operationLabel}
+                    </span>
+                    <span class="operation-file">
+                        <span class="file-name">${fileName}</span>
+                        <span class="file-path">${dirPath}</span>
+                    </span>
+                </div>
+                <div class="operation-actions">
+                    <button class="accept-button" title="Accept">
+                        <i class="codicon codicon-check"></i>
+                    </button>
+                    <button class="reject-button" title="Reject">
+                        <i class="codicon codicon-x"></i>
+                    </button>
+                </div>
+            </div>
+            <div class="operation-content">
+                ${operation.description ? `<div class="operation-description">${operation.description}</div>` : ''}
+                ${operation.type === 'update' ? `<div class="operation-diff"></div>` : ''}
+                ${operation.type === 'add' ? `<div class="operation-preview"></div>` : ''}
+            </div>
+        `;
+        
+        // Add event listeners for individual accept/reject buttons
+        const acceptButton = element.querySelector('.accept-button');
+        acceptButton?.addEventListener('click', () => {
+            vscode.postMessage({
+                command: 'acceptOperation',
+                id: operation.id
+            });
+        });
+        
+        const rejectButton = element.querySelector('.reject-button');
+        rejectButton?.addEventListener('click', () => {
+            vscode.postMessage({
+                command: 'rejectOperation',
+                id: operation.id
+            });
+        });
+        
+        // If this is an update operation, request the diff
+        if (operation.type === 'update') {
+            vscode.postMessage({
+                command: 'getOperationDiff',
+                id: operation.id
+            });
+        }
+        
+        // If this is an add operation, show the preview
+        if (operation.type === 'add' && operation.newContent) {
+            const previewElement = element.querySelector('.operation-preview');
+            if (previewElement) {
+                previewElement.innerHTML = `<pre class="code-preview">${escapeHtml(operation.newContent)}</pre>`;
+            }
+        }
+        
+        operationsContainer.appendChild(element);
+    });
+}
+
+// Helper function to escape HTML
+function escapeHtml(unsafe: string): string {
+    return unsafe
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
+}
+
+function updateOperationDiff(operationId: string, diff: { added: boolean; removed: boolean; value: string; }[]) {
+    const operationElement = document.querySelector(`.operation-item[data-id="${operationId}"]`);
+    if (!operationElement) return;
+    
+    const diffElement = operationElement.querySelector('.operation-diff');
+    if (!diffElement) return;
+    
+    diffElement.innerHTML = '';
+    
+    // Create a diff display
+    const diffContainer = document.createElement('div');
+    diffContainer.className = 'diff-container';
+    
+    diff.forEach(part => {
+        const diffPart = document.createElement('div');
+        diffPart.className = part.added ? 'diff-added' : part.removed ? 'diff-removed' : 'diff-unchanged';
+        
+        const lines = part.value.split('\n');
+        lines.forEach((line, index) => {
+            if (index < lines.length - 1 || line.length > 0) {
+                const lineElement = document.createElement('div');
+                lineElement.className = 'diff-line';
+                const prefix = part.added ? '+ ' : part.removed ? '- ' : '  ';
+                lineElement.textContent = prefix + line;
+                diffPart.appendChild(lineElement);
+            }
+        });
+        
+        diffContainer.appendChild(diffPart);
+    });
+    
+    diffElement.appendChild(diffContainer);
 } 
