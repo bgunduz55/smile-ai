@@ -4,6 +4,7 @@ import { ModelManager } from '../utils/ModelManager';
 import { CodebaseIndexer } from '../indexing/CodebaseIndexer';
 import { FileAnalyzer } from '../utils/FileAnalyzer';
 import { Message } from '../types/chat';
+import { FileOperationManager } from '../utils/FileOperationManager';
 
 export class AIAssistantPanel {
     public static currentPanel: AIAssistantPanel | undefined;
@@ -32,6 +33,10 @@ export class AIAssistantPanel {
         this.modelManager = modelManager;
         this.codebaseIndexer = codebaseIndexer;
         this.fileAnalyzer = FileAnalyzer.getInstance();
+        
+        // Set up FileOperationManager
+        const fileOperationManager = FileOperationManager.getInstance();
+        fileOperationManager.setWebviewView(webviewView);
         
         // Initialize components independently
         this.initializeAIEngine()
@@ -156,24 +161,78 @@ export class AIAssistantPanel {
                 command: 'showLoading'
             });
 
+            // Enhanced agent mode detection with more context awareness
             // Check if the user's message contains action-oriented keywords that suggest agent mode
             const agentModeKeywords = [
-                'ekle', 'oluştur', 'yarat', 'düzenle', 'güncelle', 'sil', 'değiştir', 
-                'add', 'create', 'make', 'edit', 'update', 'delete', 'change', 'modify',
-                'fix', 'implement', 'write', 'generate', 'build'
+                // Explicit action verbs (English & Turkish)
+                'ekle', 'oluştur', 'yarat', 'düzenle', 'güncelle', 'sil', 'değiştir', 'yaz', 'kodla',
+                'add', 'create', 'make', 'edit', 'update', 'delete', 'change', 'modify', 'write', 'code',
+                'fix', 'implement', 'generate', 'build', 'develop', 'refactor', 'improve',
+                
+                // File type references suggesting creation
+                '.md', '.js', '.ts', '.html', '.css', '.json', '.yml', '.yaml', '.txt', '.xml',
+                'dosya', 'file', 'document', 'script', 'class', 'component', 'module',
+                
+                // Implied creation phrases
+                'yeni', 'new', 'oluşturabilir misin', 'can you create', 'dosyası', 'bir md', 'a file', 
+                'özellik', 'feature', 'implement', 'generate', 'need to have', 'olmalı',
+                'ekler misin', 'could you add', 'should be created'
             ];
             
-            const shouldUseAgentMode = agentModeKeywords.some(keyword => 
+            // Check for contextual clues that suggest an agent mode response
+            const previousMessages = this.messages.slice(-5); // Get the last 5 messages for context
+            let containsFollowUpCue = false;
+            
+            // Check if this message seems to be following up on a previous request
+            // by looking for phrases that imply correction or continuation
+            const followUpPhrases = [
+                'ama', 'but', 'instead', 'yerine', 'aslında', 'actually', 'hatırlayarak',
+                'remember', 'hala', 'still', 'tekrar', 'again', 'bir daha', 'once more',
+                'doğru', 'correct', 'yanlış', 'wrong', 'olmadı', 'didn\'t work',
+                'yapamadı', 'couldn\'t', 'çalışmadı', 'didn\'t work'
+            ];
+            
+            const containsFollowUpPhrase = followUpPhrases.some(phrase => 
+                text.toLowerCase().includes(phrase.toLowerCase())
+            );
+            
+            // If this seems like a follow-up message, check if we have a previous agent response
+            if (containsFollowUpPhrase) {
+                const hasPreviousAgentResponse = previousMessages.some(msg => 
+                    msg.role === 'assistant' && 
+                    (msg.content.includes('```') || // Contains code block
+                     msg.content.includes('file') || // References a file
+                     msg.content.includes('dosya')) // References a file in Turkish
+                );
+                
+                if (hasPreviousAgentResponse) {
+                    containsFollowUpCue = true;
+                }
+            }
+            
+            // Determine if agent mode should be used
+            const containsAgentKeyword = agentModeKeywords.some(keyword => 
                 text.toLowerCase().includes(keyword.toLowerCase())
             );
+            
+            const shouldUseAgentMode = containsAgentKeyword || containsFollowUpCue;
             
             let response;
             if (shouldUseAgentMode) {
                 // Process message with agent mode for action-oriented requests
                 console.log('Processing message with agent mode:', text);
+                
+                // If this is a follow-up, provide the context of previous messages
+                const contextHistory = containsFollowUpCue ? previousMessages.map(msg => ({
+                    role: msg.role,
+                    content: msg.content,
+                    timestamp: msg.timestamp || Date.now() // Ensure timestamp is always a number
+                })) : [];
+                
                 response = await this.aiEngine.processAgentMessage(text, {
                     options: options,
-                    codebaseIndex: this.codebaseIndexer.getIndex()
+                    codebaseIndex: this.codebaseIndexer.getIndex(),
+                    contextHistory: contextHistory
                 });
             } else {
                 // Process message with chat mode for Q&A
@@ -405,6 +464,11 @@ export class AIAssistantPanel {
                             </div>
                         </div>
                     </div>
+                    
+                    <!-- Pending file operations container -->
+                    <div class="pending-operations" style="display: none;">
+                        <!-- File operations will be inserted here -->
+                    </div>
                 </div>
 
                 <template id="message-template">
@@ -489,11 +553,105 @@ export class AIAssistantPanel {
                     case 'attachFolder':
                         await this.handleAttachFolder();
                         break;
+                    case 'acceptOperation':
+                        await this.handleAcceptOperation(message.id);
+                        break;
+                    case 'rejectOperation':
+                        await this.handleRejectOperation(message.id);
+                        break;
+                    case 'acceptAllOperations':
+                        await this.handleAcceptAllOperations();
+                        break;
+                    case 'rejectAllOperations':
+                        await this.handleRejectAllOperations();
+                        break;
+                    case 'getOperationDiff':
+                        await this.handleGetOperationDiff(message.id);
+                        break;
                 }
             },
             undefined,
             this.disposables
         );
+    }
+
+    private async handleAcceptOperation(id: string): Promise<void> {
+        try {
+            const fileOperationManager = FileOperationManager.getInstance();
+            const success = await fileOperationManager.acceptOperation(id);
+            
+            if (success) {
+                vscode.window.showInformationMessage('File operation applied successfully.');
+            } else {
+                vscode.window.showErrorMessage('Failed to apply file operation.');
+            }
+        } catch (error) {
+            console.error('Error accepting operation:', error);
+            vscode.window.showErrorMessage(`Error applying operation: ${error instanceof Error ? error.message : 'Unknown error'}`);
+        }
+    }
+
+    private async handleRejectOperation(id: string): Promise<void> {
+        try {
+            const fileOperationManager = FileOperationManager.getInstance();
+            const success = await fileOperationManager.rejectOperation(id);
+            
+            if (success) {
+                vscode.window.showInformationMessage('File operation rejected.');
+            } else {
+                vscode.window.showErrorMessage('Failed to reject file operation.');
+            }
+        } catch (error) {
+            console.error('Error rejecting operation:', error);
+            vscode.window.showErrorMessage(`Error rejecting operation: ${error instanceof Error ? error.message : 'Unknown error'}`);
+        }
+    }
+
+    private async handleAcceptAllOperations(): Promise<void> {
+        try {
+            const fileOperationManager = FileOperationManager.getInstance();
+            const success = await fileOperationManager.acceptAllOperations();
+            
+            if (success) {
+                vscode.window.showInformationMessage('All file operations applied successfully.');
+            } else {
+                vscode.window.showErrorMessage('Failed to apply all file operations.');
+            }
+        } catch (error) {
+            console.error('Error accepting all operations:', error);
+            vscode.window.showErrorMessage(`Error applying all operations: ${error instanceof Error ? error.message : 'Unknown error'}`);
+        }
+    }
+
+    private async handleRejectAllOperations(): Promise<void> {
+        try {
+            const fileOperationManager = FileOperationManager.getInstance();
+            const success = await fileOperationManager.rejectAllOperations();
+            
+            if (success) {
+                vscode.window.showInformationMessage('All file operations rejected.');
+            } else {
+                vscode.window.showErrorMessage('Failed to reject all file operations.');
+            }
+        } catch (error) {
+            console.error('Error rejecting all operations:', error);
+            vscode.window.showErrorMessage(`Error rejecting all operations: ${error instanceof Error ? error.message : 'Unknown error'}`);
+        }
+    }
+
+    private async handleGetOperationDiff(id: string): Promise<void> {
+        try {
+            const fileOperationManager = FileOperationManager.getInstance();
+            const diff = fileOperationManager.getDiff(id);
+            
+            this.webviewView.webview.postMessage({
+                command: 'operationDiff',
+                id,
+                diff
+            });
+        } catch (error) {
+            console.error('Error getting operation diff:', error);
+        }
     }
 
     public dispose() {

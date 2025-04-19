@@ -531,4 +531,147 @@ pre code {
     .message-content {
         max-width: 85%;
     }
+}
+
+/* File Operations UI */
+.pending-operations {
+    margin-top: 15px;
+    border: 1px solid var(--vscode-panel-border);
+    border-radius: 5px;
+    overflow: hidden;
+    background-color: var(--vscode-editor-background);
+}
+
+.operations-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 12px;
+    background-color: var(--vscode-panel-background);
+    border-bottom: 1px solid var(--vscode-panel-border);
+}
+
+.operations-header h3 {
+    margin: 0;
+    font-size: 14px;
+    font-weight: 500;
+}
+
+.operation-actions {
+    display: flex;
+    gap: 8px;
+}
+
+.operation-actions button {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    background: none;
+    border: 1px solid var(--vscode-button-border);
+    border-radius: 3px;
+    color: var(--vscode-button-foreground);
+    cursor: pointer;
+    font-size: 12px;
+    padding: 2px 8px;
+}
+
+.accept-all-button, .accept-button {
+    background-color: var(--vscode-button-background);
+    color: var(--vscode-button-foreground);
+}
+
+.reject-all-button, .reject-button {
+    background-color: var(--vscode-errorForeground);
+    color: white;
+}
+
+.operation-item {
+    padding: 10px;
+    border-bottom: 1px solid var(--vscode-panel-border);
+}
+
+.operation-item:last-child {
+    border-bottom: none;
+}
+
+.operation-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+}
+
+.operation-info {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.operation-type {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-weight: 500;
+}
+
+.operation-file {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.file-name {
+    font-weight: 500;
+}
+
+.file-path {
+    opacity: 0.7;
+    font-size: 12px;
+}
+
+.operation-content {
+    margin-top: 8px;
+}
+
+.operation-description {
+    margin-bottom: 8px;
+    font-style: italic;
+    opacity: 0.9;
+}
+
+.diff-container {
+    font-family: 'Consolas', 'Courier New', monospace;
+    font-size: 12px;
+    white-space: pre;
+    overflow-x: auto;
+    margin-top: 8px;
+    border: 1px solid var(--vscode-panel-border);
+    border-radius: 3px;
+    background-color: var(--vscode-editor-background);
+}
+
+.diff-added {
+    background-color: rgba(0, 255, 0, 0.1);
+}
+
+.diff-removed {
+    background-color: rgba(255, 0, 0, 0.1);
+}
+
+.diff-line {
+    white-space: pre;
+    padding: 0 4px;
+}
+
+.code-preview {
+    background-color: var(--vscode-editor-background);
+    color: var(--vscode-editor-foreground);
+    padding: 8px;
+    border-radius: 3px;
+    overflow-x: auto;
+    font-family: 'Consolas', 'Courier New', monospace;
+    font-size: 12px;
+    border: 1px solid var(--vscode-panel-border);
+    max-height: 300px;
+    overflow-y: auto;
 } 

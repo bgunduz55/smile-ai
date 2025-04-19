@@ -2,6 +2,10 @@ import axios from 'axios';
 import { AIMessage, AIRequest, AIResponse } from './types';
 import { CodebaseIndex } from '../indexing/CodebaseIndex';
 import { IndexedFile } from '../indexing/CodebaseIndexer';
+import { FileOperationManager } from '../utils/FileOperationManager';
+import * as vscode from 'vscode';
+import * as fs from 'fs';
+import * as path from 'path';
 
 export interface AIEngineConfig {
     provider: {
@@ -28,6 +32,7 @@ export interface ProcessMessageOptions {
 export interface ProcessOptions {
     options?: any;
     codebaseIndex?: any;
+    contextHistory?: Array<{ role: string; content: string; timestamp: number; }>;
 }
 
 export class AIEngine {
@@ -68,7 +73,7 @@ export class AIEngine {
             const response = await this.sendRequest(message, options, 'agent');
             
             // Extract file creation commands from the response
-            await this.executeAgentActions(response);
+            await this.executeAgentActions(response, message, options.contextHistory);
             
             return response;
         } catch (error) {
@@ -112,6 +117,20 @@ export class AIEngine {
             let systemPrompt = this.getSystemPrompt(mode);
             if (codebaseContext) {
                 systemPrompt += `\n\nHere is information about the codebase:\n${codebaseContext}`;
+            }
+
+            // Include conversation history if provided
+            let contextualHistory = '';
+            if (options.contextHistory && options.contextHistory.length > 0) {
+                contextualHistory = "\n\nHere is some context from previous messages:\n";
+                options.contextHistory.forEach(msg => {
+                    contextualHistory += `${msg.role === 'user' ? 'User' : 'Assistant'}: ${msg.content}\n`;
+                });
+                contextualHistory += "\nPlease consider the above context when responding to the current request.";
+            }
+            
+            if (contextualHistory) {
+                systemPrompt += contextualHistory;
             }
             
             // Construct the request body with options
@@ -196,27 +215,41 @@ export class AIEngine {
         switch (mode) {
             case 'agent':
                 return `You are an AI coding agent that can autonomously perform tasks. You can:
-                - Analyze code and suggest improvements
-                - Create new files and implement features
-                - Debug issues and fix problems
-                - Refactor code following best practices
-                Please be proactive and take initiative when helping the user.`;
+                    - Analyze code and suggest improvements
+                    - Create new files and implement features
+                    - Debug issues and fix problems
+                    - Refactor code following best practices
+                    
+                    IMPORTANT INSTRUCTIONS FOR FILE CREATION:
+                    - When asked to create a file, ALWAYS provide the full file content inside a code block
+                    - Format file creation as: \`\`\`language\npath/to/file.ext\ncode content here\n\`\`\`
+                    - Do not just describe what would be in the file; ACTUALLY create it
+                    - If the user says a previous file creation attempt failed, create the file again with the complete content
+                    - When translating or updating files, include the full new content, not just the changes
+                    - Remember to create proper directory structure in paths
+                    - When a user mentions "dosya" (Turkish for "file"), treat it as a file creation request
+                    
+                    When responding to follow-up requests:
+                    - If the user indicates you didn't complete a task correctly, apologize and immediately fix the issue
+                    - Maintain context from previous messages to understand ongoing requests
+                    - Be proactive and take initiative when helping the user
+                    - If unsure about what exactly to create, ask clarifying questions first, then provide a complete solution`;
             
             case 'ask':
                 return `You are an AI assistant focused on answering questions about code. You:
-                - Provide clear and concise explanations
-                - Use code examples when relevant
-                - Explain concepts in depth when needed
-                - Reference documentation and best practices
-                Focus on helping users understand their code better.`;
+                    - Provide clear and concise explanations
+                    - Use code examples when relevant
+                    - Explain concepts in depth when needed
+                    - Reference documentation and best practices
+                    Focus on helping users understand their code better.`;
             
             default:
                 return `You are an AI coding assistant that helps with programming tasks. You can:
-                - Write and modify code
-                - Answer questions
-                - Provide suggestions
-                - Help with debugging
-                Aim to be helpful while following the user's lead.`;
+                    - Write and modify code
+                    - Answer questions
+                    - Provide suggestions
+                    - Help with debugging
+                    Aim to be helpful while following the user's lead.`;
         }
     }
 
@@ -462,69 +495,324 @@ export class AIEngine {
      * Extracts and executes actions from the agent's response
      * Currently supports markdown file creation when content is provided in code blocks
      */
-    private async executeAgentActions(response: string): Promise<void> {
-        // Import vscode dynamically to avoid issues
-        const vscode = require('vscode');
-        
-        // Extract file names and content from markdown code blocks
-        const fileCreationRegex = /```markdown\s*#.*?```|```md\s*#.*?```|`([^`]+\.md)`|I'll create a file named `([^`]+\.md)`/gs;
-        const matches = [...response.matchAll(fileCreationRegex)];
-        
-        if (matches.length === 0) {
-            console.log('No file creation commands found in response');
-            return;
-        }
-        
-        // Look for markdown content in code blocks
-        const markdownContentRegex = /```markdown\s*([\s\S]*?)```|```md\s*([\s\S]*?)```/gs;
-        const contentMatches = [...response.matchAll(markdownContentRegex)];
-        
-        if (contentMatches.length === 0) {
-            console.log('No markdown content found in response');
-            return;
-        }
-        
-        // Extract potential file name from text
-        let fileName = '';
-        const fileNameMatches = response.match(/`([^`]+\.md)`|I'll create a file named `([^`]+\.md)`|file named `([^`]+\.md)`/);
-        if (fileNameMatches) {
-            fileName = fileNameMatches[1] || fileNameMatches[2] || fileNameMatches[3] || '';
-        }
-        
-        if (!fileName) {
-            console.log('Could not extract file name from response');
-            return;
-        }
-        
-        // Get the content from the first markdown block
-        const content = contentMatches[0][1] || contentMatches[0][2] || '';
-        if (!content) {
-            console.log('No content found in markdown block');
-            return;
-        }
-        
-        // Create the file in the workspace
+    private async executeAgentActions(response: string, originalRequest?: string, contextHistory?: Array<{ role: string; content: string; timestamp: number; }>): Promise<void> {
         try {
-            const workspaceFolders = vscode.workspace.workspaceFolders;
-            if (!workspaceFolders || workspaceFolders.length === 0) {
-                console.error('No workspace folder found');
-                return;
+            console.log('Executing agent actions');
+            const fileOperationManager = FileOperationManager.getInstance();
+            
+            // Extract file creation/modification commands
+            const fileActionRegex = /```(?:file|typescript|javascript|json|yaml|html|css|scss|less|xml|md|markdown|tsx|jsx|python|java|c|cpp|cs|go|rust|php|ruby|swift)?\s+([^\n]+)\n([\s\S]*?)```/g;
+            
+            let match;
+            let actionsFound = false;
+            
+            // Process each file action in the response
+            while ((match = fileActionRegex.exec(response)) !== null) {
+                actionsFound = true;
+                const filePath = match[1].trim();
+                const fileContent = match[2];
+                
+                // Skip if filePath is empty or doesn't look like a file path
+                if (!filePath || filePath.includes('```') || filePath.includes('|')) {
+                    continue;
+                }
+                
+                // Get the absolute path
+                let absolutePath = filePath;
+                if (!path.isAbsolute(filePath)) {
+                    if (vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders.length > 0) {
+                        absolutePath = path.join(vscode.workspace.workspaceFolders[0].uri.fsPath, filePath);
+                    } else {
+                        console.warn('No workspace folder found, using relative path');
+                    }
+                }
+                
+                // Check if file exists to determine if this is an add or update operation
+                const fileExists = fs.existsSync(absolutePath);
+                
+                if (fileExists) {
+                    // Read original content for update operation
+                    const originalContent = fs.readFileSync(absolutePath, 'utf8');
+                    
+                    // Only create an update operation if content actually changed
+                    if (originalContent !== fileContent) {
+                        const description = `Update file ${path.basename(filePath)} with AI-generated content`;
+                        const operation = fileOperationManager.createUpdateOperation(absolutePath, originalContent, fileContent, description);
+                        // Auto-accept the operation
+                        fileOperationManager.acceptOperation(operation.id);
+                        actionsFound = true;
+                    }
+                } else {
+                    // This is a new file
+                    const description = `Create new file ${path.basename(filePath)} with AI-generated content`;
+                    const operation = fileOperationManager.createAddOperation(absolutePath, fileContent, description);
+                    // Auto-accept the operation
+                    fileOperationManager.acceptOperation(operation.id);
+                    
+                    // Create directories if they don't exist
+                    const dirPath = path.dirname(absolutePath);
+                    if (!fs.existsSync(dirPath)) {
+                        fs.mkdirSync(dirPath, { recursive: true });
+                    }
+                    actionsFound = true;
+                }
             }
             
-            const workspacePath = workspaceFolders[0].uri.fsPath;
-            const filePath = vscode.Uri.file(`${workspacePath}/${fileName}`);
+            // Extract file deletion commands
+            const fileDeleteRegex = /Delete file\s*[:"'\s]+([^"'\n]+)[:"'\s]+/gi;
+            while ((match = fileDeleteRegex.exec(response)) !== null) {
+                actionsFound = true;
+                const filePath = match[1].trim();
+                
+                // Get the absolute path
+                let absolutePath = filePath;
+                if (!path.isAbsolute(filePath)) {
+                    if (vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders.length > 0) {
+                        absolutePath = path.join(vscode.workspace.workspaceFolders[0].uri.fsPath, filePath);
+                    }
+                }
+                
+                // Check if file exists before attempting to delete
+                if (fs.existsSync(absolutePath)) {
+                    const originalContent = fs.readFileSync(absolutePath, 'utf8');
+                    const description = `Delete file ${path.basename(filePath)}`;
+                    const operation = fileOperationManager.createDeleteOperation(absolutePath, originalContent, description);
+                    // Auto-accept the operation
+                    fileOperationManager.acceptOperation(operation.id);
+                }
+            }
             
-            console.log(`Creating file: ${filePath.fsPath}`);
-            console.log(`With content: ${content.substring(0, 100)}...`);
+            // Check for additional file operations mentioned in plain text
+            const additionalFileRegex = /(?:translate|update|modify|convert|fix)\s+file\s*[:"'\s]+([^"'\n]+)[:"'\s]+/gi;
             
-            await vscode.workspace.fs.writeFile(filePath, Buffer.from(content, 'utf8'));
-            console.log(`Successfully created file: ${filePath.fsPath}`);
+            while ((match = additionalFileRegex.exec(response)) !== null) {
+                const filePath = match[1].trim();
+                
+                // Get the absolute path
+                let absolutePath = filePath;
+                if (!path.isAbsolute(filePath)) {
+                    if (vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders.length > 0) {
+                        absolutePath = path.join(vscode.workspace.workspaceFolders[0].uri.fsPath, filePath);
+                    }
+                }
+                
+                // If the file exists and content is provided in the response, create an update operation
+                if (fs.existsSync(absolutePath)) {
+                    const originalContent = fs.readFileSync(absolutePath, 'utf8');
+                    
+                    // Extract content that might be associated with this file
+                    const fileContentRegex = new RegExp(`(?:content|translation)\\s+for\\s+${path.basename(filePath)}\\s*:\\s*\`\`\`(?:\\w+)?\\s*([\\s\\S]*?)\`\`\``, 'i');
+                    const contentMatch = fileContentRegex.exec(response);
+                    
+                    if (contentMatch && contentMatch[1]) {
+                        const newContent = contentMatch[1];
+                        if (originalContent !== newContent) {
+                            const description = `Update ${path.basename(filePath)} based on translation/modification request`;
+                            const operation = fileOperationManager.createUpdateOperation(absolutePath, originalContent, newContent, description);
+                            // Auto-accept the operation
+                            fileOperationManager.acceptOperation(operation.id);
+                            actionsFound = true;
+                        }
+                    }
+                }
+            }
             
-            // Show the file in the editor
-            const document = await vscode.workspace.openTextDocument(filePath);
-            await vscode.window.showTextDocument(document);
+            // If no actions found yet, check for descriptions of files to create from the context
+            if (!actionsFound && (originalRequest || (contextHistory && contextHistory.length > 0))) {
+                // Look for file creation requests without explicit code blocks
+                const fileCreationPatterns = [
+                    // Match file path patterns followed by content
+                    {regex: /create\s+(?:a|the)\s+file\s+[`'"]?([\w\-\./]+\.\w+)[`'"]?/i, group: 1},
+                    {regex: /generate\s+(?:a|the)\s+file\s+[`'"]?([\w\-\./]+\.\w+)[`'"]?/i, group: 1},
+                    {regex: /new\s+file\s+[`'"]?([\w\-\./]+\.\w+)[`'"]?/i, group: 1},
+                    {regex: /dosya\s+oluştur\s+[`'"]?([\w\-\./]+\.\w+)[`'"]?/i, group: 1},
+                    {regex: /yeni\s+dosya\s+[`'"]?([\w\-\./]+\.\w+)[`'"]?/i, group: 1},
+                    // Named files in markdown format 
+                    {regex: /\*\*Location:\*\*\s+[`'"]?([\w\-\./]+\.\w+)[`'"]?/i, group: 1},
+                    {regex: /\*\*File:\*\*\s+[`'"]?([\w\-\./]+\.\w+)[`'"]?/i, group: 1}
+                ];
+                
+                let potentialFilePath = '';
+                
+                // Check the original request first
+                if (originalRequest) {
+                    for (const pattern of fileCreationPatterns) {
+                        const fileMatch = originalRequest.match(pattern.regex);
+                        if (fileMatch && fileMatch[pattern.group]) {
+                            potentialFilePath = fileMatch[pattern.group];
+                            break;
+                        }
+                    }
+                }
+                
+                // If no file path found in request, check context history
+                if (!potentialFilePath && contextHistory) {
+                    // Combine all messages to search through
+                    const allMessages = contextHistory.map(msg => msg.content).join(" ");
+                    for (const pattern of fileCreationPatterns) {
+                        const fileMatch = allMessages.match(pattern.regex);
+                        if (fileMatch && fileMatch[pattern.group]) {
+                            potentialFilePath = fileMatch[pattern.group];
+                            break;
+                        }
+                    }
+                }
+                
+                // Look for potential file content from the current response
+                if (potentialFilePath && response.includes('```')) {
+                    // Use our new extraction function to get content
+                    const fileContent = this.extractFileContentFromResponse(response, potentialFilePath);
+                    
+                    if (fileContent) {
+                        // Get the absolute path
+                        let absolutePath = potentialFilePath;
+                        if (!path.isAbsolute(potentialFilePath)) {
+                            if (vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders.length > 0) {
+                                absolutePath = path.join(vscode.workspace.workspaceFolders[0].uri.fsPath, potentialFilePath);
+                            }
+                        }
+                        
+                        // Create file operation
+                        const fileExists = fs.existsSync(absolutePath);
+                        
+                        if (fileExists) {
+                            const originalContent = fs.readFileSync(absolutePath, 'utf8');
+                            if (originalContent !== fileContent) {
+                                const description = `Update file ${path.basename(potentialFilePath)} based on context`;
+                                const operation = fileOperationManager.createUpdateOperation(absolutePath, originalContent, fileContent, description);
+                                // Auto-accept the operation
+                                fileOperationManager.acceptOperation(operation.id);
+                                actionsFound = true;
+                            }
+                        } else {
+                            const description = `Create new file ${path.basename(potentialFilePath)} based on context`;
+                            const operation = fileOperationManager.createAddOperation(absolutePath, fileContent, description);
+                            // Auto-accept the operation
+                            fileOperationManager.acceptOperation(operation.id);
+                            
+                            // Create directories if they don't exist
+                            const dirPath = path.dirname(absolutePath);
+                            if (!fs.existsSync(dirPath)) {
+                                fs.mkdirSync(dirPath, { recursive: true });
+                            }
+                            actionsFound = true;
+                        }
+                    }
+                }
+            }
+            
+            // Look for explicit file paths mentioned in the response
+            if (!actionsFound) {
+                const mentionedFilePaths = [];
+                
+                // Common file extensions to look for
+                const fileExtensions = ['.md', '.ts', '.js', '.json', '.html', '.css', '.yml', '.yaml', '.txt', '.jsx', '.tsx'];
+                
+                // Find all potential file paths in the response
+                fileExtensions.forEach(ext => {
+                    const filePathRegex = new RegExp(`(?:file(?:name)?|path|location)\\s*[:：]?\\s*["'\\s]*((?:[\\w\\-./]+)+${ext.replace('.', '\\.')})[\\s"',.)]`, 'gi');
+                    let filePathMatch;
+                    while ((filePathMatch = filePathRegex.exec(response)) !== null) {
+                        if (filePathMatch[1] && !filePathMatch[1].includes('```')) {
+                            mentionedFilePaths.push(filePathMatch[1].trim());
+                        }
+                    }
+                    
+                    // Also look for paths in markdown format
+                    const markdownPathRegex = new RegExp(`\\*\\*(?:file|path|location)\\*\\*\\s*[:：]?\\s*["'\\s]*((?:[\\w\\-./]+)+${ext.replace('.', '\\.')})[\\s"',.)]`, 'gi');
+                    while ((filePathMatch = markdownPathRegex.exec(response)) !== null) {
+                        if (filePathMatch[1] && !filePathMatch[1].includes('```')) {
+                            mentionedFilePaths.push(filePathMatch[1].trim());
+                        }
+                    }
+                });
+                
+                // Look for paths directly within special characters like ` or "
+                const quotedPathRegex = /[`"']((?:[\w\-./]+\/)*[\w\-]+\.[\w]+)[`"']/g;
+                let quotedPathMatch;
+                while ((quotedPathMatch = quotedPathRegex.exec(response)) !== null) {
+                    if (quotedPathMatch[1] && !quotedPathMatch[1].includes('```')) {
+                        mentionedFilePaths.push(quotedPathMatch[1].trim());
+                    }
+                }
+                
+                // Process found file paths
+                for (const filePath of new Set(mentionedFilePaths)) { // Use Set to deduplicate
+                    const fileContent = this.extractFileContentFromResponse(response, filePath);
+                    
+                    if (fileContent) {
+                        // Get the absolute path
+                        let absolutePath = filePath;
+                        if (!path.isAbsolute(filePath)) {
+                            if (vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders.length > 0) {
+                                absolutePath = path.join(vscode.workspace.workspaceFolders[0].uri.fsPath, filePath);
+                            }
+                        }
+                        
+                        // Create file operation
+                        const fileExists = fs.existsSync(absolutePath);
+                        
+                        if (fileExists) {
+                            const originalContent = fs.readFileSync(absolutePath, 'utf8');
+                            if (originalContent !== fileContent) {
+                                const description = `Update file ${path.basename(filePath)} detected in response`;
+                                const operation = fileOperationManager.createUpdateOperation(absolutePath, originalContent, fileContent, description);
+                                // Auto-accept the operation
+                                fileOperationManager.acceptOperation(operation.id);
+                                actionsFound = true;
+                            }
+                        } else {
+                            const description = `Create new file ${path.basename(filePath)} detected in response`;
+                            const operation = fileOperationManager.createAddOperation(absolutePath, fileContent, description);
+                            // Auto-accept the operation
+                            fileOperationManager.acceptOperation(operation.id);
+                            
+                            // Create directories if they don't exist
+                            const dirPath = path.dirname(absolutePath);
+                            if (!fs.existsSync(dirPath)) {
+                                fs.mkdirSync(dirPath, { recursive: true });
+                            }
+                            actionsFound = true;
+                        }
+                    }
+                }
+            }
+            
         } catch (error) {
-            console.error(`Failed to create file: ${error instanceof Error ? error.message : String(error)}`);
+            console.error('Error executing agent actions:', error);
         }
+    }
+
+    private extractFileContentFromResponse(response: string, filePath: string): string | null {
+        // Try different patterns to extract file content
+        const patterns = [
+            // Find content in a code block that might be associated with the file
+            new RegExp(`\`\`\`(?:\\w+)?\\s*${path.basename(filePath)}\\s*\\n([\\s\\S]*?)\`\`\``, 'i'),
+            // Look for content after "Here's the content for [filename]:" or similar phrases
+            new RegExp(`(?:here(?:'s| is) the content(?: for| of)? ${path.basename(filePath)}\\s*[:：]?\\s*\`\`\`(?:\\w+)?\\s*\\n?([\\s\\S]*?)\`\`\``, 'i'),
+            // Look for content labeled as the file
+            new RegExp(`${path.basename(filePath)}\\s*[:：]\\s*\`\`\`(?:\\w+)?\\s*\\n?([\\s\\S]*?)\`\`\``, 'i'),
+            // Extract the first code block if nothing else matches and we're sure this is for a file
+            /```(?:\w+)?\s*\n([\s\S]*?)```/
+        ];
+
+        for (const pattern of patterns) {
+            const match = response.match(pattern);
+            if (match && match[1]) {
+                return match[1];
+            }
+        }
+
+        // If we don't find content in code blocks, look for other indicators
+        // For markdown files, maybe the content isn't in a code block
+        if (filePath.endsWith('.md') && response.includes('# ')) {
+            // Try to extract structured markdown content
+            const mdHeadingMatch = response.match(/# [^\n]+(?:\n[\s\S]*?)(?=\n#|$)/);
+            if (mdHeadingMatch) {
+                return mdHeadingMatch[0];
+            }
+        }
+
+        return null;
     }
 } 
