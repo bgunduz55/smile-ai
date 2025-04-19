@@ -1,4 +1,9 @@
 ---
+description: 
+globs: 
+alwaysApply: true
+---
+---
 description: Smile Ai Coding Assistant Extension For Vscode
 globs: 
 ---
