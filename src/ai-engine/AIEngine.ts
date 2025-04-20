@@ -6,7 +6,6 @@ import { FileOperationManager } from '../utils/FileOperationManager';
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
-import { Message } from '../types/chat';
 import { RAGService } from '../indexing/RAGService';
 
 export interface AIEngineConfig {
@@ -36,14 +35,6 @@ export interface ProcessOptions {
     options?: any;
     codebaseIndex?: any;
     contextHistory?: Array<{ role: string; content: string; timestamp: number; }>;
-}
-
-// Action interface for file operations
-interface Action {
-    type: 'add' | 'update' | 'delete';
-    filePath: string;
-    content?: string;
-    original?: string;
 }
 
 export class AIEngine {
@@ -80,14 +71,22 @@ export class AIEngine {
         }
     }
 
-    public async processMessage(message: string, options: ProcessOptions): Promise<string> {
+    public async processMessage(text: string, options: ProcessOptions): Promise<string> {
         try {
-            // Pass options to sendRequest
-            return await this.sendRequest(message, options, 'chat');
+            // Check if we have file attachments
+            const hasAttachments = options?.options?.attachments?.length > 0;
+            
+            // Standard message processing
+            console.log('Processing message with attachments:', hasAttachments);
+            const response = await this.sendRequest(text, options, 'chat');
+            
+            // Process any file updates found in the response, regardless of request type
+            await this.processFileOperations(response);
+            
+            return response;
         } catch (error) {
             console.error('Error in processMessage:', error);
-            // Provide a fallback response so the chat UI at least works
-            return `I received your message: "${message}"\n\nHowever, I couldn't connect to the AI provider. Please make sure Ollama is running at ${this.config.provider.apiEndpoint} and the model ${this.config.provider.modelName} is available.`;
+            return `I encountered an error while processing your request: ${error instanceof Error ? error.message : String(error)}`;
         }
     }
 
@@ -97,8 +96,8 @@ export class AIEngine {
             // First get the response from the AI
             const response = await this.sendRequest(message, options, 'agent');
             
-            // Extract file creation commands from the response
-            await this.executeAgentActions(response, message, options.contextHistory);
+            // Process file operations, using the same generic method
+            await this.processFileOperations(response);
             
             return response;
         } catch (error) {
@@ -115,6 +114,43 @@ export class AIEngine {
     private async sendRequest(message: string, options: ProcessOptions, mode: 'chat' | 'agent' | 'ask'): Promise<string> {
         try {
             console.log(`Sending ${mode} request to ${this.config.provider.name} at ${this.config.provider.apiEndpoint}`);
+            
+            // Create a copy of the message for enhancement
+            let enhancedMessage = message;
+            
+            // Check if the message already contains file content markers
+            const containsFileContent = message.includes('```') && 
+                                      (message.includes('### File:') || 
+                                       message.includes('# ') || 
+                                       message.includes('## '));
+            
+            // Handle file attachments
+            const hasAttachments = options?.options?.attachments?.length > 0;
+            if (hasAttachments && !containsFileContent) {
+                const attachmentsWithContent = options?.options?.attachments?.filter((a: any) => a.type === 'file' && a.content) || [];
+                
+                if (attachmentsWithContent.length > 0) {
+                    console.log(`Enhancing message with ${attachmentsWithContent.length} file attachments`);
+                    enhancedMessage += "\n\n";
+                    
+                    // Add file content
+                    attachmentsWithContent.forEach((attachment: any) => {
+                        const fileName = attachment.name || attachment.path.split(/[\/\\]/).pop() || 'file';
+                        console.log(`Adding content for ${fileName} to message`);
+                        enhancedMessage += `### File: ${fileName}\n\`\`\`\n${attachment.content}\n\`\`\`\n\n`;
+                    });
+                    
+                    // Check if this is a translation request
+                    const isTranslationRequest = this.isTranslationRequest(message);
+                    
+                    // For translation requests, add clear instructions
+                    if (isTranslationRequest) {
+                        enhancedMessage += "\nPlease translate the content of these files and return the full translated content in code blocks with the original file names. Your response will be used to update the original files.";
+                    }
+                    
+                    console.log("Final message preparation complete");
+                }
+            }
             
             // Check if user is asking about the codebase
             const isCodebaseQuery = message.toLowerCase().includes('codebase') || 
@@ -164,12 +200,24 @@ export class AIEngine {
                 systemPrompt += contextualHistory;
             }
             
+            // Create a clean copy of options to avoid duplication
+            const cleanOptions = options.options || {};
+            
+            // If message is already enhanced with file content, remove attachments 
+            // to prevent duplication in the request body
+            if (enhancedMessage !== message) {
+                console.log('Message already enhanced with attachments, clearing attachments in request body');
+                if (cleanOptions.attachments) {
+                    delete cleanOptions.attachments;
+                }
+            }
+            
             // Construct the request body with options
             const requestBody = this.config.provider.name === 'ollama' ? {
                 model: this.config.provider.modelName,
-                prompt: `${systemPrompt}\n\nUser: ${message}\n\nAssistant:`,
+                prompt: `${systemPrompt}\n\nUser: ${enhancedMessage}\n\nAssistant:`,
                 stream: false,
-                options: options.options || {},
+                options: cleanOptions,
             } : {
                 model: this.config.provider.modelName,
                 messages: [
@@ -179,20 +227,21 @@ export class AIEngine {
                     },
                     {
                         role: 'user',
-                        content: message
+                        content: enhancedMessage
                     }
                 ],
                 max_tokens: this.config.maxTokens || 2048,
                 temperature: this.config.temperature || 0.7,
-                options: options.options || {},
+                options: cleanOptions,
                 codebaseIndex: options.codebaseIndex || null
             };
 
+            // Log the complete request body for debugging
             console.log('Request body:', JSON.stringify(requestBody));
 
             // Try to make API request with timeout
             const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 90000); // Increased timeout to 90 seconds
+            const timeoutId = setTimeout(() => controller.abort(), 180000); // Increased timeout to 3 minutes
             
             try {
                 // Make the API request
@@ -208,7 +257,7 @@ export class AIEngine {
                 clearTimeout(timeoutId);
 
                 if (!response.ok) {
-                    throw new Error(`API request failed: ${response.statusText}`);
+                    throw new Error(`API request failed: ${response.statusText} (${response.status})`);
                 }
 
                 const data = await response.json();
@@ -227,8 +276,14 @@ export class AIEngine {
                 // Log the final content
                 console.log('Processed content:', content);
                 return content;
-            } catch (fetchError) {
+            } catch (fetchError: unknown) {
                 console.error('Fetch error:', fetchError);
+                
+                // Handle specific error cases
+                if (fetchError instanceof Error && fetchError.name === 'AbortError') {
+                    return `I couldn't get a response from the AI provider within the time limit. The request timed out after 3 minutes.\n\nPlease check that ${this.config.provider.name} is running correctly at ${this.config.provider.apiEndpoint} with the model "${this.config.provider.modelName}" and try again with a simpler request.`;
+                }
+                
                 // Provide a fallback response
                 return `I received your request in ${mode} mode, but I couldn't connect to the AI provider.\n\nPlease make sure ${this.config.provider.name} is running at ${this.config.provider.apiEndpoint} with the model "${this.config.provider.modelName}" available.`;
             } finally {
@@ -243,6 +298,20 @@ export class AIEngine {
     }
 
     private getSystemPrompt(mode: 'chat' | 'agent' | 'ask'): string {
+        // Check if the input message suggests a translation request
+        const isTranslationMode = mode === 'chat' && this.detectTranslationRequest();
+        
+        if (isTranslationMode) {
+            return `You are an AI assistant specialized in translation tasks. When translating files:
+                - Preserve all code functionality and structure
+                - Translate only comments, strings, text content, and documentation
+                - Do not change variable names, function names, or code logic
+                - Return the complete translated content for each file inside a code block
+                - Format each file as: \`\`\`filetype\npath/to/file.ext\ncomplete translated content\n\`\`\`
+                - Do NOT include the original content alongside the translation
+                - Keep the same file format and indentation as the original`;
+        }
+        
         switch (mode) {
             case 'agent':
                 return `You are an AI coding agent that can autonomously perform tasks. You can:
@@ -282,6 +351,24 @@ export class AIEngine {
                     - Help with debugging
                     Aim to be helpful while following the user's lead.`;
         }
+    }
+
+    /**
+     * Detects if the current context indicates a translation request
+     */
+    private detectTranslationRequest(): boolean {
+        // Check the most recent messages in the conversation history
+        if (this.conversationHistory.length > 0) {
+            const recentMessages = this.conversationHistory.slice(-3); // Check last 3 messages
+            
+            for (const message of recentMessages) {
+                if (message.role === 'user' && this.isTranslationRequest(message.content)) {
+                    return true;
+                }
+            }
+        }
+        
+        return false;
     }
 
     public updateConfig(newConfig: Partial<AIEngineConfig>) {
@@ -528,566 +615,155 @@ export class AIEngine {
     }
 
     /**
-     * Extracts and executes actions from the agent's response
-     * Currently supports markdown file creation when content is provided in code blocks
+     * Generic method to process file operations in AI responses
+     * Handles all types of file updates (translations, edits, code changes, etc.)
      */
-    private async executeAgentActions(response: string, originalRequest?: string, contextHistory?: Array<{ role: string; content: string; timestamp: number; }>): Promise<void> {
+    private async processFileOperations(response: string): Promise<void> {
         try {
-            console.log('Executing agent actions');
+            console.log('Processing file operations in response');
+            
+            // Check for file content in the response
+            await this.extractAndProcessFileContent(response);
+            
+            // Legacy functionality can go here if needed
+            // You can add more specific processing here if required
+        } catch (error) {
+            console.error('Error processing file operations:', error);
+        }
+    }
+
+    /**
+     * Extracts and processes file content from AI responses
+     * Handles various code block formats and file patterns
+     */
+    private async extractAndProcessFileContent(response: string): Promise<void> {
+        try {
+            console.log('Extracting file content from response');
+            console.log('Response preview:', response.substring(0, 200) + '...');
+            
             const fileOperationManager = FileOperationManager.getInstance();
             
-            // Extract actions from the response using our extractActions method
-            if (originalRequest) {
-                const actions = await this.extractActions(response, originalRequest, contextHistory?.map(ctx => ({
-                    role: ctx.role,
-                    content: ctx.content,
-                    timestamp: ctx.timestamp
-                })) as Message[]);
+            // Regular expressions to find file blocks in various formats
+            const fileBlockRegexes = [
+                // Default format: ```[language] file/path.ext content ```
+                /```(?:file|[\w-]+)?\s*(?:title=)?[`'"]?([\w\-\./\\]+\.\w+)[`'"]?\s*\n([\s\S]*?)```/g,
                 
-                // Process each extracted action
-                for (const action of actions) {
-                    if (action.type === 'add') {
-                        if (action.content) {
-                            // Get the absolute path
-                            let absolutePath = action.filePath;
-                            if (!path.isAbsolute(action.filePath)) {
-                                if (vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders.length > 0) {
-                                    absolutePath = path.join(vscode.workspace.workspaceFolders[0].uri.fsPath, action.filePath);
-                                }
-                            }
-                            
-                            const description = `Create new file ${path.basename(action.filePath)} from extracted action`;
-                            const operation = await fileOperationManager.createAddOperation(absolutePath, action.content, description);
-                            await fileOperationManager.acceptOperation(operation.id);
-                        }
-                    } else if (action.type === 'update') {
-                        if (action.content && action.original) {
-                            // Get the absolute path
-                            let absolutePath = action.filePath;
-                            if (!path.isAbsolute(action.filePath)) {
-                                if (vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders.length > 0) {
-                                    absolutePath = path.join(vscode.workspace.workspaceFolders[0].uri.fsPath, action.filePath);
-                                }
-                            }
-                            
-                            const description = `Update file ${path.basename(action.filePath)} from extracted action`;
-                            const operation = await fileOperationManager.createUpdateOperation(absolutePath, action.original, action.content, description);
-                            await fileOperationManager.acceptOperation(operation.id);
-                        }
-                    }
-                }
-            }
+                // Markdown format with "### File:" and triple backticks
+                /### File: ([\w\-\./\\]+\.\w+)\s*```(?:[\w-]+)?\s*\n([\s\S]*?)```/g,
+                
+                // Markdown format with filename in block
+                /```(?:markdown|md)?\s*\n### File: ([\w\-\./\\]+\.\w+)\s*\n\n([\s\S]*?)```/g,
+                
+                // Ollama format with markdown header inside the code block
+                /```markdown\n### File: ([\w\-\./\\]+\.\w+)\s*\n([\s\S]*?)```/g,
+                
+                // Ollama gemma format
+                /```markdown\n### File: ([\w\-\./\\]+\.\w+)\n\n([\s\S]*?)```/g,
+                
+                // Generic file pattern - captures various formats
+                /File: ([\w\-\./\\]+\.\w+)[\s\n]+([\s\S]*?)(?=```|$)/g
+            ];
             
-            // Continue with the existing file action detection logic
-            // Extract file creation/modification commands
-            const fileActionRegex = /```(?:file|typescript|javascript|json|yaml|html|css|scss|less|xml|md|markdown|tsx|jsx|python|java|c|cpp|cs|go|rust|php|ruby|swift)?\s+([^\n]+)\n([\s\S]*?)```/g;
+            let filesFound = false;
+            let regexIndex = 0;
             
-            let match;
-            let actionsFound = false;
-            
-            // Process each file action in the response
-            while ((match = fileActionRegex.exec(response)) !== null) {
-                actionsFound = true;
-                const filePath = match[1].trim();
-                const fileContent = match[2];
+            for (const regex of fileBlockRegexes) {
+                console.log(`Trying regex pattern ${regexIndex+1}`);
+                let match;
                 
-                // Skip if filePath is empty or doesn't look like a file path
-                if (!filePath || filePath.includes('```') || filePath.includes('|')) {
-                    continue;
-                }
-                
-                // Get the absolute path
-                let absolutePath = filePath;
-                if (!path.isAbsolute(filePath)) {
-                    if (vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders.length > 0) {
-                        absolutePath = path.join(vscode.workspace.workspaceFolders[0].uri.fsPath, filePath);
-                    } else {
-                        console.warn('No workspace folder found, using relative path');
-                    }
-                }
-                
-                // Check if file exists to determine if this is an add or update operation
-                const fileExists = fs.existsSync(absolutePath);
-                
-                if (fileExists) {
-                    // Read original content for update operation
-                    const originalContent = fs.readFileSync(absolutePath, 'utf8');
+                while ((match = regex.exec(response)) !== null) {
+                    filesFound = true;
+                    const filePath = match[1].trim();
+                    const fileContent = match[2];
                     
-                    // Only create an update operation if content actually changed
-                    if (originalContent !== fileContent) {
-                        const description = `Update file ${path.basename(filePath)} with AI-generated content`;
-                        const operation = await fileOperationManager.createUpdateOperation(absolutePath, originalContent, fileContent, description);
-                        // Auto-accept the operation
-                        await fileOperationManager.acceptOperation(operation.id);
-                        actionsFound = true;
-                    }
-                } else {
-                    // This is a new file
-                    const description = `Create new file ${path.basename(filePath)} with AI-generated content`;
-                    const operation = await fileOperationManager.createAddOperation(absolutePath, fileContent, description);
-                    // Auto-accept the operation
-                    await fileOperationManager.acceptOperation(operation.id);
+                    console.log(`Match found with regex ${regexIndex+1}:`);
+                    console.log(`- File path: ${filePath}`);
+                    console.log(`- Content length: ${fileContent?.length || 0} characters`);
                     
-                    // Create directories if they don't exist
-                    const dirPath = path.dirname(absolutePath);
-                    if (!fs.existsSync(dirPath)) {
-                        fs.mkdirSync(dirPath, { recursive: true });
+                    if (!filePath || !fileContent) {
+                        console.log('Skipping due to missing path or content');
+                        continue;
                     }
-                    actionsFound = true;
-                }
-            }
-            
-            // Extract file deletion commands
-            const fileDeleteRegex = /Delete file\s*[:"'\s]+([^"'\n]+)[:"'\s]+/gi;
-            while ((match = fileDeleteRegex.exec(response)) !== null) {
-                actionsFound = true;
-                const filePath = match[1].trim();
-                
-                // Get the absolute path
-                let absolutePath = filePath;
-                if (!path.isAbsolute(filePath)) {
-                    if (vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders.length > 0) {
-                        absolutePath = path.join(vscode.workspace.workspaceFolders[0].uri.fsPath, filePath);
-                    }
-                }
-                
-                // Check if file exists before attempting to delete
-                if (fs.existsSync(absolutePath)) {
-                    const originalContent = fs.readFileSync(absolutePath, 'utf8');
-                    const description = `Delete file ${path.basename(filePath)}`;
-                    const operation = await fileOperationManager.createDeleteOperation(absolutePath, originalContent, description);
-                    // Auto-accept the operation
-                    await fileOperationManager.acceptOperation(operation.id);
-                }
-            }
-            
-            // Check for additional file operations mentioned in plain text
-            const additionalFileRegex = /(?:translate|update|modify|convert|fix)\s+file\s*[:"'\s]+([^"'\n]+)[:"'\s]+/gi;
-            
-            while ((match = additionalFileRegex.exec(response)) !== null) {
-                const filePath = match[1].trim();
-                
-                // Get the absolute path
-                let absolutePath = filePath;
-                if (!path.isAbsolute(filePath)) {
-                    if (vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders.length > 0) {
-                        absolutePath = path.join(vscode.workspace.workspaceFolders[0].uri.fsPath, filePath);
-                    }
-                }
-                
-                // If the file exists and content is provided in the response, create an update operation
-                if (fs.existsSync(absolutePath)) {
-                    const originalContent = fs.readFileSync(absolutePath, 'utf8');
                     
-                    // Extract content that might be associated with this file
-                    const fileContentRegex = new RegExp(`(?:content|translation)\\s+for\\s+${path.basename(filePath)}\\s*:\\s*\`\`\`(?:\\w+)?\\s*([\\s\\S]*?)\`\`\``, 'i');
-                    const contentMatch = fileContentRegex.exec(response);
+                    console.log(`Found file content for: ${filePath}`);
                     
-                    if (contentMatch && contentMatch[1]) {
-                        const newContent = contentMatch[1];
-                        if (originalContent !== newContent) {
-                            const description = `Update ${path.basename(filePath)} based on translation/modification request`;
-                            const operation = await fileOperationManager.createUpdateOperation(absolutePath, originalContent, newContent, description);
-                            // Auto-accept the operation
-                            await fileOperationManager.acceptOperation(operation.id);
-                            actionsFound = true;
-                        }
-                    }
-                }
-            }
-            
-            // If no actions found yet, check for descriptions of files to create from the context
-            if (!actionsFound && (originalRequest || (contextHistory && contextHistory.length > 0))) {
-                // Look for file creation requests without explicit code blocks
-                const fileCreationPatterns = [
-                    // Match file path patterns followed by content
-                    {regex: /create\s+(?:a|the)\s+file\s+[`'"]?([\w\-\./]+\.\w+)[`'"]?/i, group: 1},
-                    {regex: /generate\s+(?:a|the)\s+file\s+[`'"]?([\w\-\./]+\.\w+)[`'"]?/i, group: 1},
-                    {regex: /new\s+file\s+[`'"]?([\w\-\./]+\.\w+)[`'"]?/i, group: 1},
-                    {regex: /dosya\s+oluştur\s+[`'"]?([\w\-\./]+\.\w+)[`'"]?/i, group: 1},
-                    {regex: /yeni\s+dosya\s+[`'"]?([\w\-\./]+\.\w+)[`'"]?/i, group: 1},
-                    // Named files in markdown format 
-                    {regex: /\*\*Location:\*\*\s+[`'"]?([\w\-\./]+\.\w+)[`'"]?/i, group: 1},
-                    {regex: /\*\*File:\*\*\s+[`'"]?([\w\-\./]+\.\w+)[`'"]?/i, group: 1}
-                ];
-                
-                let potentialFilePath = '';
-                
-                // Check the original request first
-                if (originalRequest) {
-                    for (const pattern of fileCreationPatterns) {
-                        const fileMatch = originalRequest.match(pattern.regex);
-                        if (fileMatch && fileMatch[pattern.group]) {
-                            potentialFilePath = fileMatch[pattern.group];
-                            break;
-                        }
-                    }
-                }
-                
-                // If no file path found in request, check context history
-                if (!potentialFilePath && contextHistory) {
-                    // Combine all messages to search through
-                    const allMessages = contextHistory.map(msg => msg.content).join(" ");
-                    for (const pattern of fileCreationPatterns) {
-                        const fileMatch = allMessages.match(pattern.regex);
-                        if (fileMatch && fileMatch[pattern.group]) {
-                            potentialFilePath = fileMatch[pattern.group];
-                            break;
-                        }
-                    }
-                }
-                
-                // Look for potential file content from the current response
-                if (potentialFilePath && response.includes('```')) {
-                    // Use our new extraction function to get content
-                    const fileContent = this.extractFileContentFromResponse(response, potentialFilePath);
-                    
-                    if (fileContent) {
-                        // Get the absolute path
-                        let absolutePath = potentialFilePath;
-                        if (!path.isAbsolute(potentialFilePath)) {
-                            if (vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders.length > 0) {
-                                absolutePath = path.join(vscode.workspace.workspaceFolders[0].uri.fsPath, potentialFilePath);
-                            }
-                        }
-                        
-                        // Create file operation
-                        const fileExists = fs.existsSync(absolutePath);
-                        
-                        if (fileExists) {
-                            const originalContent = fs.readFileSync(absolutePath, 'utf8');
-                            if (originalContent !== fileContent) {
-                                const description = `Update file ${path.basename(potentialFilePath)} based on context`;
-                                const operation = await fileOperationManager.createUpdateOperation(absolutePath, originalContent, fileContent, description);
-                                // Auto-accept the operation
-                                await fileOperationManager.acceptOperation(operation.id);
-                                actionsFound = true;
-                            }
+                    // Get the absolute path
+                    let absolutePath = filePath;
+                    if (!path.isAbsolute(filePath)) {
+                        if (vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders.length > 0) {
+                            absolutePath = path.join(vscode.workspace.workspaceFolders[0].uri.fsPath, filePath);
+                            console.log(`Resolved absolute path: ${absolutePath}`);
                         } else {
-                            const description = `Create new file ${path.basename(potentialFilePath)} based on context`;
-                            const operation = await fileOperationManager.createAddOperation(absolutePath, fileContent, description);
-                            // Auto-accept the operation
-                            await fileOperationManager.acceptOperation(operation.id);
-                            
-                            // Create directories if they don't exist
-                            const dirPath = path.dirname(absolutePath);
-                            if (!fs.existsSync(dirPath)) {
-                                fs.mkdirSync(dirPath, { recursive: true });
-                            }
-                            actionsFound = true;
+                            console.warn('No workspace folder found, using relative path');
                         }
                     }
-                }
-            }
-            
-            // Look for explicit file paths mentioned in the response
-            if (!actionsFound) {
-                const mentionedFilePaths = [];
-                
-                // Common file extensions to look for
-                const fileExtensions = ['.md', '.ts', '.js', '.json', '.html', '.css', '.yml', '.yaml', '.txt', '.jsx', '.tsx'];
-                
-                // Find all potential file paths in the response
-                fileExtensions.forEach(ext => {
-                    const filePathRegex = new RegExp(`(?:file(?:name)?|path|location)\\s*[:：]?\\s*["'\\s]*((?:[\\w\\-./]+)+${ext.replace('.', '\\.')})[\\s"',.)]`, 'gi');
-                    let filePathMatch;
-                    while ((filePathMatch = filePathRegex.exec(response)) !== null) {
-                        if (filePathMatch[1] && !filePathMatch[1].includes('```')) {
-                            mentionedFilePaths.push(filePathMatch[1].trim());
-                        }
-                    }
-                    
-                    // Also look for paths in markdown format
-                    const markdownPathRegex = new RegExp(`\\*\\*(?:file|path|location)\\*\\*\\s*[:：]?\\s*["'\\s]*((?:[\\w\\-./]+)+${ext.replace('.', '\\.')})[\\s"',.)]`, 'gi');
-                    while ((filePathMatch = markdownPathRegex.exec(response)) !== null) {
-                        if (filePathMatch[1] && !filePathMatch[1].includes('```')) {
-                            mentionedFilePaths.push(filePathMatch[1].trim());
-                        }
-                    }
-                });
-                
-                // Look for paths directly within special characters like ` or "
-                const quotedPathRegex = /[`"']((?:[\w\-./]+\/)*[\w\-]+\.[\w]+)[`"']/g;
-                let quotedPathMatch;
-                while ((quotedPathMatch = quotedPathRegex.exec(response)) !== null) {
-                    if (quotedPathMatch[1] && !quotedPathMatch[1].includes('```')) {
-                        mentionedFilePaths.push(quotedPathMatch[1].trim());
-                    }
-                }
-                
-                // Process found file paths
-                for (const filePath of new Set(mentionedFilePaths)) { // Use Set to deduplicate
-                    const fileContent = this.extractFileContentFromResponse(response, filePath);
-                    
-                    if (fileContent) {
-                        // Get the absolute path
-                        let absolutePath = filePath;
-                        if (!path.isAbsolute(filePath)) {
-                            if (vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders.length > 0) {
-                                absolutePath = path.join(vscode.workspace.workspaceFolders[0].uri.fsPath, filePath);
-                            }
-                        }
-                        
-                        // Create file operation
-                        const fileExists = fs.existsSync(absolutePath);
-                        
-                        if (fileExists) {
-                            const originalContent = fs.readFileSync(absolutePath, 'utf8');
-                            if (originalContent !== fileContent) {
-                                const description = `Update file ${path.basename(filePath)} detected in response`;
-                                const operation = await fileOperationManager.createUpdateOperation(absolutePath, originalContent, fileContent, description);
-                                // Auto-accept the operation
-                                await fileOperationManager.acceptOperation(operation.id);
-                                actionsFound = true;
-                            }
-                        } else {
-                            const description = `Create new file ${path.basename(filePath)} detected in response`;
-                            const operation = await fileOperationManager.createAddOperation(absolutePath, fileContent, description);
-                            // Auto-accept the operation
-                            await fileOperationManager.acceptOperation(operation.id);
-                            
-                            // Create directories if they don't exist
-                            const dirPath = path.dirname(absolutePath);
-                            if (!fs.existsSync(dirPath)) {
-                                fs.mkdirSync(dirPath, { recursive: true });
-                            }
-                            actionsFound = true;
-                        }
-                    }
-                }
-            }
-            
-        } catch (error) {
-            console.error('Error executing agent actions:', error);
-        }
-    }
-
-    private extractFileContentFromResponse(response: string, filePath: string): string | null {
-        // Try different patterns to extract file content
-        const patterns = [
-            // Find content in a code block that might be associated with the file
-            new RegExp(`\`\`\`(?:\\w+)?\\s*${path.basename(filePath)}\\s*\\n([\\s\\S]*?)\`\`\``, 'i'),
-            // Look for content after "Here's the content for [filename]:" or similar phrases
-            new RegExp(`(?:here(?:'s| is) the content(?: for| of)? ${path.basename(filePath)}\\s*[:：]?\\s*\`\`\`(?:\\w+)?\\s*\\n?([\\s\\S]*?)\`\`\``, 'i'),
-            // Look for content labeled as the file
-            new RegExp(`${path.basename(filePath)}\\s*[:：]\\s*\`\`\`(?:\\w+)?\\s*\\n?([\\s\\S]*?)\`\`\``, 'i'),
-            // Extract the first code block if nothing else matches and we're sure this is for a file
-            /```(?:\w+)?\s*\n([\s\S]*?)```/
-        ];
-
-        for (const pattern of patterns) {
-            const match = response.match(pattern);
-            if (match && match[1]) {
-                return match[1];
-            }
-        }
-
-        // If we don't find content in code blocks, look for other indicators
-        // For markdown files, maybe the content isn't in a code block
-        if (filePath.endsWith('.md') && response.includes('# ')) {
-            // Try to extract structured markdown content
-            const mdHeadingMatch = response.match(/# [^\n]+(?:\n[\s\S]*?)(?=\n#|$)/);
-            if (mdHeadingMatch) {
-                return mdHeadingMatch[0];
-            }
-        }
-
-        return null;
-    }
-
-    private async extractActions(response: string, originalRequest: string, contextHistory: Message[] = []): Promise<Action[]> {
-        const actions: Action[] = [];
-        
-        console.log('Extracting actions from response:', response.substring(0, 150) + '...');
-        
-        // First check for explicit file paths mentioned in the response
-        const fileOperationRegexes = [
-            /создать файл[`'"]?([\w\-\./]+\.\w+)[`'"]?/g, // Russian: create file
-            /создать[`'"]?([\w\-\./]+\.\w+)[`'"]?/g, // Russian: create
-            /criar arquivo[`'"]?([\w\-\./]+\.\w+)[`'"]?/g, // Portuguese: create file
-            /criar[`'"]?([\w\-\./]+\.\w+)[`'"]?/g, // Portuguese: create
-            /créer un fichier[`'"]?([\w\-\./]+\.\w+)[`'"]?/g, // French: create file 
-            /créer[`'"]?([\w\-\./]+\.\w+)[`'"]?/g, // French: create
-            /erstellen[`'"]?([\w\-\./]+\.\w+)[`'"]?/g, // German: create
-            /crear archivo[`'"]?([\w\-\./]+\.\w+)[`'"]?/g, // Spanish: create file
-            /crear[`'"]?([\w\-\./]+\.\w+)[`'"]?/g, // Spanish: create
-            /dosya oluştur[`'"]?([\w\-\./]+\.\w+)[`'"]?/g, // Turkish: create file
-            /oluştur[`'"]?([\w\-\./]+\.\w+)[`'"]?/g, // Turkish: create
-            /create\s+(?:a|the)?\s*(?:new)?\s*file\s+[`'"]?([\w\-\./]+\.\w+)[`'"]?/g,
-            /create\s+[`'"]?([\w\-\./]+\.\w+)[`'"]?/g,
-            /add\s+(?:a|the)?\s*(?:new)?\s*file\s+[`'"]?([\w\-\./]+\.\w+)[`'"]?/g,
-            /add\s+[`'"]?([\w\-\./]+\.\w+)[`'"]?/g,
-            /save\s+(?:to)?\s*[`'"]?([\w\-\./]+\.\w+)[`'"]?/g,
-            /generate\s+(?:a|the)?\s*file\s+[`'"]?([\w\-\./]+\.\w+)[`'"]?/g,
-            /write\s+(?:a|the)?\s*file\s+[`'"]?([\w\-\./]+\.\w+)[`'"]?/g,
-            /new\s+file\s+[`'"]?([\w\-\./]+\.\w+)[`'"]?/g,
-        ];
-        
-        // Also check for file paths in markdown code blocks
-        const markdownFilePathRegex = /```\s*(?:title=)?[`'"]?([\w\-\./]+\.\w+)[`'"]?/g;
-        
-        // Function to check for file paths with a specific regex
-        const checkForFilePaths = (regex: RegExp, text: string): string[] => {
-            const filePaths: string[] = [];
-            let match;
-            while ((match = regex.exec(text)) !== null) {
-                if (match[1] && !filePaths.includes(match[1])) {
-                    console.log(`Detected file path: ${match[1]} with regex: ${regex}`);
-                    filePaths.push(match[1]);
-                }
-            }
-            return filePaths;
-        };
-        
-        // Check for file paths in the response with each regex
-        const potentialFilePaths: string[] = [];
-        
-        // Check with regular regexes
-        fileOperationRegexes.forEach(regex => {
-            potentialFilePaths.push(...checkForFilePaths(regex, response));
-        });
-        
-        // Also check for markdown code blocks
-        potentialFilePaths.push(...checkForFilePaths(markdownFilePathRegex, response));
-        
-        console.log('Potential file paths found:', potentialFilePaths);
-        
-        // For each potential file path, extract content and create an action
-        for (const potentialFilePath of potentialFilePaths) {
-            const fileContent = this.extractFileContentFromResponse(response, potentialFilePath);
-            if (fileContent) {
-                const workspace = vscode.workspace.workspaceFolders?.[0];
-                if (workspace) {
-                    // Resolve absolute path
-                    let absolutePath: string;
-                    if (path.isAbsolute(potentialFilePath)) {
-                        absolutePath = potentialFilePath;
-                    } else {
-                        absolutePath = path.join(workspace.uri.fsPath, potentialFilePath);
-                    }
-                    
-                    // Get POSIX-style path for display
-                    const posixPath = absolutePath.split(path.sep).join(path.posix.sep);
-                    console.log(`Processing file operation for path: ${posixPath}`);
                     
                     // Check if file exists
                     const fileExists = fs.existsSync(absolutePath);
                     console.log(`File exists: ${fileExists}`);
                     
                     if (fileExists) {
-                        // Update operation
-                        const currentContent = fs.readFileSync(absolutePath, 'utf8');
-                        if (currentContent !== fileContent) {
-                            console.log(`Creating UPDATE operation for: ${posixPath}`);
-                            actions.push({
-                                type: 'update',
-                                filePath: posixPath,
-                                content: fileContent,
-                                original: currentContent
-                            });
+                        // Update existing file
+                        const originalContent = fs.readFileSync(absolutePath, 'utf8');
+                        
+                        // Only create operation if content changed
+                        if (originalContent !== fileContent) {
+                            const description = `Update file ${path.basename(filePath)} with AI-generated content`;
+                            const operation = await fileOperationManager.createUpdateOperation(absolutePath, originalContent, fileContent, description);
+                            await fileOperationManager.acceptOperation(operation.id);
+                            
+                            console.log(`File ${filePath} updated with new content`);
                         } else {
-                            console.log(`File content unchanged, skipping operation for: ${posixPath}`);
+                            console.log(`File content unchanged, no update needed for ${filePath}`);
                         }
                     } else {
-                        // Add operation
-                        console.log(`Creating ADD operation for: ${posixPath}`);
-                        actions.push({
-                            type: 'add',
-                            filePath: posixPath,
-                            content: fileContent
-                        });
-                    }
-                }
-            }
-        }
-        
-        // If no actions were found from the explicit file paths, check for descriptions of files to create from the context
-        if (actions.length === 0) {
-            console.log('No explicit file paths found, checking context for file creation requests');
-            
-            // Combined context from original request and context history
-            const fullContext = originalRequest + '\n' + 
-                contextHistory.map(msg => msg.content).join('\n') + '\n' + 
-                response;
-                
-            // More comprehensive regexes to catch file creation requests
-            const contextFilePathRegexes = [
-                // English patterns
-                /create\s+(?:a|the)\s+file\s+[`'"]?([\w\-\./]+\.\w+)[`'"]?/g,
-                /generate\s+(?:a|the)\s+file\s+[`'"]?([\w\-\./]+\.\w+)[`'"]?/g,
-                /new\s+file\s+[`'"]?([\w\-\./]+\.\w+)[`'"]?/g,
-                // File name in quotes or markdown backticks
-                /[`'"]+([\w\-\./]+\.\w+)[`'"]+/g,
-                // File name in markdown code span
-                /`([\w\-\./]+\.\w+)`/g,
-                // File name at the beginning of a markdown code block
-                /```\s*(?:title=)?[`'"]?([\w\-\./]+\.\w+)[`'"]?/g,
-                // Turkish patterns
-                /dosya\s+oluştur\s+[`'"]?([\w\-\./]+\.\w+)[`'"]?/g,
-                /yeni\s+dosya\s+[`'"]?([\w\-\./]+\.\w+)[`'"]?/g
-            ];
-            
-            for (const regex of contextFilePathRegexes) {
-                const contextFilePaths = checkForFilePaths(regex, fullContext);
-                
-                for (const filePath of contextFilePaths) {
-                    // Skip paths we've already processed
-                    if (potentialFilePaths.includes(filePath)) {
-                        continue;
-                    }
-                    
-                    console.log(`Found context file path: ${filePath}`);
-                    const fileContent = this.extractFileContentFromResponse(response, filePath);
-                    
-                    if (fileContent) {
-                        const workspace = vscode.workspace.workspaceFolders?.[0];
-                        if (workspace) {
-                            // Resolve absolute path
-                            let absolutePath: string;
-                            if (path.isAbsolute(filePath)) {
-                                absolutePath = filePath;
-                            } else {
-                                absolutePath = path.join(workspace.uri.fsPath, filePath);
-                            }
-                            
-                            // Get POSIX-style path for display
-                            const posixPath = absolutePath.split(path.sep).join(path.posix.sep);
-                            console.log(`Processing context file operation for path: ${posixPath}`);
-                            
-                            // Check if file exists
-                            const fileExists = fs.existsSync(absolutePath);
-                            console.log(`File exists: ${fileExists}`);
-                            
-                            if (fileExists) {
-                                // Update operation
-                                const currentContent = fs.readFileSync(absolutePath, 'utf8');
-                                if (currentContent !== fileContent) {
-                                    console.log(`Creating UPDATE operation for context file: ${posixPath}`);
-                                    actions.push({
-                                        type: 'update',
-                                        filePath: posixPath,
-                                        content: fileContent,
-                                        original: currentContent
-                                    });
-                                } else {
-                                    console.log(`Context file content unchanged, skipping operation for: ${posixPath}`);
-                                }
-                            } else {
-                                // Add operation
-                                console.log(`Creating ADD operation for context file: ${posixPath}`);
-                                actions.push({
-                                    type: 'add',
-                                    filePath: posixPath,
-                                    content: fileContent
-                                });
-                            }
+                        // Create new file
+                        const description = `Create new file ${path.basename(filePath)} with AI-generated content`;
+                        const operation = await fileOperationManager.createAddOperation(absolutePath, fileContent, description);
+                        await fileOperationManager.acceptOperation(operation.id);
+                        
+                        // Create directories if they don't exist
+                        const dirPath = path.dirname(absolutePath);
+                        if (!fs.existsSync(dirPath)) {
+                            fs.mkdirSync(dirPath, { recursive: true });
                         }
+                        
+                        console.log(`New file ${filePath} created with content`);
                     }
                 }
+                
+                regexIndex++;
             }
+            
+            if (!filesFound) {
+                console.log('No file content blocks found in the AI response');
+            }
+        } catch (error) {
+            console.error('Error extracting file content:', error);
         }
+    }
+
+    /**
+     * Checks if the given message is a translation request
+     */
+    private isTranslationRequest(message: string): boolean {
+        // Normalize the message for consistent matching
+        const normalizedMessage = message.toLowerCase();
         
-        console.log(`Total actions extracted: ${actions.length}`);
-        return actions;
+        // Define patterns that suggest translation requests
+        const translationPatterns = [
+            'translate', 'translation', 'çevir', 'çeviri', 'türkçe', 
+            'übersetz', 'traducir', 'tradui', 'tradução', 'traduzione',
+            'convert to', 'tercüme et', 'in another language', 'localiz',
+            'güncelleyelim'
+        ];
+        
+        // Check if the message contains any of the translation patterns
+        const isTranslation = translationPatterns.some(pattern => normalizedMessage.includes(pattern));
+        
+        console.log(`Checking if message is a translation request: ${isTranslation}`, 
+                   isTranslation ? `Matched pattern in: ${normalizedMessage.substring(0, 50)}...` : '');
+        
+        return isTranslation;
     }
 } 

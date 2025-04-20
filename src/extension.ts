@@ -33,8 +33,11 @@ export class SmileAIExtension {
     private readonly improvementProvider: ImprovementTreeProvider;
     private readonly modelManager: ModelManager;
     private readonly improvementManager: ImprovementManager;
+    private aiAssistantPanel: AIAssistantPanel | undefined;
+    private readonly context: vscode.ExtensionContext;
 
     constructor(context: vscode.ExtensionContext) {
+        this.context = context;
         this.fileAnalyzer = FileAnalyzer.getInstance();
         this.codeAnalyzer = CodeAnalyzer.getInstance();
         this.statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left);
@@ -114,7 +117,7 @@ export class SmileAIExtension {
                         ]
                     };
                     
-                    AIAssistantPanel.currentPanel = new AIAssistantPanel(
+                    this.aiAssistantPanel = new AIAssistantPanel(
                         webviewView,
                         context,
                         this.aiEngine,
@@ -128,86 +131,8 @@ export class SmileAIExtension {
         this.taskExecutors = new Map();
 
         // Register commands
-        context.subscriptions.push(
-            vscode.commands.registerCommand('smile-ai.openChat', () => {
-                vscode.commands.executeCommand('smile-ai.assistant.focus');
-            }),
-            vscode.commands.registerCommand('smile-ai.openComposer', () => {
-                // TODO: Implement composer view
-            }),
-            vscode.commands.registerCommand('smile-ai.addModel', async () => {
-                await this.modelManager.addModel({
-                    name: 'Gemma 3 12B',
-                    provider: 'ollama',
-                    modelName: 'gemma3:12b',
-                    apiEndpoint: 'http://localhost:11434',
-                    maxTokens: 2048,
-                    temperature: 0.7,
-                    embeddingModelName: 'nomic-embed-text'
-                });
-            }),
-            vscode.commands.registerCommand('smile-ai.removeModel', async (modelName: string) => {
-                await this.modelManager.removeModel(modelName);
-            }),
-            vscode.commands.registerCommand('smile-ai.selectActiveModel', async (modelName: string) => {
-                await this.modelManager.setActiveModel(modelName);
-            }),
-            vscode.commands.registerCommand('smile-ai.noteImprovement', async () => {
-                const editor = vscode.window.activeTextEditor;
-                if (!editor) {
-                    return;
-                }
+        this.registerCommands();
 
-                const selection = editor.selection;
-                
-                const note = await vscode.window.showInputBox({
-                    prompt: 'Enter improvement note',
-                    placeHolder: 'What needs to be improved?'
-                });
-
-                if (note) {
-                    await this.improvementManager.addNote(note, {
-                        file: editor.document.uri.fsPath,
-                        selection: {
-                            startLine: selection.start.line,
-                            startChar: selection.start.character,
-                            endLine: selection.end.line,
-                            endChar: selection.end.character
-                        },
-                        status: 'pending',
-                        priority: 'medium',
-                        timestamp: Date.now()
-                    });
-                }
-            }),
-            vscode.commands.registerCommand('smile-ai.markImprovementDone', (item) => {
-                this.improvementManager.updateNoteStatus(item.id, 'done');
-            }),
-            vscode.commands.registerCommand('smile-ai.dismissImprovement', (item) => {
-                this.improvementManager.updateNoteStatus(item.id, 'dismissed');
-            }),
-            vscode.commands.registerCommand('smile-ai.setImprovementPriority', async (item) => {
-                const priority = await vscode.window.showQuickPick(['low', 'medium', 'high', 'none'], {
-                    placeHolder: 'Select priority'
-                });
-
-                if (priority) {
-                    this.improvementManager.updateNotePriority(item.id, priority as 'low' | 'medium' | 'high' | 'none');
-                }
-            }),
-            vscode.commands.registerCommand('smile-ai.reindexCodebase', async () => {
-                await vscode.window.withProgress({
-                    location: vscode.ProgressLocation.Notification,
-                    title: "Indexing codebase...",
-                    cancellable: false
-                }, async (progress) => {
-                    await this.codebaseIndexer.indexWorkspace((message) => {
-                        progress.report({ message });
-                    });
-                });
-            })
-        );
-        
         this.initializeComponents();
     }
 
@@ -335,11 +260,73 @@ export class SmileAIExtension {
         this.aiEngine.updateConfig({ enableRAG });
     }
 
+    private registerCommands(): void {
+        // Register a command to open the AI assistant panel
+        const openAIAssistantCommand = vscode.commands.registerCommand('smile-ai.openAIAssistant', () => {
+            // Show the AI Assistant panel
+            vscode.commands.executeCommand('smile-ai.assistant.focus');
+        });
+
+        // Command to attach a file to the current conversation
+        const attachFileCommand = vscode.commands.registerCommand('smile-ai.attachFile', () => {
+            if (this.aiAssistantPanel) {
+                this.attachFile();
+            } else {
+                vscode.window.showInformationMessage('Open Smile AI assistant first to attach files.');
+            }
+        });
+
+        // Command to attach a folder to the current conversation
+        const attachFolderCommand = vscode.commands.registerCommand('smile-ai.attachFolder', () => {
+            if (this.aiAssistantPanel) {
+                this.attachFolder();
+            } else {
+                vscode.window.showInformationMessage('Open Smile AI assistant first to attach folders.');
+            }
+        });
+
+        // Register a command to configure the AI assistant
+        const configureCommand = vscode.commands.registerCommand('smile-ai.configure', () => {
+            vscode.commands.executeCommand('workbench.action.openSettings', '@ext:bgunduk.smile-ai');
+        });
+
+        // Register commands for handling improvements
+        const improveCommand = vscode.commands.registerCommand('smile-ai.improve', async (improvement) => {
+            if (this.aiAssistantPanel) {
+                // Call method to handle improvement if available
+                await vscode.window.showInformationMessage('Improvement registered: ' + improvement);
+            }
+        });
+
+        this.context.subscriptions.push(
+            openAIAssistantCommand,
+            attachFileCommand,
+            attachFolderCommand,
+            configureCommand,
+            improveCommand
+        );
+    }
+
+    // Helper methods to work with private AIAssistantPanel methods
+    private attachFile(): void {
+        if (this.aiAssistantPanel) {
+            vscode.commands.executeCommand('smile-ai.assistant.focus');
+            vscode.commands.executeCommand('smile-ai.assistant.attachFile');
+        }
+    }
+
+    private attachFolder(): void {
+        if (this.aiAssistantPanel) {
+            vscode.commands.executeCommand('smile-ai.assistant.focus');
+            vscode.commands.executeCommand('smile-ai.assistant.attachFolder');
+        }
+    }
+
     public dispose() {
         this.statusBarItem.dispose();
         // Note: CodebaseIndexer and ImprovementManager don't need dispose methods
-        if (AIAssistantPanel.currentPanel) {
-            AIAssistantPanel.currentPanel.dispose();
+        if (this.aiAssistantPanel) {
+            this.aiAssistantPanel.dispose();
         }
     }
 }
