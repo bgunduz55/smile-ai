@@ -7,4 +7,5 @@ export interface AIEngineConfig {
     maxTokens: number;
     temperature: number;
     embeddingModelName?: string;
+    enableRAG?: boolean; // Enable Retrieval Augmented Generation
 } 

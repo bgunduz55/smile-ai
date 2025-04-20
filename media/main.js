@@ -25,20 +25,6 @@
     document.addEventListener('DOMContentLoaded', () => {
         log("DOM fully loaded");
         
-        // Set up the settings button event listener
-        const settingsButton = document.querySelector('.settings-button button');
-        if (settingsButton) {
-            log("Settings button found, adding event listener");
-            settingsButton.addEventListener('click', () => {
-                log("Settings button clicked");
-                vscode.postMessage({
-                    command: 'addModel' // This is the command handled in the extension
-                });
-            });
-        } else {
-            log("Settings button not found in the DOM");
-        }
-
         // Set up send button event listener
         const sendButton = document.querySelector('#send-button');
         const messageInput = document.querySelector('#message-input');

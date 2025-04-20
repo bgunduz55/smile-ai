@@ -418,7 +418,7 @@ export class AIAssistantPanel {
             // Create a welcome message
             const welcomeMessage: Message = {
                 role: 'system',
-                content: 'Welcome to Smile AI! I\'m ready to help you with your code. You can ask questions, get explanations, or request code changes. I\'m indexing your codebase to provide better assistance.',
+                content: 'Welcome to Smile AI! Ask me anything about your code or suggest improvements.',
                 timestamp: Date.now()
             };
             
@@ -435,28 +435,10 @@ export class AIAssistantPanel {
                 <title>Smile AI Assistant</title>
                 <link rel="stylesheet" href="${cssUri}">
                 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@vscode/codicons/dist/codicon.css">
-                <script>
-                    // Unregister any existing service workers
-                    if ('serviceWorker' in navigator) {
-                        navigator.serviceWorker.getRegistrations().then(function(registrations) {
-                            for(let registration of registrations) {
-                                registration.unregister();
-                            }
-                        });
-                    }
-                </script>
                 <script src="${mainUri}" defer></script>
             </head>
             <body>
                 <div class="container">
-                    <div class="header">
-                        <div class="settings-button">
-                            <button id="settingsButton" title="Settings">
-                                <i class="codicon codicon-gear"></i>
-                            </button>
-                        </div>
-                    </div>
-                    
                     <div class="chat-container">
                         <div class="messages" id="messages">
                             <!-- Messages will be inserted here -->
@@ -466,45 +448,16 @@ export class AIAssistantPanel {
                                 <textarea
                                     class="input-box"
                                     id="message-input"
-                                    placeholder="Ask, search, build anything... (Enter ile gönder, Shift+Enter ile yeni satır)"
+                                    placeholder="Ask any question about your code..."
                                     rows="1"
                                 ></textarea>
                                 <button class="send-button" id="send-button">
                                     <i class="codicon codicon-send"></i>
-                                    Send
                                 </button>
                             </div>
                         </div>
                     </div>
-                    
-                    <!-- Pending file operations container -->
-                    <div class="pending-operations" style="display: none;">
-                        <!-- File operations will be inserted here -->
-                    </div>
                 </div>
-
-                <template id="message-template">
-                    <div class="message">
-                        <div class="avatar">
-                            <i class="codicon"></i>
-                        </div>
-                        <div class="message-content">
-                            <div class="markdown-content"></div>
-                        </div>
-                    </div>
-                </template>
-
-                <template id="code-block-template">
-                    <div class="code-block">
-                        <div class="header">
-                            <span class="filename"></span>
-                            <button class="copy-button">
-                                <i class="codicon codicon-copy"></i>
-                            </button>
-                        </div>
-                        <pre><code></code></pre>
-                    </div>
-                </template>
             </body>
             </html>`;
             
@@ -515,35 +468,7 @@ export class AIAssistantPanel {
                     command: 'addMessage', 
                     message: welcomeMessage
                 });
-                
-                // Start indexing in the background
-                this.indexCodebase()
-                    .then(() => {
-                        const indexCompleteMessage: Message = {
-                            role: 'system',
-                            content: 'Codebase indexing complete! I now have a better understanding of your project.',
-                            timestamp: Date.now()
-                        };
-                        this.messages.push(indexCompleteMessage);
-                        webview.postMessage({
-                            command: 'addMessage',
-                            message: indexCompleteMessage
-                        });
-                    })
-                    .catch((error) => {
-                        console.error('Error during codebase indexing:', error);
-                        const indexErrorMessage: Message = {
-                            role: 'system',
-                            content: 'There was an issue indexing your codebase. I\'ll still try to help, but my responses might be less accurate.',
-                            timestamp: Date.now()
-                        };
-                        this.messages.push(indexErrorMessage);
-                        webview.postMessage({
-                            command: 'addMessage',
-                            message: indexErrorMessage
-                        });
-                    });
-            }, 1000);
+            }, 500);
         } catch (error) {
             console.error('Error setting up webview:', error);
         }

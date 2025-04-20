@@ -7,6 +7,7 @@ import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
 import { Message } from '../types/chat';
+import { RAGService } from '../indexing/RAGService';
 
 export interface AIEngineConfig {
     provider: {
@@ -17,6 +18,7 @@ export interface AIEngineConfig {
     maxTokens?: number;
     temperature?: number;
     embeddingModelName?: string;
+    enableRAG?: boolean;
 }
 
 export interface ProcessMessageOptions {
@@ -47,9 +49,23 @@ interface Action {
 export class AIEngine {
     private config: AIEngineConfig;
     private conversationHistory: AIMessage[] = [];
+    private ragService: RAGService | null = null;
+    private codebaseIndex: CodebaseIndex | null = null;
 
     constructor(config: AIEngineConfig) {
         this.config = config;
+    }
+
+    // Initialize RAG service with a codebase index
+    public initRAG(codebaseIndex: CodebaseIndex): void {
+        this.codebaseIndex = codebaseIndex;
+        this.ragService = RAGService.getInstance(this, codebaseIndex);
+        // Set RAG enabled based on config
+        if (this.ragService && this.config.enableRAG !== undefined) {
+            this.ragService.setEnabled(this.config.enableRAG);
+        }
+        
+        console.log(`Initialized RAG service with ${this.codebaseIndex ? 'codebase index' : 'no index'}`);
     }
 
     public async testConnection(): Promise<boolean> {
@@ -106,11 +122,17 @@ export class AIEngine {
                                   message.includes('code base') || 
                                   message.includes('kod taban');
             
-            // Prepare relevant codebase context if needed
+            // Prepare relevant codebase context using RAG if available
             let codebaseContext = '';
-            if (isCodebaseQuery && options.codebaseIndex) {
-                console.log("Detected codebase query, preparing codebase context");
-                codebaseContext = this.prepareCodebaseContext(message, options.codebaseIndex);
+            if (isCodebaseQuery) {
+                if (this.ragService && this.ragService.isEnabled()) {
+                    console.log("Using RAG service to prepare context");
+                    const enhancedContext = await this.ragService.enhanceQueryWithContext(message);
+                    codebaseContext = enhancedContext.relevantContext;
+                } else if (options.codebaseIndex) {
+                    console.log("Using traditional codebase context method");
+                    codebaseContext = this.prepareCodebaseContext(message, options.codebaseIndex);
+                }
             }
             
             // Check if we're using Ollama and use the correct endpoint
@@ -264,6 +286,11 @@ export class AIEngine {
 
     public updateConfig(newConfig: Partial<AIEngineConfig>) {
         this.config = { ...this.config, ...newConfig };
+        
+        // Update RAG service settings if enableRAG has changed
+        if (this.ragService && newConfig.enableRAG !== undefined) {
+            this.ragService.setEnabled(newConfig.enableRAG);
+        }
     }
 
     public getConfig(): AIEngineConfig {
