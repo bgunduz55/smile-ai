@@ -8,6 +8,8 @@
     --cursor-text-color: #e0e0e0;
     --cursor-assistant-bg: #252526;
     --cursor-user-bg: #2d2d2d;
+    --container-padding: 20px;
+    --input-padding: 12px;
 }
 
 body {
@@ -17,13 +19,16 @@ body {
     background: var(--cursor-background-dark);
     color: var(--cursor-text-color);
     font-size: 14px;
+    overflow: hidden;
+    height: 100vh;
 }
 
 .container {
     display: flex;
     flex-direction: column;
     height: 100vh;
-    padding: 10px;
+    overflow: hidden;
+    padding: 0;
 }
 
 .toolbar {
@@ -63,8 +68,9 @@ body {
 .chat-container {
     display: flex;
     flex-direction: column;
-    height: 100vh;
+    height: 100%;
     overflow: hidden;
+    flex: 1;
 }
 
 .messages {
@@ -207,32 +213,45 @@ body {
 }
 
 .input-container {
-    padding: 10px;
+    padding: 12px 16px;
     background: var(--vscode-editor-background);
     border-top: 1px solid var(--vscode-panel-border);
+    width: 100%;
+    box-sizing: border-box;
 }
 
 .input-row {
     display: flex;
-    gap: 8px;
+    gap: 12px;
     background: var(--vscode-input-background);
     border: 1px solid var(--vscode-input-border, transparent);
-    border-radius: 6px;
-    padding: 6px;
+    border-radius: 8px;
+    padding: 8px 12px;
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.input-wrapper {
+    position: relative;
+    flex: 1;
+    min-width: 0;
+    width: 100%;
 }
 
 .input-box {
-    flex: 1;
+    width: 100%;
     background: transparent;
     border: none;
     color: var(--vscode-input-foreground);
     font-family: var(--vscode-font-family);
     font-size: 14px;
     resize: none;
-    padding: 4px;
+    padding: 6px;
     outline: none;
-    max-height: 120px;
-    min-height: 20px;
+    max-height: 150px;
+    min-height: 24px;
+    line-height: 1.5;
+    box-sizing: border-box;
 }
 
 .input-box:focus {
@@ -336,57 +355,93 @@ body {
 
 .attachment-toolbar {
     display: flex;
-    gap: 0.5rem;
-    margin-bottom: 0.5rem;
+    gap: 8px;
+    margin-bottom: 10px;
 }
 
 .attachment-button {
     display: inline-flex;
     align-items: center;
-    gap: 0.5rem;
-    padding: 0.3rem 0.5rem;
-    background: transparent;
-    border: 1px solid var(--cursor-border-color);
-    border-radius: var(--border-radius);
-    color: var(--cursor-text-color);
+    gap: 6px;
+    padding: 6px 10px;
+    background: var(--vscode-button-background);
+    color: var(--vscode-button-foreground);
+    border: none;
+    border-radius: 4px;
     cursor: pointer;
     font-size: 12px;
-    transition: background-color 0.2s;
 }
 
 .attachment-button:hover {
-    background: var(--cursor-button-hover);
+    background: var(--vscode-button-hoverBackground);
 }
 
-.current-attachments {
+.attachment-button .codicon {
+    font-size: 14px;
+}
+
+#attachments-container {
     display: flex;
     flex-wrap: wrap;
-    gap: 0.5rem;
-    margin-bottom: 0.5rem;
+    gap: 8px;
+    margin-bottom: 10px;
+    display: none;
 }
 
 .attachment-item {
     display: flex;
     align-items: center;
-    gap: 0.5rem;
-    padding: 0.3rem 0.5rem;
-    background: rgba(0, 0, 0, 0.2);
-    border-radius: var(--border-radius);
+    gap: 6px;
+    padding: 6px 10px;
+    background: var(--vscode-editor-inactiveSelectionBackground);
+    border-radius: 4px;
     font-size: 12px;
-    border: 1px solid var(--cursor-border-color);
 }
 
-.attachment-item .remove-attachment {
-    background: transparent;
-    border: none;
-    color: var(--cursor-text-color);
+.attachment-item .codicon {
+    font-size: 14px;
+    color: var(--vscode-editorInfo-foreground);
+}
+
+.attachment-remove {
+    color: var(--vscode-descriptionForeground);
     cursor: pointer;
-    padding: 2px;
-    border-radius: 3px;
+    font-size: 12px;
+    margin-left: 4px;
 }
 
-.attachment-item .remove-attachment:hover {
-    background: rgba(255, 255, 255, 0.1);
+.attachment-remove:hover {
+    color: var(--vscode-errorForeground);
+}
+
+/* File Suggestions */
+#suggestions-container {
+    position: absolute;
+    max-height: 200px;
+    overflow-y: auto;
+    background-color: var(--vscode-editor-background);
+    border: 1px solid var(--vscode-panel-border);
+    border-radius: 4px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+    z-index: 1000;
+    display: none;
+}
+
+.suggestion-item {
+    padding: 8px 12px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    transition: background-color 0.2s ease;
+}
+
+.suggestion-item:hover {
+    background-color: var(--vscode-list-hoverBackground);
+}
+
+.suggestion-item i {
+    color: var(--vscode-symbolIcon-fileForeground);
 }
 
 .message.loading .avatar i {
@@ -786,4 +841,450 @@ body {
 
 .header-actions button i {
     font-size: 16px;
+}
+
+/* Öneri bileşeni stili - yenilendi */
+.suggestions-container {
+    display: none;
+    position: absolute;
+    bottom: 110%;
+    left: 0;
+    right: 0;
+    background-color: var(--vscode-editor-background);
+    border: 1px solid var(--vscode-widget-border);
+    border-radius: 6px;
+    max-height: 300px;
+    overflow-y: auto;
+    z-index: 10;
+    box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+}
+
+.suggestion-item {
+    padding: 8px 12px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    border-bottom: 1px solid var(--vscode-panel-border);
+    transition: background-color 0.2s ease;
+}
+
+.suggestion-item:last-child {
+    border-bottom: none;
+}
+
+.suggestion-item:hover, .suggestion-item.selected {
+    background-color: var(--vscode-list-hoverBackground);
+}
+
+.suggestion-item .icon {
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+}
+
+.suggestion-item .content {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+}
+
+.suggestion-item .label {
+    font-weight: 500;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.suggestion-item .path {
+    color: var(--vscode-descriptionForeground);
+    font-size: 0.85em;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    margin-top: 2px;
+}
+
+/* Folder nesting visualization */
+.suggestion-item .is-nested {
+    margin-left: 16px;
+    position: relative;
+}
+
+.suggestion-item .is-nested:before {
+    content: '';
+    position: absolute;
+    left: -12px;
+    top: 50%;
+    width: 8px;
+    height: 1px;
+    background-color: var(--vscode-descriptionForeground);
+}
+
+.suggestion-group-header {
+    padding: 6px 10px;
+    font-size: 12px;
+    font-weight: bold;
+    background-color: var(--vscode-panel-background);
+    border-bottom: 1px solid var(--vscode-panel-border);
+    color: var(--vscode-foreground);
+    position: sticky;
+    top: 0;
+    z-index: 1;
+}
+
+/* Context Menu */
+.context-menu {
+    position: absolute;
+    background-color: var(--vscode-editor-background);
+    border: 1px solid var(--vscode-editor-lineHighlightBorder);
+    border-radius: 4px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+    z-index: 1000;
+    overflow: hidden;
+    min-width: 160px;
+}
+
+.context-menu-item {
+    padding: 8px 12px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--vscode-foreground);
+    transition: background-color 0.2s ease;
+}
+
+.context-menu-item:hover {
+    background-color: var(--vscode-list-hoverBackground);
+}
+
+.context-menu-item:active {
+    background-color: var(--vscode-list-activeSelectionBackground);
+    color: var(--vscode-list-activeSelectionForeground);
+}
+
+.context-menu-item i {
+    font-size: 14px;
+}
+
+/* Input box and helpers */
+.input-wrapper {
+    position: relative;
+    flex: 1;
+    min-width: 0;
+}
+
+.suggestions-container {
+    display: none;
+    position: absolute;
+    bottom: 100%;
+    left: 0;
+    right: 0;
+    max-height: 300px;
+    overflow-y: auto;
+    background-color: var(--vscode-menu-background);
+    border: 1px solid var(--vscode-widget-border);
+    border-radius: 4px;
+    z-index: 100;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+    margin-bottom: 5px;
+}
+
+.suggestion-item {
+    padding: 6px 10px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    border-bottom: 1px solid var(--vscode-list-inactiveFocusOutline, rgba(160, 160, 160, 0.2));
+}
+
+.suggestion-item:last-child {
+    border-bottom: none;
+}
+
+.suggestion-item:hover, .suggestion-item.selected {
+    background-color: var(--vscode-list-hoverBackground);
+    color: var(--vscode-list-hoverForeground);
+}
+
+.suggestion-item .icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.suggestion-item .icon i {
+    color: var(--vscode-icon-foreground);
+}
+
+.suggestion-item .content {
+    flex: 1;
+    overflow: hidden;
+}
+
+.suggestion-item .label {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-weight: 500;
+}
+
+.suggestion-item .path {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-size: 0.85em;
+    color: var(--vscode-descriptionForeground);
+}
+
+.suggestion-group-header {
+    background-color: var(--vscode-list-deemphasizedForeground, rgba(160, 160, 160, 0.2));
+    padding: 4px 10px;
+    font-size: 11px;
+    font-weight: bold;
+    color: var(--vscode-foreground);
+    position: sticky;
+    top: 0;
+    z-index: 1;
+}
+
+#app {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+}
+
+#chat-container {
+    flex: 1;
+    overflow-y: auto;
+    padding: var(--container-padding);
+}
+
+#input-container {
+    border-top: 1px solid var(--vscode-panel-border);
+    padding: 10px var(--container-padding);
+}
+
+#attachments-container {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 10px;
+}
+
+.attachment-item {
+    display: flex;
+    align-items: center;
+    background-color: var(--vscode-button-secondaryBackground);
+    color: var(--vscode-button-secondaryForeground);
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 12px;
+}
+
+.attachment-item .icon {
+    margin-right: 4px;
+}
+
+.attachment-item .remove-attachment {
+    margin-left: 6px;
+    cursor: pointer;
+    opacity: 0.7;
+}
+
+.attachment-item .remove-attachment:hover {
+    opacity: 1;
+}
+
+.input-row {
+    display: flex;
+    align-items: flex-start;
+    position: relative;
+}
+
+#add-context-button {
+    background: none;
+    border: none;
+    color: var(--vscode-button-foreground);
+    padding: 8px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+#add-context-button:hover {
+    background-color: var(--vscode-button-hoverBackground);
+}
+
+#context-menu {
+    position: absolute;
+    top: 40px;
+    left: 0;
+    background-color: var(--vscode-editorWidget-background);
+    border: 1px solid var(--vscode-widget-border);
+    border-radius: 4px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+    display: none;
+    z-index: 1000;
+    width: 180px;
+}
+
+.context-menu-item {
+    padding: 8px 12px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+}
+
+.context-menu-item:hover {
+    background-color: var(--vscode-list-hoverBackground);
+}
+
+.context-menu-item i {
+    margin-right: 8px;
+}
+
+#message-input {
+    flex: 1;
+    border: 1px solid var(--vscode-input-border);
+    background-color: var(--vscode-input-background);
+    color: var(--vscode-input-foreground);
+    border-radius: 4px;
+    padding: var(--input-padding);
+    min-height: 60px;
+    max-height: 200px;
+    resize: vertical;
+    margin: 0 10px;
+}
+
+#message-input:focus {
+    outline: none;
+    border-color: var(--vscode-focusBorder);
+}
+
+#send-message {
+    background-color: var(--vscode-button-background);
+    color: var(--vscode-button-foreground);
+    border: none;
+    border-radius: 4px;
+    padding: 8px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    align-self: flex-end;
+    margin-bottom: 2px;
+}
+
+#send-message:hover {
+    background-color: var(--vscode-button-hoverBackground);
+}
+
+/* Message styles */
+.message {
+    display: flex;
+    margin-bottom: 20px;
+}
+
+.message.user {
+    background-color: var(--vscode-editor-background);
+}
+
+.message.assistant {
+    background-color: var(--vscode-editor-inactiveSelectionBackground);
+}
+
+.message-header {
+    display: flex;
+    align-items: center;
+    margin-bottom: 8px;
+    font-weight: bold;
+}
+
+.message-avatar {
+    width: 24px;
+    height: 24px;
+    margin-right: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    background-color: var(--vscode-badge-background);
+    color: var(--vscode-badge-foreground);
+}
+
+.message-content {
+    flex: 1;
+    line-height: 1.5;
+    padding: 10px 16px;
+    border-radius: 8px;
+}
+
+/* Code block styles */
+.code-block {
+    margin: 10px 0;
+    border-radius: 6px;
+    overflow: hidden;
+    background-color: var(--vscode-editor-background);
+    border: 1px solid var(--vscode-panel-border);
+}
+
+.code-block-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 12px;
+    background-color: var(--vscode-tab-inactiveBackground);
+    border-bottom: 1px solid var(--vscode-panel-border);
+}
+
+.code-block-filename {
+    font-size: 12px;
+    color: var(--vscode-tab-inactiveForeground);
+}
+
+.code-block-copy {
+    background: none;
+    border: none;
+    color: var(--vscode-button-foreground);
+    cursor: pointer;
+    padding: 4px;
+    opacity: 0.7;
+}
+
+.code-block-copy:hover {
+    opacity: 1;
+}
+
+.code-block-content {
+    padding: 12px;
+    overflow-x: auto;
+    font-family: var(--vscode-editor-font-family);
+    font-size: var(--vscode-editor-font-size);
+}
+
+/* Scrollbar styles */
+::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+}
+
+::-webkit-scrollbar-track {
+    background: var(--vscode-scrollbarSlider-background);
+}
+
+::-webkit-scrollbar-thumb {
+    background: var(--vscode-scrollbarSlider-hoverBackground);
+    border-radius: 5px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: var(--vscode-scrollbarSlider-activeBackground);
 } 

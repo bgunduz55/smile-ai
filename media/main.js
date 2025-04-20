@@ -28,6 +28,10 @@
         // Set up send button event listener
         const sendButton = document.querySelector('#send-button');
         const messageInput = document.querySelector('#message-input');
+        const chatContainer = document.getElementById('messages');
+        const attachFileButton = document.getElementById('attachFileButton');
+        const attachFolderButton = document.getElementById('attachFolderButton');
+        const attachmentsContainer = document.getElementById('attachments-container');
 
         if (sendButton && messageInput) {
             sendButton.addEventListener('click', () => {
@@ -35,12 +39,68 @@
             });
 
             messageInput.addEventListener('keydown', (event) => {
-                if (event.key === 'Enter' && !event.shiftKey) {
+                const suggestionsContainer = document.getElementById('suggestions-container');
+                const isVisible = suggestionsContainer && suggestionsContainer.style.display === 'block';
+                
+                if (isVisible) {
+                    // Suggestion navigation
+                    if (event.key === 'ArrowUp' || event.key === 'ArrowDown') {
+                        event.preventDefault();
+                        navigateSuggestions(event.key === 'ArrowDown' ? 1 : -1);
+                        return;
+                    }
+                    
+                    // Accept suggestion with Tab or Enter
+                    if (event.key === 'Tab' || event.key === 'Enter') {
+                        event.preventDefault();
+                        acceptSelectedSuggestion();
+                        return;
+                    }
+                    
+                    // Escape closes suggestions
+                    if (event.key === 'Escape') {
+                        event.preventDefault();
+                        hideSuggestions();
+                        return;
+                    }
+                }
+                
+                // Standard behavior - send message with Enter (unless shift is pressed)
+                if (event.key === 'Enter' && !event.shiftKey && !isVisible) {
                     event.preventDefault();
                     sendMessage();
                 }
             });
+            
+            // Set up @ mention detection - ÖNEMLİ: Input event listener ekle
+            messageInput.addEventListener('input', handleInputChange);
         }
+        
+        // Set up file and folder attachment buttons
+        if (attachFileButton) {
+            attachFileButton.addEventListener('click', () => {
+                log("Attach File button clicked");
+                vscode.postMessage({
+                    command: 'attachFile'
+                });
+            });
+        } else {
+            log("Attach File button not found in the DOM");
+        }
+        
+        if (attachFolderButton) {
+            attachFolderButton.addEventListener('click', () => {
+                log("Attach Folder button clicked");
+                vscode.postMessage({
+                    command: 'attachFolder'
+                });
+            });
+        } else {
+            log("Attach Folder button not found in the DOM");
+        }
+        
+        // Request workspace files on startup for @ mentions
+        requestWorkspaceFiles();
         
         // Initialize pending operations container
         const pendingOperationsContainer = document.querySelector('.pending-operations');
@@ -51,24 +111,102 @@
         }
     });
 
+    // Current attachments
+    let currentAttachments = [];
+    
+    // Cache for workspace files (used for @ mentions)
+    let workspaceFiles = [];
+    let workspaceFolders = [];
+
     // Function to send message to extension
     function sendMessage() {
-        const messageInput = document.querySelector('#message-input');
-        const message = messageInput.value.trim();
-
-        if (message) {
+        const messageInput = document.getElementById('message-input');
+        const text = messageInput.value.trim();
+        
+        if (text) {
+            log("Sending message with attachments:", currentAttachments.length > 0 ? 
+                currentAttachments.map(a => a.name || a.path.split(/[\\\/]/).pop()).join(', ') : 
+                'none');
+            
+            // Check if the message already contains file content markers
+            const containsFileContent = text.includes('```') && 
+                                      (text.includes('### File:') || 
+                                       text.includes('# ') || 
+                                       text.includes('## '));
+            
+            // If message already contains file content, don't send attachments to avoid duplication
+            let attachmentsToSend = [];
+            if (!containsFileContent && currentAttachments.length > 0) {
+                // Make sure any file attachments have content included
+                attachmentsToSend = currentAttachments.map(attachment => {
+                    // Create a new object to avoid modifying the original
+                    const newAttachment = { ...attachment };
+                    
+                    // Make sure to include content if we have it
+                    if (attachment.content) {
+                        log(`Including content for attached file: ${attachment.name || attachment.path.split(/[\\\/]/).pop()}, length: ${attachment.content.length} characters`);
+                    } else {
+                        log(`No content found for attachment: ${attachment.name || attachment.path.split(/[\\\/]/).pop()}`);
+                    }
+                    
+                    return newAttachment;
+                });
+            } else if (containsFileContent) {
+                log('Message already contains file content, skipping attachments to avoid duplication');
+            }
+            
             vscode.postMessage({
                 command: 'sendMessage',
-                text: message
+                text: text,
+                options: {
+                    attachments: attachmentsToSend,
+                    originalText: text
+                }
             });
-            messageInput.value = '';
-
-            // Don't add user message here since it will be added by the extension
-            // addMessage('user', message);
             
-            // No need to show loading here since it will be controlled by the extension
-            // showLoading();
+            messageInput.value = '';
+            // Clear attachments after sending
+            currentAttachments = [];
+            updateAttachmentsUI();
         }
+    }
+
+    // Function to update attachments UI
+    function updateAttachmentsUI() {
+        const attachmentsContainer = document.getElementById('attachments-container');
+        attachmentsContainer.innerHTML = '';
+        
+        if (currentAttachments.length === 0) {
+            attachmentsContainer.style.display = 'none';
+            return;
+        }
+        
+        attachmentsContainer.style.display = 'flex';
+        
+        currentAttachments.forEach((attachment, index) => {
+            const attachmentItem = document.createElement('div');
+            attachmentItem.className = 'attachment-item';
+            
+            const icon = document.createElement('span');
+            icon.className = 'codicon';
+            icon.classList.add(attachment.type === 'file' ? 'codicon-file' : 'codicon-folder');
+            
+            const name = document.createElement('span');
+            name.textContent = attachment.name || attachment.path.split(/[\\\/]/).pop();
+            
+            const removeButton = document.createElement('span');
+            removeButton.className = 'codicon codicon-close attachment-remove';
+            removeButton.addEventListener('click', () => {
+                currentAttachments.splice(index, 1);
+                updateAttachmentsUI();
+            });
+            
+            attachmentItem.appendChild(icon);
+            attachmentItem.appendChild(name);
+            attachmentItem.appendChild(removeButton);
+            
+            attachmentsContainer.appendChild(attachmentItem);
+        });
     }
 
     // Function to add message to the chat
@@ -429,6 +567,74 @@
                     }
                     break;
                     
+                case 'fileAttached':
+                    if (message.path) {
+                        log("File attached:", message.path);
+                        currentAttachments.push({
+                            type: 'file',
+                            path: message.path,
+                            content: message.content
+                        });
+                        updateAttachmentsUI();
+                        // Focus back on the message input
+                        document.getElementById('message-input').focus();
+                    }
+                    break;
+                    
+                case 'folderAttached':
+                    if (message.path) {
+                        log("Folder attached:", message.path);
+                        currentAttachments.push({
+                            type: 'folder',
+                            path: message.path
+                        });
+                        updateAttachmentsUI();
+                        // Focus back on the message input
+                        document.getElementById('message-input').focus();
+                    }
+                    break;
+                    
+                case 'fileContentLoaded':
+                    if (message.path && message.content) {
+                        const contentLength = message.content ? message.content.length : 0;
+                        log(`File content loaded for ${message.path}, length: ${contentLength} characters`);
+                        
+                        // Update the attachment with the content
+                        const attachment = currentAttachments.find(a => a.path === message.path);
+                        if (attachment) {
+                            attachment.content = message.content;
+                            
+                            // Refresh UI to indicate content was loaded
+                            updateAttachmentsUI();
+                            
+                            // Get filename from path
+                            const fileName = attachment.name || attachment.path.split(/[\\\/]/).pop();
+                            log(`Updated attachment with content for ${fileName}, content length: ${contentLength}`);
+                        } else {
+                            log(`Warning: Received content for ${message.path} but no matching attachment found`);
+                            
+                            // Add it as an attachment anyway if it's not already in the list
+                            const fileName = message.path.split(/[\\\/]/).pop();
+                            currentAttachments.push({
+                                type: 'file',
+                                path: message.path,
+                                name: fileName,
+                                content: message.content
+                            });
+                            updateAttachmentsUI();
+                            log(`Added new attachment for ${fileName} with content length: ${contentLength}`);
+                        }
+                    }
+                    break;
+                    
+                case 'workspaceFilesUpdated':
+                    if (message.files && Array.isArray(message.files)) {
+                        log("Received workspace files:", message.files.length);
+                        workspaceFiles = message.files.filter(f => !f.isDirectory);
+                        workspaceFolders = message.files.filter(f => f.isDirectory);
+                    }
+                    break;
+                    
                 default:
                     console.log('Unhandled message command:', message.command);
             }
@@ -436,6 +642,283 @@
             console.error('Error handling message:', error);
         }
     });
+
+    // Function to request workspace files for suggestions
+    function requestWorkspaceFiles() {
+        vscode.postMessage({
+            command: 'getWorkspaceFiles'
+        });
+    }
+    
+    // Functions for @ mention suggestions
+    function handleInputChange(event) {
+        const input = event.target;
+        const text = input.value;
+        const cursorPosition = input.selectionStart;
+        
+        // Get text before cursor
+        const textBeforeCursor = text.substring(0, cursorPosition);
+        
+        // Check if we have an @ symbol that's not part of a word
+        const atSignMatch = textBeforeCursor.match(/@([^@\s]*)$/);
+        
+        if (atSignMatch) {
+            // We have an @ sign with some text after it
+            const searchTerm = atSignMatch[1].toLowerCase();
+            showFileSuggestions(searchTerm);
+        } else {
+            hideSuggestions();
+        }
+    }
+    
+    function showFileSuggestions(searchTerm) {
+        const suggestionsContainer = document.getElementById('suggestions-container');
+        if (!suggestionsContainer) return;
+        
+        // Filter files based on search term (case insensitive)
+        let matchingFiles = [];
+        let matchingFolders = [];
+        
+        // Hierarchical organization of files and folders
+        const allMatchingItems = workspaceFiles
+            .filter(file => 
+                !file.isDirectory && 
+                (file.name.toLowerCase().includes(searchTerm) || 
+                (file.parent && file.parent.toLowerCase().includes(searchTerm)))
+            )
+            .concat(
+                workspaceFolders.filter(folder => 
+                    folder.isDirectory && 
+                    (folder.name.toLowerCase().includes(searchTerm) || 
+                    (folder.parent && folder.parent.toLowerCase().includes(searchTerm)))
+                )
+            );
+        
+        // Group by parent/path for better organization
+        const itemsByPath = {};
+        allMatchingItems.forEach(item => {
+            const parentPath = item.parent || '/';
+            if (!itemsByPath[parentPath]) {
+                itemsByPath[parentPath] = [];
+            }
+            itemsByPath[parentPath].push(item);
+        });
+        
+        if (Object.keys(itemsByPath).length === 0) {
+            hideSuggestions();
+            return;
+        }
+        
+        // Clear previous suggestions
+        suggestionsContainer.innerHTML = '';
+        
+        // Function to create a suggestion group
+        const createSuggestionGroup = (parentPath, items) => {
+            // Create group header if it's not root
+            if (parentPath !== '/' && items.some(item => item.level && item.level > 1)) {
+                const groupHeader = document.createElement('div');
+                groupHeader.classList.add('suggestion-group-header');
+                groupHeader.textContent = parentPath;
+                suggestionsContainer.appendChild(groupHeader);
+            }
+            
+            // Sort items: directories first then by name
+            items.sort((a, b) => {
+                if (a.isDirectory !== b.isDirectory) {
+                    return a.isDirectory ? -1 : 1;
+                }
+                return a.name.localeCompare(b.name);
+            });
+            
+            // Add each item to the group
+            items.forEach(item => {
+                const suggestionItem = document.createElement('div');
+                suggestionItem.classList.add('suggestion-item');
+                if (items[0] === item) suggestionItem.classList.add('selected');
+                
+                // Determine nesting level visualization
+                const nestingClass = item.level && item.level > 1 ? 'is-nested' : '';
+                const indentLevel = item.level ? Math.min(item.level, 3) : 0; // Limit indentation depth
+                
+                const isFolder = item.isDirectory;
+                const fileName = item.name;
+                const filePath = item.path;
+                const displayPath = filePath.replace(/\\/g, '/'); // Normalize path for display
+                
+                suggestionItem.innerHTML = `
+                    <div class="icon">
+                        <i class="codicon codicon-${isFolder ? 'folder' : 'file'}"></i>
+                    </div>
+                    <div class="content ${nestingClass}">
+                        <div class="label">${fileName}</div>
+                        <div class="path">${displayPath}</div>
+                    </div>
+                `;
+                
+                suggestionItem.dataset.path = filePath;
+                suggestionItem.dataset.type = isFolder ? 'folder' : 'file';
+                
+                suggestionItem.addEventListener('click', () => {
+                    addMention(filePath, isFolder ? 'folder' : 'file');
+                    hideSuggestions();
+                });
+                
+                suggestionsContainer.appendChild(suggestionItem);
+            });
+        };
+        
+        // Process groups by priority: exact matches first
+        const prioritizedGroupKeys = Object.keys(itemsByPath).sort((a, b) => {
+            const aHasExactMatch = itemsByPath[a].some(item => 
+                item.name.toLowerCase() === searchTerm.toLowerCase());
+            const bHasExactMatch = itemsByPath[b].some(item => 
+                item.name.toLowerCase() === searchTerm.toLowerCase());
+            
+            if (aHasExactMatch !== bHasExactMatch) {
+                return aHasExactMatch ? -1 : 1;
+            }
+            
+            // Then prioritize by path depth (shallower first)
+            return a.split('/').length - b.split('/').length;
+        });
+        
+        // Create groups
+        prioritizedGroupKeys.forEach(parentPath => {
+            createSuggestionGroup(parentPath, itemsByPath[parentPath]);
+        });
+        
+        // Only show a maximum of 10 items
+        const allItems = suggestionsContainer.querySelectorAll('.suggestion-item');
+        if (allItems.length > 10) {
+            // Hide excess items
+            Array.from(allItems).slice(10).forEach(item => {
+                item.style.display = 'none';
+            });
+            
+            // Add a "more items" indication
+            const moreItemsIndicator = document.createElement('div');
+            moreItemsIndicator.classList.add('suggestion-group-header');
+            moreItemsIndicator.textContent = `...and ${allItems.length - 10} more items`;
+            suggestionsContainer.appendChild(moreItemsIndicator);
+        }
+        
+        // Show suggestions container
+        suggestionsContainer.style.display = 'block';
+    }
+    
+    function hideSuggestions() {
+        const suggestionsContainer = document.getElementById('suggestions-container');
+        if (suggestionsContainer) {
+            suggestionsContainer.style.display = 'none';
+        }
+    }
+    
+    function navigateSuggestions(direction) {
+        const suggestionsContainer = document.getElementById('suggestions-container');
+        if (!suggestionsContainer || suggestionsContainer.style.display !== 'block') return;
+        
+        const items = Array.from(suggestionsContainer.querySelectorAll('.suggestion-item:not([style*="display: none"])'));
+        if (items.length === 0) return;
+        
+        // Find currently selected item
+        let currentIndex = -1;
+        items.forEach((item, index) => {
+            if (item.classList.contains('selected')) {
+                currentIndex = index;
+            }
+        });
+        
+        // Remove selection from current item
+        if (currentIndex >= 0) {
+            items[currentIndex].classList.remove('selected');
+        }
+        
+        // Calculate new index
+        let newIndex = currentIndex + direction;
+        if (newIndex < 0) newIndex = items.length - 1;
+        if (newIndex >= items.length) newIndex = 0;
+        
+        // Add selection to new item
+        items[newIndex].classList.add('selected');
+        
+        // Ensure selected item is visible
+        items[newIndex].scrollIntoView({ block: 'nearest' });
+    }
+
+    // Function to accept selected suggestion
+    function acceptSelectedSuggestion() {
+        const suggestionsContainer = document.getElementById('suggestions-container');
+        if (!suggestionsContainer || suggestionsContainer.style.display !== 'block') return;
+        
+        const selectedItem = suggestionsContainer.querySelector('.suggestion-item.selected');
+        if (!selectedItem) return;
+        
+        const path = selectedItem.dataset.path;
+        const type = selectedItem.dataset.type;
+        
+        if (path && type) {
+            addMention(path, type);
+        }
+        
+        hideSuggestions();
+    }
+    
+    // Function to add a file/folder mention to the input
+    function addMention(path, type) {
+        const messageInput = document.getElementById('message-input');
+        if (!messageInput) return;
+        
+        // Get current cursor position 
+        const cursorPosition = messageInput.selectionStart;
+        const text = messageInput.value;
+        
+        // Find the @ symbol before cursor
+        const textBeforeCursor = text.substring(0, cursorPosition);
+        const atSignMatch = textBeforeCursor.match(/@([^@\s]*)$/);
+        
+        if (atSignMatch) {
+            // Replace the @ mention with the selected file/folder name
+            const startPos = cursorPosition - atSignMatch[0].length;
+            const fileName = path.split(/[\\/]/).pop(); // Get just the file name
+            
+            // Create new value replacing the @ mention
+            const newValue = text.substring(0, startPos) + 
+                            fileName + ' ' + 
+                            text.substring(cursorPosition);
+            
+            messageInput.value = newValue;
+            
+            // Move cursor after the inserted file name
+            messageInput.selectionStart = messageInput.selectionEnd = startPos + fileName.length + 1;
+            
+            // Focus back on input
+            messageInput.focus();
+            
+            // Get file content if it's a file
+            if (type === 'file') {
+                try {
+                    // Request file content from extension
+                    vscode.postMessage({
+                        command: 'getFileContent',
+                        path: path
+                    });
+                } catch (e) {
+                    console.error('Error requesting file content:', e);
+                }
+            }
+            
+            // Add to attachments
+            const existingAttachment = currentAttachments.find(att => att.path === path);
+            if (!existingAttachment) {
+                currentAttachments.push({
+                    type: type,
+                    path: path
+                });
+                
+                updateAttachmentsUI();
+            }
+        }
+    }
 
     log("Initialization script loaded");
 })();
