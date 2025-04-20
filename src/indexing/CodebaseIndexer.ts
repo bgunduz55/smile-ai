@@ -89,10 +89,15 @@ export class CodebaseIndexer {
                 throw new Error('No workspace folder is open');
             }
 
-            console.log(`Found ${workspaceFolders.length} workspace folders to index`);
+            // Get batch size from configuration
+            const config = vscode.workspace.getConfiguration('smile-ai');
+            const performanceConfig = config.get<any>('performance', {});
+            const batchSize = performanceConfig.indexingBatchSize || 20;
+            
+            console.log(`Found ${workspaceFolders.length} workspace folders to index with batch size ${batchSize}`);
             for (const folder of workspaceFolders) {
                 console.log(`Indexing folder: ${folder.uri.fsPath}`);
-                await this.indexFolder(folder.uri.fsPath, progressCallback);
+                await this.indexFolderWithBatches(folder.uri.fsPath, batchSize, progressCallback);
             }
             console.log("Workspace indexing completed successfully");
         } catch (error) {
@@ -101,55 +106,101 @@ export class CodebaseIndexer {
         } finally {
             this.isIndexing = false;
             console.log("Setting isIndexing to false");
+            
+            // Force garbage collection if possible
+            if (global.gc) {
+                try {
+                    global.gc();
+                    console.log("Requested garbage collection after indexing");
+                } catch (e) {
+                    console.warn("Failed to trigger garbage collection:", e);
+                }
+            }
         }
     }
 
-    private async indexFolder(folderPath: string, progressCallback?: (message: string) => void): Promise<void> {
-        console.log(`Starting to index folder: ${folderPath}`);
+    /**
+     * Index a folder using batches for better memory management and performance
+     */
+    private async indexFolderWithBatches(
+        folderPath: string, 
+        batchSize: number, 
+        progressCallback?: (message: string) => void
+    ): Promise<void> {
+        console.log(`Starting to index folder with batches: ${folderPath}`);
         try {
+            // First get all files that match our pattern
             const files = await vscode.workspace.findFiles(
                 new vscode.RelativePattern(folderPath, '**/*'),
                 '{**/node_modules/**,**/.angular/**,**/.vscode/**,**/dist/**,**/out/**,**/.git/**}'
             );
 
-            console.log(`Found ${files.length} files to index in ${folderPath}`);
-            let indexedCount = 0;
+            // Filter files by ignore patterns upfront
+            const filteredFiles: vscode.Uri[] = [];
             for (const file of files) {
-                try {
-                    const relativePath = vscode.workspace.asRelativePath(file);
-                    
-                    // Skip if file matches ignore patterns
-                    if (this.ignoreFilter.ignores(relativePath)) {
-                        console.log(`Skipping ignored file: ${relativePath}`);
-                        continue;
-                    }
-                    
-                    if (progressCallback) {
-                        progressCallback(`Indexing ${relativePath} (${indexedCount + 1}/${files.length})`);
-                    }
-                    
-                    // Ignore binary files
-                    const filePath = file.fsPath;
-                    if (this.isBinaryPath(filePath)) {
-                        console.log(`Skipping binary file: ${filePath}`);
-                        continue;
-                    }
-                    
-                    await this.attachFile(file.fsPath);
-                    indexedCount++;
-                    
-                    if (indexedCount % 10 === 0) {
-                        console.log(`Indexed ${indexedCount}/${files.length} files`);
-                    }
-                } catch (fileError) {
-                    console.error(`Error indexing file ${file.fsPath}:`, fileError);
+                const relativePath = vscode.workspace.asRelativePath(file);
+                if (!this.ignoreFilter.ignores(relativePath) && !this.isBinaryPath(file.fsPath)) {
+                    filteredFiles.push(file);
                 }
             }
-            console.log(`Folder indexing completed: ${folderPath}. Indexed ${indexedCount}/${files.length} files`);
+
+            console.log(`Found ${filteredFiles.length} files to index in ${folderPath} after filtering`);
+            
+            // Process files in batches
+            const totalFiles = filteredFiles.length;
+            let indexedCount = 0;
+            let batchCount = 0;
+            
+            for (let i = 0; i < totalFiles; i += batchSize) {
+                batchCount++;
+                const batch = filteredFiles.slice(i, i + batchSize);
+                
+                if (progressCallback) {
+                    progressCallback(`Indexing batch ${batchCount} (${i+1}-${Math.min(i+batchSize, totalFiles)}/${totalFiles})`);
+                }
+                
+                console.log(`Processing batch ${batchCount}: ${batch.length} files`);
+                
+                // Process batch with Promise.all for parallel execution
+                const batchPromises = batch.map(async (file) => {
+                    try {
+                        await this.attachFile(file.fsPath);
+                        indexedCount++;
+                        return true;
+                    } catch (error) {
+                        console.error(`Error indexing file ${file.fsPath}:`, error);
+                        return false;
+                    }
+                });
+                
+                await Promise.all(batchPromises);
+                
+                // Log progress
+                console.log(`Completed batch ${batchCount}, total indexed: ${indexedCount}/${totalFiles}`);
+                
+                // Small delay to allow UI updates and prevent CPU hogging
+                await new Promise(resolve => setTimeout(resolve, 10));
+                
+                // Suggest garbage collection between batches for large workspaces
+                if (global.gc && totalFiles > 1000) {
+                    try {
+                        global.gc();
+                    } catch (e) {
+                        // Ignore GC errors
+                    }
+                }
+            }
+            
+            console.log(`Folder indexing completed: ${folderPath}. Indexed ${indexedCount}/${totalFiles} files`);
         } catch (error) {
             console.error(`Error finding files in folder ${folderPath}:`, error);
             throw error;
         }
+    }
+    
+    // Keep the old indexFolder method for backward compatibility
+    private async indexFolder(folderPath: string, progressCallback?: (message: string) => void): Promise<void> {
+        return this.indexFolderWithBatches(folderPath, 20, progressCallback);
     }
 
     private isBinaryPath(filePath: string): boolean {

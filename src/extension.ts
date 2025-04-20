@@ -308,13 +308,57 @@ export class SmileAIExtension {
                 await vscode.window.showInformationMessage('Improvement registered: ' + improvement);
             }
         });
+        
+        // Toggle code completion command
+        const toggleCodeCompletionCommand = vscode.commands.registerCommand('smile-ai.toggleCodeCompletion', () => {
+            // Read current configuration
+            const config = vscode.workspace.getConfiguration('smile-ai');
+            const behavior = config.get<any>('behavior', {});
+            const isEnabled = behavior.autoComplete === true;
+            
+            // Update configuration with opposite value
+            config.update('behavior.autoComplete', !isEnabled, vscode.ConfigurationTarget.Global)
+                .then(() => {
+                    // Manually toggle the provider since config change events might be delayed
+                    if (isEnabled) {
+                        this.completionManager.disableCodeCompletion();
+                        vscode.window.showInformationMessage('Smile AI: Code completion disabled');
+                    } else {
+                        this.completionManager.enableCodeCompletion();
+                        vscode.window.showInformationMessage('Smile AI: Code completion enabled');
+                    }
+                });
+        });
+        
+        // Toggle inline completion command
+        const toggleInlineCompletionCommand = vscode.commands.registerCommand('smile-ai.toggleInlineCompletion', () => {
+            // Read current configuration
+            const config = vscode.workspace.getConfiguration('smile-ai');
+            const behavior = config.get<any>('behavior', {});
+            const isEnabled = behavior.inlineCompletion === true;
+            
+            // Update configuration with opposite value
+            config.update('behavior.inlineCompletion', !isEnabled, vscode.ConfigurationTarget.Global)
+                .then(() => {
+                    // Manually toggle the provider since config change events might be delayed
+                    if (isEnabled) {
+                        this.completionManager.disableInlineCompletion();
+                        vscode.window.showInformationMessage('Smile AI: Inline completion disabled');
+                    } else {
+                        this.completionManager.enableInlineCompletion();
+                        vscode.window.showInformationMessage('Smile AI: Inline completion enabled');
+                    }
+                });
+        });
 
         this.context.subscriptions.push(
             openAIAssistantCommand,
             attachFileCommand,
             attachFolderCommand,
             configureCommand,
-            improveCommand
+            improveCommand,
+            toggleCodeCompletionCommand,
+            toggleInlineCompletionCommand
         );
     }
 

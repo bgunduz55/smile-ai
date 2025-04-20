@@ -97,6 +97,18 @@
         "title": "Smile AI: Reindex Codebase"
       },
       {
+        "command": "smile-ai.toggleCodeCompletion",
+        "title": "Toggle Code Completion",
+        "category": "Smile AI",
+        "icon": "$(light-bulb)"
+      },
+      {
+        "command": "smile-ai.toggleInlineCompletion",
+        "title": "Toggle Inline Completion",
+        "category": "Smile AI",
+        "icon": "$(lightbulb-autofix)"
+      },
+      {
         "command": "smile-ai.addModel",
         "title": "Add AI Model",
         "category": "Smile AI"
@@ -362,6 +374,47 @@
               "type": "boolean",
               "default": true,
               "description": "Automatically add imports for code completions when possible"
+            },
+            "enableAgent": {
+              "type": "boolean",
+              "default": true,
+              "description": "Enable AI agent functionality for assistant view"
+            }
+          }
+        },
+        "smile-ai.performance": {
+          "type": "object",
+          "description": "Performance settings for the extension",
+          "properties": {
+            "enableStreamingResponses": {
+              "type": "boolean",
+              "default": true,
+              "description": "Enable streaming responses for faster initial feedback (when supported by provider)"
+            },
+            "responseChunkSize": {
+              "type": "number",
+              "default": 200,
+              "description": "Maximum number of tokens to request in each chunk when streaming is enabled"
+            },
+            "cacheResponses": {
+              "type": "boolean",
+              "default": true,
+              "description": "Cache AI responses for similar queries to improve performance"
+            },
+            "maxCacheSize": {
+              "type": "number",
+              "default": 50,
+              "description": "Maximum number of responses to keep in the cache"
+            },
+            "indexingBatchSize": {
+              "type": "number",
+              "default": 20,
+              "description": "Number of files to process in a batch during codebase indexing"
+            },
+            "contextWindow": {
+              "type": "number",
+              "default": 10000,
+              "description": "Maximum number of tokens to use for context window (adjust based on your model's capabilities)"
             }
           }
         },
@@ -450,6 +503,7 @@
     "jest-environment-node": "^29.7.0",
     "mocha": "^10.2.0",
     "style-loader": "^4.0.0",
+    "terser-webpack-plugin": "^5.3.14",
     "ts-jest": "^29.1.2",
     "ts-loader": "^9.5.1",
     "typescript": "^5.8.3",
