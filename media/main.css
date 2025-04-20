@@ -533,28 +533,34 @@ pre code {
     }
 }
 
-/* File Operations UI */
+/* File Operations UI - daha belirgin ve görünür yapıyoruz */
 .pending-operations {
-    margin-top: 15px;
-    border: 1px solid var(--vscode-panel-border);
-    border-radius: 5px;
-    overflow: hidden;
+    margin: 15px 0;
+    padding: 15px;
+    border: 2px solid var(--vscode-button-background); /* Daha belirgin sınır */
+    border-radius: 8px;
     background-color: var(--vscode-editor-background);
+    max-height: 500px;
+    overflow-y: auto;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3); /* Gölge ekledik */
 }
 
 .operations-header {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: 8px 12px;
+    padding: 10px;
+    margin-bottom: 10px;
     background-color: var(--vscode-panel-background);
     border-bottom: 1px solid var(--vscode-panel-border);
+    border-radius: 6px;
 }
 
 .operations-header h3 {
     margin: 0;
     font-size: 14px;
-    font-weight: 500;
+    font-weight: 600;
+    color: var(--vscode-button-foreground);
 }
 
 .operation-actions {
@@ -566,62 +572,76 @@ pre code {
     display: flex;
     align-items: center;
     gap: 4px;
-    background: none;
+    background: var(--vscode-button-background);
     border: 1px solid var(--vscode-button-border);
-    border-radius: 3px;
+    border-radius: 4px;
     color: var(--vscode-button-foreground);
     cursor: pointer;
     font-size: 12px;
-    padding: 2px 8px;
+    padding: 4px 10px;
+    transition: all 0.2s ease;
+}
+
+.operation-actions button:hover {
+    background-color: var(--vscode-button-hoverBackground);
+    transform: translateY(-1px);
 }
 
 .accept-all-button, .accept-button {
-    background-color: var(--vscode-button-background);
-    color: var(--vscode-button-foreground);
+    background-color: #28a745 !important;
+    color: white !important;
 }
 
 .reject-all-button, .reject-button {
-    background-color: var(--vscode-errorForeground);
-    color: white;
+    background-color: #dc3545 !important;
+    color: white !important;
 }
 
 .operation-item {
-    padding: 10px;
-    border-bottom: 1px solid var(--vscode-panel-border);
+    padding: 12px;
+    margin-bottom: 10px;
+    border: 1px solid var(--vscode-panel-border);
+    border-radius: 6px;
+    background-color: var(--vscode-editor-background);
+    transition: all 0.2s ease;
 }
 
-.operation-item:last-child {
-    border-bottom: none;
+.operation-item:hover {
+    border-color: var(--vscode-button-background);
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
 }
 
 .operation-header {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    margin-bottom: 8px;
+    margin-bottom: 10px;
 }
 
 .operation-info {
     display: flex;
-    align-items: center;
-    gap: 8px;
+    flex-direction: column;
+    gap: 4px;
 }
 
 .operation-type {
     display: flex;
     align-items: center;
-    gap: 4px;
-    font-weight: 500;
+    gap: 6px;
+    font-weight: 600;
+    font-size: 13px;
 }
 
 .operation-file {
     display: flex;
     align-items: center;
-    gap: 4px;
+    gap: 6px;
+    flex-wrap: wrap;
 }
 
 .file-name {
     font-weight: 500;
+    color: var(--vscode-button-foreground);
 }
 
 .file-path {
@@ -629,49 +649,215 @@ pre code {
     font-size: 12px;
 }
 
-.operation-content {
-    margin-top: 8px;
+.operation-description {
+    margin: 8px 0;
+    font-style: italic;
+    opacity: 0.8;
+    padding: 5px;
+    background-color: rgba(0,0,0,0.1);
+    border-radius: 4px;
 }
 
-.operation-description {
-    margin-bottom: 8px;
-    font-style: italic;
-    opacity: 0.9;
+.operation-content {
+    margin-top: 10px;
+}
+
+.view-diff-button {
+    background: none;
+    border: 1px dashed var(--vscode-button-border);
+    color: var(--vscode-button-foreground);
+    padding: 4px 8px;
+    border-radius: 4px;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    transition: all 0.2s;
+}
+
+.view-diff-button:hover {
+    background-color: rgba(255,255,255,0.1);
 }
 
 .diff-container {
-    font-family: 'Consolas', 'Courier New', monospace;
-    font-size: 12px;
-    white-space: pre;
-    overflow-x: auto;
-    margin-top: 8px;
+    margin-top: 10px;
+    padding: 10px;
     border: 1px solid var(--vscode-panel-border);
-    border-radius: 3px;
+    border-radius: 4px;
+    background-color: var(--vscode-editor-background);
+    font-family: 'Consolas', 'Courier New', monospace;
+    max-height: 300px;
+    overflow: auto;
+}
+
+.diff-container.loading {
+    text-align: center;
+    padding: 20px;
+    font-style: italic;
+    color: var(--vscode-descriptionForeground);
+}
+
+/* Add CSS for diff visualization */
+
+/* Enhanced diff view */
+.enhanced-diff-view {
+    font-family: var(--vscode-editor-font-family);
+    font-size: var(--vscode-editor-font-size);
+    overflow-x: auto;
+    margin-top: 10px;
+    border: 1px solid var(--vscode-panel-border);
+    border-radius: 4px;
+    max-height: 450px;
+    overflow-y: auto;
     background-color: var(--vscode-editor-background);
 }
 
-.diff-added {
-    background-color: rgba(0, 255, 0, 0.1);
+.diff-table {
+    width: 100%;
+    border-collapse: collapse;
+    table-layout: fixed;
 }
 
-.diff-removed {
-    background-color: rgba(255, 0, 0, 0.1);
+.diff-header {
+    background-color: var(--vscode-panel-background);
+    padding: 8px;
+    border-bottom: 1px solid var(--vscode-panel-border);
+}
+
+.diff-stats {
+    display: flex;
+    gap: 15px;
+    margin-bottom: 5px;
+}
+
+.diff-stats .additions {
+    color: #28a745;
+}
+
+.diff-stats .deletions {
+    color: #d73a49;
+}
+
+.diff-actions {
+    display: flex;
+    gap: 10px;
+    margin-top: 5px;
+}
+
+.diff-actions button {
+    background: none;
+    border: 1px solid var(--vscode-button-border);
+    color: var(--vscode-button-foreground);
+    border-radius: 3px;
+    padding: 2px 8px;
+    font-size: 12px;
+    cursor: pointer;
+}
+
+.diff-actions button:hover {
+    background-color: var(--vscode-button-hoverBackground);
 }
 
 .diff-line {
+    height: 20px;
     white-space: pre;
-    padding: 0 4px;
 }
 
-.code-preview {
+.diff-line:hover {
+    background-color: var(--vscode-editor-hoverBackground);
+}
+
+.diff-add {
+    background-color: rgba(40, 167, 69, 0.15);
+}
+
+.diff-remove {
+    background-color: rgba(215, 58, 73, 0.15);
+}
+
+.diff-unchanged {
+    background-color: transparent;
+}
+
+.line-number {
+    width: 40px;
+    text-align: right;
+    padding: 0 5px;
+    color: var(--vscode-editorLineNumber-foreground);
+    user-select: none;
+    border-right: 1px solid var(--vscode-panel-border);
     background-color: var(--vscode-editor-background);
-    color: var(--vscode-editor-foreground);
-    padding: 8px;
-    border-radius: 3px;
-    overflow-x: auto;
-    font-family: 'Consolas', 'Courier New', monospace;
-    font-size: 12px;
-    border: 1px solid var(--vscode-panel-border);
-    max-height: 300px;
-    overflow-y: auto;
+}
+
+.line-content {
+    padding-left: 10px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: pre;
+}
+
+.diff-add .line-content {
+    color: #22863a;
+    background-color: rgba(40, 167, 69, 0.2);
+}
+
+.diff-remove .line-content {
+    color: #cb2431;
+    background-color: rgba(215, 58, 73, 0.2);
+}
+
+/* Line selection */
+.line-selector {
+    margin-right: 5px;
+    vertical-align: middle;
+}
+
+.line-content-wrapper {
+    display: inline-block;
+    vertical-align: middle;
+}
+
+/* Error message */
+.error-message {
+    color: var(--vscode-errorForeground);
+    padding: 10px;
+    font-style: italic;
+}
+
+.no-diff-message {
+    color: var(--vscode-descriptionForeground);
+    padding: 10px;
+    font-style: italic;
+}
+
+/* Add styles for the header and settings button */
+.header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 15px;
+    border-bottom: 1px solid var(--vscode-panel-border);
+    background-color: var(--vscode-editor-background);
+}
+
+.settings-button button {
+    background: none;
+    border: none;
+    cursor: pointer;
+    color: var(--vscode-foreground);
+    padding: 5px 10px;
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+}
+
+.settings-button button:hover {
+    background-color: var(--cursor-button-hover);
+}
+
+.settings-button button i {
+    font-size: 14px;
 } 

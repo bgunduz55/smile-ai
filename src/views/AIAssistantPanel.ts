@@ -151,12 +151,14 @@ export class AIAssistantPanel {
                 timestamp: Date.now()
             };
             this.messages.push(userMessage);
+            
+            // Send user message to the webview immediately
             this.webviewView.webview.postMessage({
                 command: 'addMessage',
                 message: userMessage
             });
-
-            // Show loading state
+            
+            // Show loading state *after* displaying the user message
             this.webviewView.webview.postMessage({
                 command: 'showLoading'
             });
@@ -255,6 +257,8 @@ export class AIAssistantPanel {
             this.webviewView.webview.postMessage({
                 command: 'hideLoading'
             });
+            
+            // Send only the assistant message since the user message was already added
             this.webviewView.webview.postMessage({
                 command: 'addMessage',
                 message: assistantMessage
@@ -445,6 +449,14 @@ export class AIAssistantPanel {
             </head>
             <body>
                 <div class="container">
+                    <div class="header">
+                        <div class="settings-button">
+                            <button id="settingsButton" title="Settings">
+                                <i class="codicon codicon-gear"></i>
+                            </button>
+                        </div>
+                    </div>
+                    
                     <div class="chat-container">
                         <div class="messages" id="messages">
                             <!-- Messages will be inserted here -->
@@ -453,11 +465,11 @@ export class AIAssistantPanel {
                             <div class="input-row">
                                 <textarea
                                     class="input-box"
-                                    id="messageInput"
+                                    id="message-input"
                                     placeholder="Ask, search, build anything... (Enter ile gönder, Shift+Enter ile yeni satır)"
                                     rows="1"
                                 ></textarea>
-                                <button class="send-button" id="sendButton">
+                                <button class="send-button" id="send-button">
                                     <i class="codicon codicon-send"></i>
                                     Send
                                 </button>
@@ -568,6 +580,9 @@ export class AIAssistantPanel {
                     case 'getOperationDiff':
                         await this.handleGetOperationDiff(message.id);
                         break;
+                    case 'acceptPartialChange':
+                        await this.handleAcceptPartialChange(message.id, message.lineIndices);
+                        break;
                 }
             },
             undefined,
@@ -651,6 +666,26 @@ export class AIAssistantPanel {
             });
         } catch (error) {
             console.error('Error getting operation diff:', error);
+        }
+    }
+
+    private async handleAcceptPartialChange(id: string, lineIndices: number[]): Promise<void> {
+        try {
+            const fileOperationManager = FileOperationManager.getInstance();
+            if (typeof fileOperationManager.acceptPartialChange === 'function') {
+                const success = await fileOperationManager.acceptPartialChange(id, lineIndices);
+                
+                if (success) {
+                    vscode.window.showInformationMessage('Partial changes applied successfully.');
+                } else {
+                    vscode.window.showErrorMessage('Failed to apply partial changes.');
+                }
+            } else {
+                vscode.window.showErrorMessage('Partial change functionality not available.');
+            }
+        } catch (error) {
+            console.error('Error accepting partial change:', error);
+            vscode.window.showErrorMessage(`Error applying partial changes: ${error instanceof Error ? error.message : 'Unknown error'}`);
         }
     }
 
