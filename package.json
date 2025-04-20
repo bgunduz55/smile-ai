@@ -71,6 +71,12 @@
         "category": "Smile AI"
       },
       {
+        "command": "smile-ai.openSettings",
+        "title": "Settings",
+        "category": "Smile AI",
+        "icon": "$(gear)"
+      },
+      {
         "command": "smile-ai.analyzeCode",
         "title": "Smile AI: Analyze Code"
       },
@@ -154,17 +160,7 @@
     "menus": {
       "view/title": [
         {
-          "command": "smile-ai.openChat",
-          "when": "view == smile-ai.assistant",
-          "group": "navigation"
-        },
-        {
-          "command": "smile-ai.openComposer",
-          "when": "view == smile-ai.assistant",
-          "group": "navigation"
-        },
-        {
-          "command": "smile-ai.addModel",
+          "command": "smile-ai.openSettings",
           "when": "view == smile-ai.assistant",
           "group": "navigation"
         }
@@ -230,6 +226,28 @@
           ],
           "description": "Select the local AI provider"
         },
+        "smile-ai.enableRAG": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable Retrieval Augmented Generation (RAG) for providing contextual code to the AI model"
+        },
+        "smile-ai.rag.maxChunks": {
+          "type": "number",
+          "default": 5,
+          "description": "Maximum number of code chunks to include in RAG context"
+        },
+        "smile-ai.rag.maxChunkSize": {
+          "type": "number",
+          "default": 2000,
+          "description": "Maximum size of each code chunk in characters"
+        },
+        "smile-ai.rag.minSimilarity": {
+          "type": "number",
+          "default": 0.7,
+          "minimum": 0,
+          "maximum": 1,
+          "description": "Minimum similarity score (0-1) for including a code chunk in RAG context"
+        },
         "smile-ai.models": {
           "type": "array",
           "default": [
@@ -240,7 +258,8 @@
               "apiEndpoint": "http://localhost:11434",
               "maxTokens": 2048,
               "temperature": 0.7,
-              "embeddingModelName": "nomic-embed-text"
+              "embeddingModelName": "nomic-embed-text",
+              "enableRAG": true
             }
           ],
           "description": "Configured AI models",
@@ -286,6 +305,11 @@
               "embeddingModelName": {
                 "type": "string",
                 "description": "(Optional) Name of the embedding model to use with this provider (e.g., 'nomic-embed-text' for Ollama). If empty, the main modelName might be tried."
+              },
+              "enableRAG": {
+                "type": "boolean",
+                "default": true,
+                "description": "Enable RAG for this model"
               }
             }
           }
