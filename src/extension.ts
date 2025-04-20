@@ -20,6 +20,7 @@ import { ImprovementTreeProvider } from './views/ImprovementTreeProvider';
 import { AIAssistantPanel } from './views/AIAssistantPanel';
 import { ModelManager } from './utils/ModelManager';
 import { AIEngineConfig } from './ai-engine/AIEngineConfig';
+import { RAGService } from './indexing/RAGService';
 
 // Export the main extension class
 export class SmileAIExtension {
@@ -43,10 +44,14 @@ export class SmileAIExtension {
         this.modelManager = ModelManager.getInstance();
         this.improvementManager = ImprovementManager.getInstance();
         
+        // Get RAG settings from configuration
+        const config = vscode.workspace.getConfiguration('smile-ai');
+        const enableRAG = config.get<boolean>('enableRAG', true);
+        
         // Initialize AI Engine with active model from ModelManager
         const activeModel = this.modelManager.getActiveModel();
         if (!activeModel) {
-            // Eğer aktif model yoksa varsayılan ayarları kullan
+            // If no active model, use default settings
             const aiConfig: AIEngineConfig = {
                 provider: {
                     name: 'ollama',
@@ -55,7 +60,8 @@ export class SmileAIExtension {
                 },
                 maxTokens: 2048,
                 temperature: 0.7,
-                embeddingModelName: 'nomic-embed-text'
+                embeddingModelName: 'nomic-embed-text',
+                enableRAG: enableRAG
             };
             this.aiEngine = new AIEngine(aiConfig);
         } else {
@@ -67,13 +73,28 @@ export class SmileAIExtension {
                 },
                 maxTokens: activeModel.maxTokens || 2048,
                 temperature: activeModel.temperature || 0.7,
-                embeddingModelName: activeModel.embeddingModelName || 'nomic-embed-text'
+                embeddingModelName: activeModel.embeddingModelName || 'nomic-embed-text',
+                enableRAG: activeModel.enableRAG !== undefined ? activeModel.enableRAG : enableRAG
             };
             this.aiEngine = new AIEngine(aiConfig);
         }
         
         // Initialize CodebaseIndexer
         this.codebaseIndexer = CodebaseIndexer.getInstance(this.aiEngine);
+        
+        // Initialize RAG service with codebase index
+        this.aiEngine.initRAG(this.codebaseIndexer.getIndex());
+        
+        // Update RAG settings from configuration
+        if (this.aiEngine) {
+            const ragService = RAGService.getInstance(this.aiEngine, this.codebaseIndexer.getIndex());
+            if (ragService) {
+                ragService.setEnabled(enableRAG);
+                ragService.setMaxChunks(config.get<number>('rag.maxChunks', 5));
+                ragService.setMaxChunkSize(config.get<number>('rag.maxChunkSize', 2000));
+                ragService.setMinSimilarity(config.get<number>('rag.minSimilarity', 0.7));
+            }
+        }
         
         // Initialize tree view provider
         this.improvementProvider = new ImprovementTreeProvider(this.improvementManager);
@@ -231,27 +252,87 @@ export class SmileAIExtension {
     }
 
     private async initializeComponents(): Promise<void> {
-        const statusCallbacks = {
-            setStatusBar: (text: string, tooltip?: string) => this.setStatusBarMessage(text, tooltip),
-            showLoading: (message?: string) => this.showLoading(message),
-            showReady: (message?: string) => this.showReady(message),
-            showError: (message?: string) => this.showError(message)
-        };
+        try {
+            // Register task executors
+            this.registerTaskExecutors();
 
-        // Initialize each executor individually
+            // Start indexing the codebase
+            await this.startIndexing();
+
+            // Listen for configuration changes to update RAG settings
+            vscode.workspace.onDidChangeConfiguration(e => {
+                if (e.affectsConfiguration('smile-ai.enableRAG') || 
+                    e.affectsConfiguration('smile-ai.rag')) {
+                    this.updateRAGSettings();
+                }
+            });
+
+            // Add other initialization tasks here
+            this.showReady('Smile AI ready');
+        } catch (error) {
+            this.showError(`Initialization error: ${error instanceof Error ? error.message : String(error)}`);
+            console.error('Initialization error:', error);
+        }
+    }
+
+    private registerTaskExecutors(): void {
         this.taskExecutors.set(TaskType.EXPLANATION, new ExplanationExecutor(this.aiEngine));
         this.taskExecutors.set(TaskType.CODE_MODIFICATION, new CodeModificationExecutor(this.aiEngine));
         this.taskExecutors.set(TaskType.TEST_GENERATION, new TestGenerationExecutor(this.aiEngine));
         this.taskExecutors.set(TaskType.DOCUMENTATION, new DocumentationExecutor(this.aiEngine));
         this.taskExecutors.set(TaskType.REFACTORING, new RefactoringExecutor(this.aiEngine, this.codebaseIndexer));
-        this.taskExecutors.set(TaskType.IMPROVEMENT_NOTE, new ImprovementNoteExecutor(this.aiEngine, statusCallbacks));
-        this.taskExecutors.set(TaskType.TESTING, new TestingExecutor(this.aiEngine, statusCallbacks));
-        this.taskExecutors.set(TaskType.DEBUGGING, new DebuggingExecutor(this.aiEngine, statusCallbacks));
-        this.taskExecutors.set(TaskType.OPTIMIZATION, new OptimizationExecutor(this.aiEngine, statusCallbacks));
-        this.taskExecutors.set(TaskType.SECURITY, new SecurityExecutor(this.aiEngine, statusCallbacks));
-        this.taskExecutors.set(TaskType.REVIEW, new ReviewExecutor(this.aiEngine, statusCallbacks));
+        this.taskExecutors.set(TaskType.IMPROVEMENT_NOTE, new ImprovementNoteExecutor(this.aiEngine, {
+            setStatusBar: (text: string, tooltip?: string) => this.setStatusBarMessage(text, tooltip),
+            showLoading: (message?: string) => this.showLoading(message),
+            showReady: (message?: string) => this.showReady(message),
+            showError: (message?: string) => this.showError(message)
+        }));
+        this.taskExecutors.set(TaskType.TESTING, new TestingExecutor(this.aiEngine, {
+            setStatusBar: (text: string, tooltip?: string) => this.setStatusBarMessage(text, tooltip),
+            showLoading: (message?: string) => this.showLoading(message),
+            showReady: (message?: string) => this.showReady(message),
+            showError: (message?: string) => this.showError(message)
+        }));
+        this.taskExecutors.set(TaskType.DEBUGGING, new DebuggingExecutor(this.aiEngine, {
+            setStatusBar: (text: string, tooltip?: string) => this.setStatusBarMessage(text, tooltip),
+            showLoading: (message?: string) => this.showLoading(message),
+            showReady: (message?: string) => this.showReady(message),
+            showError: (message?: string) => this.showError(message)
+        }));
+        this.taskExecutors.set(TaskType.OPTIMIZATION, new OptimizationExecutor(this.aiEngine, {
+            setStatusBar: (text: string, tooltip?: string) => this.setStatusBarMessage(text, tooltip),
+            showLoading: (message?: string) => this.showLoading(message),
+            showReady: (message?: string) => this.showReady(message),
+            showError: (message?: string) => this.showError(message)
+        }));
+        this.taskExecutors.set(TaskType.SECURITY, new SecurityExecutor(this.aiEngine, {
+            setStatusBar: (text: string, tooltip?: string) => this.setStatusBarMessage(text, tooltip),
+            showLoading: (message?: string) => this.showLoading(message),
+            showReady: (message?: string) => this.showReady(message),
+            showError: (message?: string) => this.showError(message)
+        }));
+        this.taskExecutors.set(TaskType.REVIEW, new ReviewExecutor(this.aiEngine, {
+            setStatusBar: (text: string, tooltip?: string) => this.setStatusBarMessage(text, tooltip),
+            showLoading: (message?: string) => this.showLoading(message),
+            showReady: (message?: string) => this.showReady(message),
+            showError: (message?: string) => this.showError(message)
+        }));
+    }
 
-        await this.startIndexing();
+    private updateRAGSettings(): void {
+        const config = vscode.workspace.getConfiguration('smile-ai');
+        const enableRAG = config.get<boolean>('enableRAG', true);
+        
+        const ragService = RAGService.getInstance(this.aiEngine, this.codebaseIndexer.getIndex());
+        if (ragService) {
+            ragService.setEnabled(enableRAG);
+            ragService.setMaxChunks(config.get<number>('rag.maxChunks', 5));
+            ragService.setMaxChunkSize(config.get<number>('rag.maxChunkSize', 2000));
+            ragService.setMinSimilarity(config.get<number>('rag.minSimilarity', 0.7));
+        }
+        
+        // Update AI engine config
+        this.aiEngine.updateConfig({ enableRAG });
     }
 
     public dispose() {
@@ -276,6 +357,9 @@ export async function activate(context: vscode.ExtensionContext) {
     context.subscriptions.push(
         vscode.commands.registerCommand('smile-ai.startChat', () => {
             vscode.commands.executeCommand('smile-ai.assistant.focus');
+        }),
+        vscode.commands.registerCommand('smile-ai.openSettings', () => {
+            vscode.commands.executeCommand('workbench.action.openSettings', 'smile-ai');
         }),
         vscode.commands.registerCommand('smile-ai.attachFile', async (uri: vscode.Uri) => {
             if (uri) {

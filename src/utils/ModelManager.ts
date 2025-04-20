@@ -8,6 +8,7 @@ export interface AIModel {
     maxTokens?: number;
     temperature?: number;
     embeddingModelName?: string; // Optional: Specific model for embeddings
+    enableRAG?: boolean; // Optional: Enable Retrieval Augmented Generation
 }
 
 export class ModelManager {
