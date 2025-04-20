@@ -5,6 +5,9 @@ import { CodebaseIndexer } from '../indexing/CodebaseIndexer';
 import { FileAnalyzer } from '../utils/FileAnalyzer';
 import { Message } from '../types/chat';
 import { FileOperationManager } from '../utils/FileOperationManager';
+import * as path from 'path';
+import { WebviewManager } from '../webviewManager';
+import { AIMessage } from '../ai-engine/types';
 
 export class AIAssistantPanel {
     public static currentPanel: AIAssistantPanel | undefined;
@@ -37,6 +40,9 @@ export class AIAssistantPanel {
         // Set up FileOperationManager
         const fileOperationManager = FileOperationManager.getInstance();
         fileOperationManager.setWebviewView(webviewView);
+        
+        // Register custom commands
+        this.registerCommands();
         
         // Initialize components independently
         this.initializeAIEngine()
@@ -137,6 +143,81 @@ export class AIAssistantPanel {
         vscode.window.showErrorMessage(`${context}: ${error.message || 'Unknown error'}`);
     }
 
+    private async handleGetWorkspaceFiles(): Promise<void> {
+        try {
+            // Find all files in the workspace
+            const workspaceFolders = vscode.workspace.workspaceFolders;
+            if (!workspaceFolders || workspaceFolders.length === 0) {
+                // No workspace folders, return empty array
+                this.webviewView.webview.postMessage({
+                    command: 'workspaceFilesUpdated',
+                    files: []
+                });
+                return;
+            }
+            
+            const files: Array<{name: string, path: string, isDirectory: boolean, parent?: string, level?: number}> = [];
+            
+            // Get all workspace folders
+            for (const folder of workspaceFolders) {
+                // Add the workspace folder itself
+                files.push({
+                    name: folder.name,
+                    path: folder.uri.fsPath,
+                    isDirectory: true,
+                    level: 0
+                });
+                
+                // Find all files in the workspace folder recursively
+                const pattern = new vscode.RelativePattern(folder, '**/*');
+                const fileUris = await vscode.workspace.findFiles(pattern, '**/node_modules/**');
+                
+                // Process files and organize hierarchically
+                for (const uri of fileUris) {
+                    try {
+                        const stat = await vscode.workspace.fs.stat(uri);
+                        const isDirectory = (stat.type & vscode.FileType.Directory) !== 0;
+                        const filePath = uri.fsPath;
+                        const relativePath = path.relative(folder.uri.fsPath, filePath);
+                        const segments = relativePath.split(/[\/\\]/);
+                        const fileName = segments.pop() || '';
+                        const parent = segments.length > 0 ? segments.join('/') : folder.name;
+                        const level = segments.length + 1; // +1 because we're 1 level below the workspace folder
+                        
+                        files.push({
+                            name: fileName,
+                            path: filePath,
+                            isDirectory,
+                            parent,
+                            level
+                        });
+                    } catch (err) {
+                        console.warn('Error getting file stats:', err);
+                    }
+                }
+            }
+            
+            // Sort files - directories first, then by level
+            files.sort((a, b) => {
+                if (a.isDirectory !== b.isDirectory) {
+                    return a.isDirectory ? -1 : 1;
+                }
+                if (a.level !== b.level) {
+                    return (a.level || 0) - (b.level || 0);
+                }
+                return a.name.localeCompare(b.name);
+            });
+            
+            // Send files to webview
+            this.webviewView.webview.postMessage({
+                command: 'workspaceFilesUpdated',
+                files
+            });
+        } catch (error) {
+            console.error('Error getting workspace files:', error);
+        }
+    }
+
     private async handleUserMessage(text: string, options: any): Promise<void> {
         if (!this.isAIEngineReady) {
             this.showModelConfigurationRequired();
@@ -144,107 +225,81 @@ export class AIAssistantPanel {
         }
 
         try {
-            // Add user message to UI immediately
+            console.log("Handling user message with options:", JSON.stringify({
+                hasAttachments: options && options.attachments ? options.attachments.length : 0,
+                originalText: options.originalText || text
+            }));
+            
+            // Check if the message already contains file content
+            const containsFileContent = text.includes('```') && 
+                                       (text.includes('### File:') || 
+                                        text.includes('# ') || 
+                                        text.includes('## '));
+            
+            // Process attachments if they exist and the message doesn't already have file content
+            if (!containsFileContent && options && options.attachments && Array.isArray(options.attachments) && options.attachments.length > 0) {
+                console.log(`Processing ${options.attachments.length} attachments`);
+                
+                for (const attachment of options.attachments) {
+                    // Add to codebase indexer based on attachment type
+                    if (attachment.type === 'file') {
+                        console.log(`Adding file to context: ${attachment.path}`);
+                        await this.codebaseIndexer.attachFile(attachment.path);
+                        
+                        // Load content if not already present
+                        if (!attachment.content) {
+                            try {
+                                console.log(`Loading content for attached file: ${attachment.path}`);
+                                const uri = vscode.Uri.file(attachment.path);
+                                const fileData = await vscode.workspace.fs.readFile(uri);
+                                attachment.content = new TextDecoder().decode(fileData);
+                                console.log(`Successfully loaded content for ${attachment.path}, length: ${attachment.content.length} characters`);
+                            } catch (err) {
+                                console.error(`Error reading attached file ${attachment.path}:`, err);
+                            }
+                        }
+                    } else if (attachment.type === 'folder') {
+                        console.log(`Adding folder to context: ${attachment.path}`);
+                        await this.codebaseIndexer.attachFolder(attachment.path);
+                    }
+                }
+            } else if (containsFileContent && options && options.attachments) {
+                // If message already contains file content, clear the attachments to avoid duplication
+                console.log('Message already contains file content, clearing attachments to avoid duplication');
+                options.attachments = [];
+            }
+
+            // Add message to UI immediately
             const userMessage: Message = {
                 role: 'user',
                 content: text,
                 timestamp: Date.now()
             };
             this.messages.push(userMessage);
-            
-            // Send user message to the webview immediately
             this.webviewView.webview.postMessage({
                 command: 'addMessage',
                 message: userMessage
             });
-            
-            // Show loading state *after* displaying the user message
+
+            // Show loading state
             this.webviewView.webview.postMessage({
                 command: 'showLoading'
             });
 
-            // Enhanced agent mode detection with more context awareness
-            // Check if the user's message contains action-oriented keywords that suggest agent mode
-            const agentModeKeywords = [
-                // Explicit action verbs (English & Turkish)
-                'ekle', 'oluştur', 'yarat', 'düzenle', 'güncelle', 'sil', 'değiştir', 'yaz', 'kodla',
-                'add', 'create', 'make', 'edit', 'update', 'delete', 'change', 'modify', 'write', 'code',
-                'fix', 'implement', 'generate', 'build', 'develop', 'refactor', 'improve',
-                
-                // File type references suggesting creation
-                '.md', '.js', '.ts', '.html', '.css', '.json', '.yml', '.yaml', '.txt', '.xml',
-                'dosya', 'file', 'document', 'script', 'class', 'component', 'module',
-                
-                // Implied creation phrases
-                'yeni', 'new', 'oluşturabilir misin', 'can you create', 'dosyası', 'bir md', 'a file', 
-                'özellik', 'feature', 'implement', 'generate', 'need to have', 'olmalı',
-                'ekler misin', 'could you add', 'should be created'
-            ];
+            // Avoid duplication in the options object
+            const cleanOptions = { ...options };
             
-            // Check for contextual clues that suggest an agent mode response
-            const previousMessages = this.messages.slice(-5); // Get the last 5 messages for context
-            let containsFollowUpCue = false;
-            
-            // Check if this message seems to be following up on a previous request
-            // by looking for phrases that imply correction or continuation
-            const followUpPhrases = [
-                'ama', 'but', 'instead', 'yerine', 'aslında', 'actually', 'hatırlayarak',
-                'remember', 'hala', 'still', 'tekrar', 'again', 'bir daha', 'once more',
-                'doğru', 'correct', 'yanlış', 'wrong', 'olmadı', 'didn\'t work',
-                'yapamadı', 'couldn\'t', 'çalışmadı', 'didn\'t work'
-            ];
-            
-            const containsFollowUpPhrase = followUpPhrases.some(phrase => 
-                text.toLowerCase().includes(phrase.toLowerCase())
-            );
-            
-            // If this seems like a follow-up message, check if we have a previous agent response
-            if (containsFollowUpPhrase) {
-                const hasPreviousAgentResponse = previousMessages.some(msg => 
-                    msg.role === 'assistant' && 
-                    (msg.content.includes('```') || // Contains code block
-                     msg.content.includes('file') || // References a file
-                     msg.content.includes('dosya')) // References a file in Turkish
-                );
-                
-                if (hasPreviousAgentResponse) {
-                    containsFollowUpCue = true;
-                }
-            }
-            
-            // Determine if agent mode should be used
-            const containsAgentKeyword = agentModeKeywords.some(keyword => 
-                text.toLowerCase().includes(keyword.toLowerCase())
-            );
-            
-            const shouldUseAgentMode = containsAgentKeyword || containsFollowUpCue;
-            
-            let response;
-            if (shouldUseAgentMode) {
-                // Process message with agent mode for action-oriented requests
-                console.log('Processing message with agent mode:', text);
-                
-                // If this is a follow-up, provide the context of previous messages
-                const contextHistory = containsFollowUpCue ? previousMessages.map(msg => ({
-                    role: msg.role,
-                    content: msg.content,
-                    timestamp: msg.timestamp || Date.now() // Ensure timestamp is always a number
-                })) : [];
-                
-                response = await this.aiEngine.processAgentMessage(text, {
-                    options: options,
-                    codebaseIndex: this.codebaseIndexer.getIndex(),
-                    contextHistory: contextHistory
-                });
-            } else {
-                // Process message with chat mode for Q&A
-                console.log('Processing message with chat mode:', text);
-                response = await this.aiEngine.processMessage(text, {
-                    options: options,
-                    codebaseIndex: this.codebaseIndexer.getIndex()
-                });
+            // Don't send duplicated text content
+            if (cleanOptions.originalText === text) {
+                delete cleanOptions.originalText;
             }
 
+            // Process with AI and get response
+            const response = await this.aiEngine.processMessage(text, { 
+                options: cleanOptions,
+                codebaseIndex: this.codebaseIndexer.getIndex()
+            });
+            
             // Add assistant response
             const assistantMessage: Message = {
                 role: 'assistant',
@@ -258,21 +313,20 @@ export class AIAssistantPanel {
                 command: 'hideLoading'
             });
             
-            // Send only the assistant message since the user message was already added
             this.webviewView.webview.postMessage({
                 command: 'addMessage',
                 message: assistantMessage
             });
-        } catch (error) {
+        } catch (error: any) {
             // Hide loading state
             this.webviewView.webview.postMessage({
                 command: 'hideLoading'
             });
-
+            
             // Show error message in chat
             const errorMessage: Message = {
-                role: 'assistant',
-                content: `I encountered an error while processing your request: ${error instanceof Error ? error.message : 'Unknown error'}\n\nPlease try again or check your AI model configuration.`,
+                role: 'system',
+                content: `Error: ${error?.message || 'Unknown error occurred'}`,
                 timestamp: Date.now()
             };
             this.messages.push(errorMessage);
@@ -280,8 +334,8 @@ export class AIAssistantPanel {
                 command: 'addMessage',
                 message: errorMessage
             });
-
-            this.handleError('Message processing failed', error instanceof Error ? error : new Error('Unknown error'));
+            
+            this.handleError('Error processing message', error);
         }
     }
 
@@ -357,14 +411,31 @@ export class AIAssistantPanel {
                 openLabel: 'Attach File'
             });
 
-            if (result && result[0]) {
-                this.webviewView.webview.postMessage({
-                    command: 'fileAttached',
-                    path: result[0].fsPath
-                });
+            if (result && result.length > 0) {
+                const filePath = result[0].fsPath;
+                console.log(`File selected: ${filePath}`);
+                
+                try {
+                    const fileUri = vscode.Uri.file(filePath);
+                    const fileData = await vscode.workspace.fs.readFile(fileUri);
+                    const fileContent = new TextDecoder().decode(fileData);
+                    console.log(`File content length: ${fileContent.length}`);
+                    
+                    // Use WebviewManager to send file attached message with content
+                    WebviewManager.getInstance().sendFileAttached('smile-ai.assistant', filePath, fileContent);
+                    
+                    // Also add it to the codebase indexer for context
+                    await this.codebaseIndexer.attachFile(filePath);
+                    
+                } catch (error) {
+                    console.error(`Error reading file: ${error}`);
+                    // Even if we can't read the file, still send the path
+                    WebviewManager.getInstance().sendFileAttached('smile-ai.assistant', filePath);
+                }
             }
         } catch (error) {
             console.error('Error attaching file:', error);
+            vscode.window.showErrorMessage(`Failed to attach file: ${error}`);
         }
     }
 
@@ -377,14 +448,19 @@ export class AIAssistantPanel {
                 openLabel: 'Attach Folder'
             });
 
-            if (result && result[0]) {
-                this.webviewView.webview.postMessage({
-                    command: 'folderAttached',
-                    path: result[0].fsPath
-                });
+            if (result && result.length > 0) {
+                const folderPath = result[0].fsPath;
+                console.log(`Folder selected: ${folderPath}`);
+                
+                // Use WebviewManager to send folder attached message
+                WebviewManager.getInstance().sendFolderAttached('smile-ai.assistant', folderPath);
+                
+                // Also add it to the codebase indexer for context
+                await this.codebaseIndexer.attachFolder(folderPath);
             }
         } catch (error) {
             console.error('Error attaching folder:', error);
+            vscode.window.showErrorMessage(`Failed to attach folder: ${error}`);
         }
     }
 
@@ -444,13 +520,27 @@ export class AIAssistantPanel {
                             <!-- Messages will be inserted here -->
                         </div>
                         <div class="input-container">
+                            <div class="attachment-toolbar">
+                                <button id="attachFileButton" class="attachment-button" title="Attach File">
+                                    <i class="codicon codicon-file"></i>
+                                    <span>Attach File</span>
+                                </button>
+                                <button id="attachFolderButton" class="attachment-button" title="Attach Folder">
+                                    <i class="codicon codicon-folder"></i>
+                                    <span>Attach Folder</span>
+                                </button>
+                            </div>
+                            <div id="attachments-container" class="current-attachments"></div>
                             <div class="input-row">
-                                <textarea
-                                    class="input-box"
-                                    id="message-input"
-                                    placeholder="Ask any question about your code..."
-                                    rows="1"
-                                ></textarea>
+                                <div class="input-wrapper">
+                                    <textarea
+                                        class="input-box"
+                                        id="message-input"
+                                        placeholder="Ask any question about your code... (@ to mention files)"
+                                        rows="1"
+                                    ></textarea>
+                                    <div id="suggestions-container" class="suggestions-container"></div>
+                                </div>
                                 <button class="send-button" id="send-button">
                                     <i class="codicon codicon-send"></i>
                                 </button>
@@ -479,7 +569,9 @@ export class AIAssistantPanel {
                 console.log('Received message from webview:', message);
                 switch (message.command) {
                     case 'sendMessage':
-                        await this.handleUserMessage(message.text, message.options || {});
+                        // Kullanıcı arabirimi için orijinal mesajı göster, ancak AI'a zenginleştirilmiş metni gönder
+                        const originalText = message.originalText || message.text;
+                        await this.handleUserMessage(message.text, { ...message.options || {}, originalText });
                         break;
                     case 'addModel':
                         await this.handleAddModel();
@@ -489,6 +581,12 @@ export class AIAssistantPanel {
                         break;
                     case 'attachFolder':
                         await this.handleAttachFolder();
+                        break;
+                    case 'getFileContent':
+                        await this.handleGetFileContent(message.path);
+                        break;
+                    case 'getWorkspaceFiles':
+                        await this.handleGetWorkspaceFiles();
                         break;
                     case 'acceptOperation':
                         await this.handleAcceptOperation(message.id);
@@ -614,9 +712,103 @@ export class AIAssistantPanel {
         }
     }
 
+    private async handleGetFileContent(filePath: string): Promise<void> {
+        try {
+            if (!filePath) {
+                console.error('Invalid file path provided');
+                return;
+            }
+            
+            console.log(`Getting content for file: ${filePath}`);
+            let fileContent = '';
+            
+            // Read file content
+            try {
+                const uri = vscode.Uri.file(filePath);
+                const fileData = await vscode.workspace.fs.readFile(uri);
+                fileContent = new TextDecoder().decode(fileData);
+                console.log(`Successfully read file content, length: ${fileContent.length} characters`);
+            } catch (err) {
+                console.error(`Error reading file ${filePath}:`, err);
+                this.webviewView.webview.postMessage({
+                    command: 'showError',
+                    error: {
+                        message: `Could not read file ${path.basename(filePath)}: ${err instanceof Error ? err.message : 'Unknown error'}`,
+                    }
+                });
+                return;
+            }
+            
+            // Send file content back to webview
+            this.webviewView.webview.postMessage({
+                command: 'fileContentLoaded',
+                path: filePath,
+                content: fileContent
+            });
+            
+            // Also add it to the codebase indexer for context
+            if (fileContent) {
+                await this.codebaseIndexer.attachFile(filePath);
+            }
+            
+        } catch (error) {
+            console.error('Error getting file content:', error);
+            this.webviewView.webview.postMessage({
+                command: 'showError',
+                error: {
+                    message: `Error processing file: ${error instanceof Error ? error.message : 'Unknown error'}`,
+                }
+            });
+        }
+    }
+
     public dispose() {
+        // Unregister the webview from WebviewManager
+        WebviewManager.getInstance().unregisterWebview('assistant');
+        
         AIAssistantPanel.currentPanel = undefined;
 
         this.disposables.forEach(d => d.dispose());
+    }
+
+    public sendMessageToWebview(message: any): void {
+        WebviewManager.getInstance().sendMessage('assistant', message);
+    }
+
+    public addMessage(message: AIMessage): void {
+        this.messages.push(message);
+        WebviewManager.getInstance().sendMessage('assistant', { command: 'addMessage', message });
+    }
+
+    public showLoading(): void {
+        WebviewManager.getInstance().sendMessage('assistant', { command: 'showLoading' });
+    }
+
+    public hideLoading(): void {
+        WebviewManager.getInstance().sendMessage('assistant', { command: 'hideLoading' });
+    }
+
+    public updateWorkspaceFiles(files: any[]): void {
+        WebviewManager.getInstance().sendMessage('assistant', { command: 'updateWorkspaceFiles', files });
+    }
+
+    public updateContext(context: any): void {
+        WebviewManager.getInstance().sendMessage('assistant', { command: 'updateContext', context });
+    }
+
+    public notifyIndexingComplete(): void {
+        WebviewManager.getInstance().sendMessage('assistant', { command: 'indexingComplete' });
+    }
+
+    private registerCommands(): void {
+        // Register commands for attaching files and folders
+        this.context.subscriptions.push(
+            vscode.commands.registerCommand('smile-ai.assistant.attachFile', () => {
+                this.handleAttachFile();
+            }),
+            vscode.commands.registerCommand('smile-ai.assistant.attachFolder', () => {
+                this.handleAttachFolder();
+            })
+        );
     }
 } 

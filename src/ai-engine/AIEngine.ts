@@ -80,22 +80,31 @@ export class AIEngine {
         }
     }
 
-    public async processMessage(message: string, options: ProcessOptions): Promise<string> {
+    public async processMessage(text: string, options: ProcessOptions): Promise<string> {
         try {
-            // Pass options to sendRequest
-            return await this.sendRequest(message, options, 'chat');
+            // Check if we have file attachments
+            const hasAttachments = options?.options?.attachments?.length > 0;
+            
+            // Standard message processing
+            console.log('Processing message with attachments:', hasAttachments);
+            return await this.sendRequest(text, options, 'chat');
         } catch (error) {
             console.error('Error in processMessage:', error);
-            // Provide a fallback response so the chat UI at least works
-            return `I received your message: "${message}"\n\nHowever, I couldn't connect to the AI provider. Please make sure Ollama is running at ${this.config.provider.apiEndpoint} and the model ${this.config.provider.modelName} is available.`;
+            return `I encountered an error while processing your request: ${error instanceof Error ? error.message : String(error)}`;
         }
     }
 
     public async processAgentMessage(message: string, options: ProcessOptions): Promise<string> {
         // Agent mode processing - more autonomous and can take actions
         try {
+            // Check if this is a translation request
+            const isTranslationRequest = this.isTranslationRequest(message);
+
+            // Use appropriate mode based on request type
+            const mode = isTranslationRequest ? 'chat' : 'agent';
+            
             // First get the response from the AI
-            const response = await this.sendRequest(message, options, 'agent');
+            const response = await this.sendRequest(message, options, mode);
             
             // Extract file creation commands from the response
             await this.executeAgentActions(response, message, options.contextHistory);
@@ -115,6 +124,43 @@ export class AIEngine {
     private async sendRequest(message: string, options: ProcessOptions, mode: 'chat' | 'agent' | 'ask'): Promise<string> {
         try {
             console.log(`Sending ${mode} request to ${this.config.provider.name} at ${this.config.provider.apiEndpoint}`);
+            
+            // Create a copy of the message for enhancement
+            let enhancedMessage = message;
+            
+            // Check if the message already contains file content markers
+            const containsFileContent = message.includes('```') && 
+                                      (message.includes('### File:') || 
+                                       message.includes('# ') || 
+                                       message.includes('## '));
+            
+            // Handle file attachments
+            const hasAttachments = options?.options?.attachments?.length > 0;
+            if (hasAttachments && !containsFileContent) {
+                const attachmentsWithContent = options?.options?.attachments?.filter((a: any) => a.type === 'file' && a.content) || [];
+                
+                if (attachmentsWithContent.length > 0) {
+                    console.log(`Enhancing message with ${attachmentsWithContent.length} file attachments`);
+                    enhancedMessage += "\n\n";
+                    
+                    // Add file content
+                    attachmentsWithContent.forEach((attachment: any) => {
+                        const fileName = attachment.name || attachment.path.split(/[\/\\]/).pop() || 'file';
+                        console.log(`Adding content for ${fileName} to message`);
+                        enhancedMessage += `### File: ${fileName}\n\`\`\`\n${attachment.content}\n\`\`\`\n\n`;
+                    });
+                    
+                    // Check if this is a translation request
+                    const isTranslationRequest = this.isTranslationRequest(message);
+                    
+                    // For translation requests, add clear instructions
+                    if (isTranslationRequest) {
+                        enhancedMessage += "\nPlease translate the content of these files and return the full translated content in code blocks with the original file names. Your response will be used to update the original files.";
+                    }
+                    
+                    console.log("Final message preparation complete");
+                }
+            }
             
             // Check if user is asking about the codebase
             const isCodebaseQuery = message.toLowerCase().includes('codebase') || 
@@ -164,12 +210,24 @@ export class AIEngine {
                 systemPrompt += contextualHistory;
             }
             
+            // Create a clean copy of options to avoid duplication
+            const cleanOptions = options.options || {};
+            
+            // If message is already enhanced with file content, remove attachments 
+            // to prevent duplication in the request body
+            if (enhancedMessage !== message) {
+                console.log('Message already enhanced with attachments, clearing attachments in request body');
+                if (cleanOptions.attachments) {
+                    delete cleanOptions.attachments;
+                }
+            }
+            
             // Construct the request body with options
             const requestBody = this.config.provider.name === 'ollama' ? {
                 model: this.config.provider.modelName,
-                prompt: `${systemPrompt}\n\nUser: ${message}\n\nAssistant:`,
+                prompt: `${systemPrompt}\n\nUser: ${enhancedMessage}\n\nAssistant:`,
                 stream: false,
-                options: options.options || {},
+                options: cleanOptions,
             } : {
                 model: this.config.provider.modelName,
                 messages: [
@@ -179,20 +237,21 @@ export class AIEngine {
                     },
                     {
                         role: 'user',
-                        content: message
+                        content: enhancedMessage
                     }
                 ],
                 max_tokens: this.config.maxTokens || 2048,
                 temperature: this.config.temperature || 0.7,
-                options: options.options || {},
+                options: cleanOptions,
                 codebaseIndex: options.codebaseIndex || null
             };
 
+            // Log the complete request body for debugging
             console.log('Request body:', JSON.stringify(requestBody));
 
             // Try to make API request with timeout
             const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 90000); // Increased timeout to 90 seconds
+            const timeoutId = setTimeout(() => controller.abort(), 180000); // Increased timeout to 3 minutes
             
             try {
                 // Make the API request
@@ -208,7 +267,7 @@ export class AIEngine {
                 clearTimeout(timeoutId);
 
                 if (!response.ok) {
-                    throw new Error(`API request failed: ${response.statusText}`);
+                    throw new Error(`API request failed: ${response.statusText} (${response.status})`);
                 }
 
                 const data = await response.json();
@@ -227,8 +286,14 @@ export class AIEngine {
                 // Log the final content
                 console.log('Processed content:', content);
                 return content;
-            } catch (fetchError) {
+            } catch (fetchError: unknown) {
                 console.error('Fetch error:', fetchError);
+                
+                // Handle specific error cases
+                if (fetchError instanceof Error && fetchError.name === 'AbortError') {
+                    return `I couldn't get a response from the AI provider within the time limit. The request timed out after 3 minutes.\n\nPlease check that ${this.config.provider.name} is running correctly at ${this.config.provider.apiEndpoint} with the model "${this.config.provider.modelName}" and try again with a simpler request.`;
+                }
+                
                 // Provide a fallback response
                 return `I received your request in ${mode} mode, but I couldn't connect to the AI provider.\n\nPlease make sure ${this.config.provider.name} is running at ${this.config.provider.apiEndpoint} with the model "${this.config.provider.modelName}" available.`;
             } finally {
@@ -243,6 +308,20 @@ export class AIEngine {
     }
 
     private getSystemPrompt(mode: 'chat' | 'agent' | 'ask'): string {
+        // Check if the input message suggests a translation request
+        const isTranslationMode = mode === 'chat' && this.detectTranslationRequest();
+        
+        if (isTranslationMode) {
+            return `You are an AI assistant specialized in translation tasks. When translating files:
+                - Preserve all code functionality and structure
+                - Translate only comments, strings, text content, and documentation
+                - Do not change variable names, function names, or code logic
+                - Return the complete translated content for each file inside a code block
+                - Format each file as: \`\`\`filetype\npath/to/file.ext\ncomplete translated content\n\`\`\`
+                - Do NOT include the original content alongside the translation
+                - Keep the same file format and indentation as the original`;
+        }
+        
         switch (mode) {
             case 'agent':
                 return `You are an AI coding agent that can autonomously perform tasks. You can:
@@ -282,6 +361,24 @@ export class AIEngine {
                     - Help with debugging
                     Aim to be helpful while following the user's lead.`;
         }
+    }
+
+    /**
+     * Detects if the current context indicates a translation request
+     */
+    private detectTranslationRequest(): boolean {
+        // Check the most recent messages in the conversation history
+        if (this.conversationHistory.length > 0) {
+            const recentMessages = this.conversationHistory.slice(-3); // Check last 3 messages
+            
+            for (const message of recentMessages) {
+                if (message.role === 'user' && this.isTranslationRequest(message.content)) {
+                    return true;
+                }
+            }
+        }
+        
+        return false;
     }
 
     public updateConfig(newConfig: Partial<AIEngineConfig>) {
@@ -535,6 +632,14 @@ export class AIEngine {
         try {
             console.log('Executing agent actions');
             const fileOperationManager = FileOperationManager.getInstance();
+            
+            // Check if this is a translation request
+            const isTranslationRequest = originalRequest ? this.isTranslationRequest(originalRequest) : false;
+            
+            if (isTranslationRequest) {
+                console.log('Processing response as a translation request');
+                await this.processTranslationResponse(response);
+            }
             
             // Extract actions from the response using our extractActions method
             if (originalRequest) {
@@ -916,11 +1021,15 @@ export class AIEngine {
             /create\s+(?:a|the)?\s*(?:new)?\s*file\s+[`'"]?([\w\-\./]+\.\w+)[`'"]?/g,
             /create\s+[`'"]?([\w\-\./]+\.\w+)[`'"]?/g,
             /add\s+(?:a|the)?\s*(?:new)?\s*file\s+[`'"]?([\w\-\./]+\.\w+)[`'"]?/g,
+            /ekle\s+(?:a|the)?\s*(?:new)?\s*file\s+[`'"]?([\w\-\./]+\.\w+)[`'"]?/g,
             /add\s+[`'"]?([\w\-\./]+\.\w+)[`'"]?/g,
             /save\s+(?:to)?\s*[`'"]?([\w\-\./]+\.\w+)[`'"]?/g,
+            /kaydet\s+(?:to)?\s*[`'"]?([\w\-\./]+\.\w+)[`'"]?/g,
             /generate\s+(?:a|the)?\s*file\s+[`'"]?([\w\-\./]+\.\w+)[`'"]?/g,
             /write\s+(?:a|the)?\s*file\s+[`'"]?([\w\-\./]+\.\w+)[`'"]?/g,
+            /yaz\s+(?:a|the)?\s*file\s+[`'"]?([\w\-\./]+\.\w+)[`'"]?/g,
             /new\s+file\s+[`'"]?([\w\-\./]+\.\w+)[`'"]?/g,
+            /yeni\s+dosya\s+[`'"]?([\w\-\./]+\.\w+)[`'"]?/g,
         ];
         
         // Also check for file paths in markdown code blocks
@@ -1089,5 +1198,83 @@ export class AIEngine {
         
         console.log(`Total actions extracted: ${actions.length}`);
         return actions;
+    }
+
+    /**
+     * Processes AI response for translation requests and updates the original files
+     * with translated content.
+     */
+    private async processTranslationResponse(response: string): Promise<void> {
+        try {
+            console.log('Processing translation response');
+            const fileOperationManager = FileOperationManager.getInstance();
+            
+            // Regular expression to find file blocks in the AI's response
+            const fileBlockRegex = /```(?:file|[\w-]+)?\s*(?:title=)?[`'"]?([\w\-\./]+\.\w+)[`'"]?\s*\n([\s\S]*?)```/g;
+            
+            let match;
+            let translationsFound = false;
+            
+            while ((match = fileBlockRegex.exec(response)) !== null) {
+                translationsFound = true;
+                const filePath = match[1].trim();
+                const translatedContent = match[2];
+                
+                if (!filePath || !translatedContent) {
+                    continue;
+                }
+                
+                console.log(`Found translation for file: ${filePath}`);
+                
+                // Get the absolute path
+                let absolutePath = filePath;
+                if (!path.isAbsolute(filePath)) {
+                    if (vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders.length > 0) {
+                        absolutePath = path.join(vscode.workspace.workspaceFolders[0].uri.fsPath, filePath);
+                    } else {
+                        console.warn('No workspace folder found, using relative path');
+                    }
+                }
+                
+                // Check if file exists
+                const fileExists = fs.existsSync(absolutePath);
+                
+                if (fileExists) {
+                    // Read original content for update operation
+                    const originalContent = fs.readFileSync(absolutePath, 'utf8');
+                    
+                    // Create update operation for the translated file
+                    const description = `Update file ${path.basename(filePath)} with translated content`;
+                    const operation = await fileOperationManager.createUpdateOperation(absolutePath, originalContent, translatedContent, description);
+                    await fileOperationManager.acceptOperation(operation.id);
+                    
+                    console.log(`File ${filePath} updated with translated content`);
+                } else {
+                    // This is a new file (unusual for translation, but handle anyway)
+                    const description = `Create new file ${path.basename(filePath)} with translated content`;
+                    const operation = await fileOperationManager.createAddOperation(absolutePath, translatedContent, description);
+                    await fileOperationManager.acceptOperation(operation.id);
+                    
+                    console.log(`New file ${filePath} created with translated content`);
+                }
+            }
+            
+            if (!translationsFound) {
+                console.log('No file translations found in the AI response');
+            }
+        } catch (error) {
+            console.error('Error processing translation response:', error);
+        }
+    }
+
+    /**
+     * Checks if the given message is a translation request
+     */
+    private isTranslationRequest(message: string): boolean {
+        return message.toLowerCase().includes('translate') || 
+               message.toLowerCase().includes('çevir') ||
+               message.toLowerCase().includes('türkçe') || 
+               message.toLowerCase().includes('übersetz') ||
+               message.toLowerCase().includes('tradui');
     }
 } 
