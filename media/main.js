@@ -493,6 +493,27 @@
     // Listen for messages from the extension
     window.addEventListener('message', event => {
         const message = event.data;
+        
+        // Check if the message uses type instead of command (handle both formats)
+        if (message.type && !message.command) {
+            // Handle messages that use 'type' instead of 'command'
+            switch (message.type) {
+                case 'contextUpdate':
+                    log('Received context update:', message.context?.file || 'unknown');
+                    // Handle context update - could show current file in UI if needed
+                    break;
+                    
+                case 'indexingComplete':
+                    log('Indexing complete');
+                    // Could update UI to show indexing status
+                    break;
+                    
+                default:
+                    console.warn('Received unhandled message type:', message.type);
+            }
+            return;
+        }
+        
         if (!message || !message.command) {
             console.warn('Received invalid message from extension:', message);
             return;
@@ -529,6 +550,16 @@
                     } else {
                         console.warn('Received invalid messages array:', message.messages);
                     }
+                    break;
+                    
+                case 'contextUpdate':
+                    log('Received context update:', message.context?.file || 'unknown');
+                    // Handle context update - could show current file in UI if needed
+                    break;
+                    
+                case 'indexingComplete':
+                    log('Indexing complete');
+                    // Could update UI to show indexing status
                     break;
                     
                 case 'showLoading':

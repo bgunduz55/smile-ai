@@ -120,7 +120,7 @@ export class WebviewManager {
      */
     public updateContext(webviewId: string, context: any): void {
         this.sendMessage(webviewId, {
-            type: 'contextUpdate',
+            command: 'contextUpdate',
             context: context
         });
     }
@@ -130,7 +130,7 @@ export class WebviewManager {
      */
     public notifyIndexingComplete(webviewId: string): void {
         this.sendMessage(webviewId, {
-            type: 'indexingComplete'
+            command: 'indexingComplete'
         });
     }
 } 

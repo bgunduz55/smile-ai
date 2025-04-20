@@ -21,6 +21,7 @@ import { AIAssistantPanel } from './views/AIAssistantPanel';
 import { ModelManager } from './utils/ModelManager';
 import { AIEngineConfig } from './ai-engine/AIEngineConfig';
 import { RAGService } from './indexing/RAGService';
+import { CompletionManager } from './completion/CompletionManager';
 
 // Export the main extension class
 export class SmileAIExtension {
@@ -33,6 +34,7 @@ export class SmileAIExtension {
     private readonly improvementProvider: ImprovementTreeProvider;
     private readonly modelManager: ModelManager;
     private readonly improvementManager: ImprovementManager;
+    private readonly completionManager: CompletionManager;
     private aiAssistantPanel: AIAssistantPanel | undefined;
     private readonly context: vscode.ExtensionContext;
 
@@ -87,6 +89,10 @@ export class SmileAIExtension {
         
         // Initialize RAG service with codebase index
         this.aiEngine.initRAG(this.codebaseIndexer.getIndex());
+        
+        // Initialize CompletionManager
+        this.completionManager = new CompletionManager(this.aiEngine, this.codebaseIndexer, context);
+        console.log('Smile AI: CompletionManager initialized in SmileAIExtension');
         
         // Update RAG settings from configuration
         if (this.aiEngine) {
@@ -189,6 +195,11 @@ export class SmileAIExtension {
                 if (e.affectsConfiguration('smile-ai.enableRAG') || 
                     e.affectsConfiguration('smile-ai.rag')) {
                     this.updateRAGSettings();
+                }
+                
+                // Update completion settings when behavior config changes
+                if (e.affectsConfiguration('smile-ai.behavior')) {
+                    this.completionManager.updateFromConfig();
                 }
             });
 
@@ -324,6 +335,8 @@ export class SmileAIExtension {
 
     public dispose() {
         this.statusBarItem.dispose();
+        // Dispose the completion manager
+        this.completionManager.dispose();
         // Note: CodebaseIndexer and ImprovementManager don't need dispose methods
         if (this.aiAssistantPanel) {
             this.aiAssistantPanel.dispose();

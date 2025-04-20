@@ -40,10 +40,24 @@ export class CodebaseIndexer {
         // Default patterns
         const defaultPatterns = [
             'node_modules',
+            '.angular',
+            '.vscode',
             'dist',
             'out',
             '.git',
-            '*.log'
+            '*.log',
+            '.next',
+            'build',
+            'coverage',
+            '.idea',
+            'bin',
+            'obj',
+            'target',
+            'tmp',
+            '.cache',
+            '*.min.*',
+            'package-lock.json',
+            'yarn.lock'
         ];
         this.ignoreFilter.add(defaultPatterns);
 
@@ -95,15 +109,23 @@ export class CodebaseIndexer {
         try {
             const files = await vscode.workspace.findFiles(
                 new vscode.RelativePattern(folderPath, '**/*'),
-                '**/node_modules/**'
+                '{**/node_modules/**,**/.angular/**,**/.vscode/**,**/dist/**,**/out/**,**/.git/**}'
             );
 
             console.log(`Found ${files.length} files to index in ${folderPath}`);
             let indexedCount = 0;
             for (const file of files) {
                 try {
+                    const relativePath = vscode.workspace.asRelativePath(file);
+                    
+                    // Skip if file matches ignore patterns
+                    if (this.ignoreFilter.ignores(relativePath)) {
+                        console.log(`Skipping ignored file: ${relativePath}`);
+                        continue;
+                    }
+                    
                     if (progressCallback) {
-                        progressCallback(`Indexing ${vscode.workspace.asRelativePath(file)} (${indexedCount + 1}/${files.length})`);
+                        progressCallback(`Indexing ${relativePath} (${indexedCount + 1}/${files.length})`);
                     }
                     
                     // Ignore binary files
