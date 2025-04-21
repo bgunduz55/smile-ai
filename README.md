@@ -14,7 +14,8 @@ Smile AI is a powerful code assistant developed for VSCode that operates using c
 - Optimized AI usage for low resource consumption
 
 ### 💡 Smart Code Assistant
-- Code suggestions and completion
+- **AI-powered code completions and inline suggestions**
+- Intelligent context-aware code recommendations
 - Code explanation and documentation generation
 - Bug detection and solution suggestions
 - Code refactoring suggestions
@@ -28,6 +29,8 @@ Smile AI is a powerful code assistant developed for VSCode that operates using c
 - Step-by-step code change implementation
 
 ### 🛠️ Developer Experience
+- GitHub Copilot-like inline completions
+- IntelliSense integration with AI suggestions
 - Intuitive user interface
 - Customizable keyboard shortcuts
 - Detailed change previews
@@ -40,6 +43,12 @@ Smile AI is a powerful code assistant developed for VSCode that operates using c
 - Local LLM integration (Ollama, LM Studio)
 - Model management and optimization
 - Context management and memory optimization
+
+### Code Completion System
+- Intelligent code suggestions as you type
+- Context-aware completions using file and workspace analysis
+- Inline (ghost text) completions for multi-line suggestions
+- Integration with VS Code's IntelliSense system
 
 ### Agent System
 - Task planning and management
@@ -58,4 +67,9 @@ Smile AI is a powerful code assistant developed for VSCode that operates using c
 - Webview panels
 - Status bar notifications
 - Code lens and decoration support
+
+## Documentation
+
+For more information on specific features, check the docs directory:
+- [Code Completion](docs/code-completion.md)
 
