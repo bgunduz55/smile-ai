@@ -167,6 +167,11 @@
         "title": "Ask/Edit/Agent",
         "category": "Smile AI",
         "icon": "$(comment)"
+      },
+      {
+        "command": "smile-ai.sendChatMessage",
+        "title": "Send Chat Message",
+        "category": "Smile AI"
       }
     ],
     "menus": {
@@ -224,6 +229,12 @@
         "command": "smile-ai.switchMode",
         "key": "ctrl+shift+m",
         "mac": "cmd+shift+m"
+      },
+      {
+        "command": "smile-ai.sendChatMessage",
+        "key": "ctrl+enter",
+        "mac": "cmd+enter",
+        "when": "view == smile-ai.assistant && focusedView == smile-ai.assistant"
       }
     ],
     "configuration": {

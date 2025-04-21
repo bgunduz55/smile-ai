@@ -33,6 +33,20 @@
         const attachFolderButton = document.getElementById('attachFolderButton');
         const attachmentsContainer = document.getElementById('attachments-container');
 
+        // Global event listener for Ctrl+Enter
+        document.addEventListener('keydown', (event) => {
+            if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
+                log("Global Ctrl+Enter detected");
+                
+                // If we're in the chat view (check if message input exists)
+                if (document.getElementById('message-input')) {
+                    event.preventDefault();
+                    log("Global Ctrl+Enter in chat view, sending message with codebase context");
+                    sendMessage(true);
+                }
+            }
+        });
+
         if (sendButton && messageInput) {
             sendButton.addEventListener('click', () => {
                 sendMessage();
@@ -65,10 +79,18 @@
                     }
                 }
                 
+                // Handle Ctrl+Enter to send message
+                if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
+                    event.preventDefault();
+                    log("Ctrl+Enter pressed, sending message with codebase context");
+                    sendMessage(true);
+                    return;
+                }
+                
                 // Standard behavior - send message with Enter (unless shift is pressed)
                 if (event.key === 'Enter' && !event.shiftKey && !isVisible) {
                     event.preventDefault();
-                    sendMessage();
+                    sendMessage(false);
                 }
             });
             
@@ -119,7 +141,7 @@
     let workspaceFolders = [];
 
     // Function to send message to extension
-    function sendMessage() {
+    function sendMessage(includeCodebaseContext = false) {
         const messageInput = document.getElementById('message-input');
         const text = messageInput.value.trim();
         
@@ -155,13 +177,23 @@
                 log('Message already contains file content, skipping attachments to avoid duplication');
             }
             
+            // If codebase context should be included but no specific attachments provided,
+            // signal to the backend to include codebase context
+            const messageOptions = {
+                attachments: attachmentsToSend,
+                originalText: text,
+                includeCodebaseContext: includeCodebaseContext && attachmentsToSend.length === 0 && !containsFileContent
+            };
+            
+            log("Sending message with options:", JSON.stringify({
+                includeCodebaseContext: messageOptions.includeCodebaseContext,
+                attachmentsCount: messageOptions.attachments.length
+            }));
+            
             vscode.postMessage({
                 command: 'sendMessage',
                 text: text,
-                options: {
-                    attachments: attachmentsToSend,
-                    originalText: text
-                }
+                options: messageOptions
             });
             
             messageInput.value = '';
@@ -664,6 +696,12 @@
                         workspaceFiles = message.files.filter(f => !f.isDirectory);
                         workspaceFolders = message.files.filter(f => f.isDirectory);
                     }
+                    break;
+                    
+                case 'triggerSendMessage':
+                    log("Received message to trigger sending a message with Ctrl+Enter");
+                    // Call the sendMessage function to send the current message with codebase context
+                    sendMessage(true);
                     break;
                     
                 default:

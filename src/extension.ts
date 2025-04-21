@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { AIEngine } from './ai-engine/AIEngine';
-import { TaskType, TaskExecutor } from './agent/types';
+import { TaskType, TaskExecutor, TaskStatus, TaskPriority } from './agent/types';
 import { CodeModificationExecutor } from './agent/executors/CodeModificationExecutor';
 import { TestGenerationExecutor } from './agent/executors/TestGenerationExecutor';
 import { DocumentationExecutor } from './agent/executors/DocumentationExecutor';
@@ -272,111 +272,303 @@ export class SmileAIExtension {
     }
 
     private registerCommands(): void {
-        // Register a command to open the AI assistant panel
-        const openAIAssistantCommand = vscode.commands.registerCommand('smile-ai.openAIAssistant', () => {
-            // Show the AI Assistant panel
-            vscode.commands.executeCommand('smile-ai.assistant.focus');
-        });
-
-        // Command to attach a file to the current conversation
-        const attachFileCommand = vscode.commands.registerCommand('smile-ai.attachFile', () => {
-            if (this.aiAssistantPanel) {
-                this.attachFile();
-            } else {
-                vscode.window.showInformationMessage('Open Smile AI assistant first to attach files.');
-            }
-        });
-
-        // Command to attach a folder to the current conversation
-        const attachFolderCommand = vscode.commands.registerCommand('smile-ai.attachFolder', () => {
-            if (this.aiAssistantPanel) {
-                this.attachFolder();
-            } else {
-                vscode.window.showInformationMessage('Open Smile AI assistant first to attach folders.');
-            }
-        });
-
-        // Register a command to configure the AI assistant
-        const configureCommand = vscode.commands.registerCommand('smile-ai.configure', () => {
-            vscode.commands.executeCommand('workbench.action.openSettings', '@ext:bgunduk.smile-ai');
-        });
-
-        // Register commands for handling improvements
-        const improveCommand = vscode.commands.registerCommand('smile-ai.improve', async (improvement) => {
-            if (this.aiAssistantPanel) {
-                // Call method to handle improvement if available
-                await vscode.window.showInformationMessage('Improvement registered: ' + improvement);
-            }
-        });
+        const context = this.context;
         
-        // Toggle code completion command
-        const toggleCodeCompletionCommand = vscode.commands.registerCommand('smile-ai.toggleCodeCompletion', () => {
-            // Read current configuration
-            const config = vscode.workspace.getConfiguration('smile-ai');
-            const behavior = config.get<any>('behavior', {});
-            const isEnabled = behavior.autoComplete === true;
-            
-            // Update configuration with opposite value
-            config.update('behavior.autoComplete', !isEnabled, vscode.ConfigurationTarget.Global)
-                .then(() => {
-                    // Manually toggle the provider since config change events might be delayed
-                    if (isEnabled) {
-                        this.completionManager.disableCodeCompletion();
-                        vscode.window.showInformationMessage('Smile AI: Code completion disabled');
-                    } else {
-                        this.completionManager.enableCodeCompletion();
-                        vscode.window.showInformationMessage('Smile AI: Code completion enabled');
+        // Add command registration for AI Interaction commands
+        context.subscriptions.push(
+            vscode.commands.registerCommand('smile-ai.analyzeCode', async () => {
+                try {
+                    this.showLoading('Analyzing code...');
+                    const editor = vscode.window.activeTextEditor;
+                    
+                    if (!editor) {
+                        vscode.window.showErrorMessage('No active editor');
+                        this.showError('No active editor');
+                        return;
                     }
-                });
-        });
-        
-        // Toggle inline completion command
-        const toggleInlineCompletionCommand = vscode.commands.registerCommand('smile-ai.toggleInlineCompletion', () => {
-            // Read current configuration
-            const config = vscode.workspace.getConfiguration('smile-ai');
-            const behavior = config.get<any>('behavior', {});
-            const isEnabled = behavior.inlineCompletion === true;
-            
-            // Update configuration with opposite value
-            config.update('behavior.inlineCompletion', !isEnabled, vscode.ConfigurationTarget.Global)
-                .then(() => {
-                    // Manually toggle the provider since config change events might be delayed
-                    if (isEnabled) {
-                        this.completionManager.disableInlineCompletion();
-                        vscode.window.showInformationMessage('Smile AI: Inline completion disabled');
+                    
+                    const document = editor.document;
+                    const success = await this.analyzeFile(document);
+                    
+                    if (success) {
+                        this.showReady('Code analysis complete');
+                        vscode.window.showInformationMessage('Code analysis complete');
                     } else {
-                        this.completionManager.enableInlineCompletion();
-                        vscode.window.showInformationMessage('Smile AI: Inline completion enabled');
+                        this.showError('Code analysis failed');
                     }
-                });
-        });
-
-        this.context.subscriptions.push(
-            openAIAssistantCommand,
-            attachFileCommand,
-            attachFolderCommand,
-            configureCommand,
-            improveCommand,
-            toggleCodeCompletionCommand,
-            toggleInlineCompletionCommand
+                } catch (error) {
+                    this.showError(`Analysis error: ${error instanceof Error ? error.message : String(error)}`);
+                    console.error('Error during code analysis:', error);
+                }
+            }),
+            
+            vscode.commands.registerCommand('smile-ai.generateTests', async () => {
+                try {
+                    this.showLoading('Generating tests...');
+                    const editor = vscode.window.activeTextEditor;
+                    
+                    if (!editor) {
+                        vscode.window.showErrorMessage('No active editor');
+                        this.showError('No active editor');
+                        return;
+                    }
+                    
+                    const document = editor.document;
+                    const executor = this.taskExecutors.get(TaskType.TEST_GENERATION);
+                    
+                    if (executor) {
+                        await executor.execute({
+                            id: Date.now().toString(),
+                            type: TaskType.TEST_GENERATION,
+                            description: 'Generate tests for the current file',
+                            status: TaskStatus.PENDING,
+                            priority: TaskPriority.MEDIUM,
+                            created: Date.now(),
+                            updated: Date.now(),
+                            metadata: {
+                                fileContext: await this.fileAnalyzer.analyzeFile(document.uri),
+                                codeAnalysis: await this.codeAnalyzer.analyzeCode(document.uri, await this.fileAnalyzer.analyzeFile(document.uri))
+                            }
+                        });
+                        this.showReady('Test generation complete');
+                    } else {
+                        this.showError('Test generation executor not available');
+                    }
+                } catch (error) {
+                    this.showError(`Test generation error: ${error instanceof Error ? error.message : String(error)}`);
+                    console.error('Error during test generation:', error);
+                }
+            }),
+            
+            // Refactor Code command
+            vscode.commands.registerCommand('smile-ai.refactorCode', async () => {
+                try {
+                    this.showLoading('Refactoring code...');
+                    const editor = vscode.window.activeTextEditor;
+                    
+                    if (!editor) {
+                        vscode.window.showErrorMessage('No active editor');
+                        this.showError('No active editor');
+                        return;
+                    }
+                    
+                    const document = editor.document;
+                    const executor = this.taskExecutors.get(TaskType.REFACTORING);
+                    
+                    if (executor) {
+                        await executor.execute({
+                            id: Date.now().toString(),
+                            type: TaskType.REFACTORING,
+                            description: 'Refactor the current file',
+                            status: TaskStatus.PENDING,
+                            priority: TaskPriority.MEDIUM,
+                            created: Date.now(),
+                            updated: Date.now(),
+                            metadata: {
+                                fileContext: await this.fileAnalyzer.analyzeFile(document.uri),
+                                codeAnalysis: await this.codeAnalyzer.analyzeCode(document.uri, await this.fileAnalyzer.analyzeFile(document.uri))
+                            }
+                        });
+                        this.showReady('Code refactoring complete');
+                    } else {
+                        this.showError('Refactoring executor not available');
+                    }
+                } catch (error) {
+                    this.showError(`Refactoring error: ${error instanceof Error ? error.message : String(error)}`);
+                    console.error('Error during code refactoring:', error);
+                }
+            }),
+            
+            // Explain Code command
+            vscode.commands.registerCommand('smile-ai.explainCode', async () => {
+                try {
+                    this.showLoading('Explaining code...');
+                    const editor = vscode.window.activeTextEditor;
+                    
+                    if (!editor) {
+                        vscode.window.showErrorMessage('No active editor');
+                        this.showError('No active editor');
+                        return;
+                    }
+                    
+                    const document = editor.document;
+                    const executor = this.taskExecutors.get(TaskType.EXPLANATION);
+                    
+                    if (executor) {
+                        await executor.execute({
+                            id: Date.now().toString(),
+                            type: TaskType.EXPLANATION,
+                            description: 'Explain the current file',
+                            status: TaskStatus.PENDING,
+                            priority: TaskPriority.MEDIUM,
+                            created: Date.now(),
+                            updated: Date.now(),
+                            metadata: {
+                                fileContext: await this.fileAnalyzer.analyzeFile(document.uri),
+                                codeAnalysis: await this.codeAnalyzer.analyzeCode(document.uri, await this.fileAnalyzer.analyzeFile(document.uri))
+                            }
+                        });
+                        this.showReady('Code explanation complete');
+                    } else {
+                        this.showError('Explanation executor not available');
+                    }
+                } catch (error) {
+                    this.showError(`Explanation error: ${error instanceof Error ? error.message : String(error)}`);
+                    console.error('Error during code explanation:', error);
+                }
+            }),
+            
+            // Reindex Codebase command
+            vscode.commands.registerCommand('smile-ai.reindexCodebase', async () => {
+                try {
+                    this.showLoading('Reindexing codebase...');
+                    await this.codebaseIndexer.indexWorkspace();
+                    this.showReady('Codebase reindexing complete');
+                    vscode.window.showInformationMessage('Codebase reindexing complete');
+                } catch (error) {
+                    this.showError(`Reindexing error: ${error instanceof Error ? error.message : String(error)}`);
+                    console.error('Error during codebase reindexing:', error);
+                }
+            }),
+            
+            // Note Future Improvement
+            vscode.commands.registerCommand('smile-ai.noteImprovement', async () => {
+                try {
+                    const executor = this.taskExecutors.get(TaskType.IMPROVEMENT_NOTE);
+                    
+                    const editor = vscode.window.activeTextEditor;
+                    if (!editor) {
+                        vscode.window.showErrorMessage('No active editor');
+                        return;
+                    }
+                    
+                    if (executor) {
+                        const fileContext = await this.fileAnalyzer.analyzeFile(editor.document.uri);
+                        const codeAnalysis = await this.codeAnalyzer.analyzeCode(editor.document.uri, fileContext);
+                        await executor.execute({
+                            id: Date.now().toString(),
+                            type: TaskType.IMPROVEMENT_NOTE,
+                            description: 'Note improvement for the current file',
+                            status: TaskStatus.PENDING,
+                            priority: TaskPriority.MEDIUM,
+                            created: Date.now(),
+                            updated: Date.now(),
+                            metadata: {
+                                fileContext,
+                                codeAnalysis
+                            }
+                        });
+                    } else {
+                        vscode.window.showErrorMessage('Improvement note executor not available');
+                    }
+                } catch (error) {
+                    console.error('Error noting improvement:', error);
+                    vscode.window.showErrorMessage(`Error noting improvement: ${error instanceof Error ? error.message : String(error)}`);
+                }
+            }),
+            
+            vscode.commands.registerCommand('smile-ai.markImprovementDone', (item) => {
+                if (item && item.id) {
+                    this.improvementManager.updateNoteStatus(item.id, 'done');
+                    this.improvementProvider.refresh();
+                }
+            }),
+            
+            vscode.commands.registerCommand('smile-ai.dismissImprovement', (item) => {
+                if (item && item.id) {
+                    this.improvementManager.updateNoteStatus(item.id, 'dismissed');
+                    this.improvementProvider.refresh();
+                }
+            }),
+            
+            vscode.commands.registerCommand('smile-ai.setImprovementPriority', async (item) => {
+                if (item && item.id) {
+                    const priorities = ['low', 'medium', 'high', 'none'];
+                    const selected = await vscode.window.showQuickPick(priorities, {
+                        placeHolder: 'Select priority level'
+                    });
+                    
+                    if (selected) {
+                        this.improvementManager.updateNotePriority(item.id, selected as 'low' | 'medium' | 'high' | 'none');
+                        this.improvementProvider.refresh();
+                    }
+                }
+            }),
+            
+            // Add/remove/select model commands - Pass to modelManager
+            vscode.commands.registerCommand('smile-ai.addModel', async () => {
+                await this.modelManager.promptAddModel();
+                
+                // Check if AIAssistantPanel exists and update models
+                if (this.aiAssistantPanel) {
+                    //this.aiAssistantPanel.updateModels();
+                }
+            }),
+            
+            vscode.commands.registerCommand('smile-ai.removeModel', async () => {
+                await this.modelManager.removeModel((await this.modelManager.getActiveModel())?.name || '');
+                
+                // Check if AIAssistantPanel exists and update models
+                if (this.aiAssistantPanel) {
+                    //this.aiAssistantPanel.updateModels();
+                }
+            }),
+            
+            vscode.commands.registerCommand('smile-ai.selectActiveModel', async () => {
+                await this.modelManager.promptSelectActiveModel();
+                
+                // Update AI Engine with new model if changed
+                const activeModel = this.modelManager.getActiveModel();
+                if (activeModel) {
+                    // Update the AI engine configuration
+                    const aiConfig = {
+                        provider: {
+                            name: activeModel.provider,
+                            modelName: activeModel.modelName,
+                            apiEndpoint: activeModel.apiEndpoint
+                        },
+                        maxTokens: activeModel.maxTokens || 2048,
+                        temperature: activeModel.temperature || 0.7
+                    };
+                    this.aiEngine.updateConfig(aiConfig);
+                }
+                
+                // Check if AIAssistantPanel exists and update models
+                if (this.aiAssistantPanel) {
+                    //this.aiAssistantPanel.updateModels();
+                }
+            }),
+            
+            // Add command to send a chat message with ctrl+enter
+            vscode.commands.registerCommand('smile-ai.sendChatMessage', () => {
+                console.log('Command smile-ai.sendChatMessage called');
+                // This command will be intercepted by the webview and handled there
+                if (this.aiAssistantPanel) {
+                    console.log('AIAssistantPanel found, sending message to webview');
+                    this.aiAssistantPanel.sendMessageToWebview({
+                        command: 'triggerSendMessage'
+                    });
+                } else {
+                    console.log('AIAssistantPanel not found, focusing and retrying');
+                    // If the AIAssistantPanel is not active, focus it first
+                    vscode.commands.executeCommand('smile-ai.assistant.focus');
+                    // Give it a moment to activate before sending the command
+                    setTimeout(() => {
+                        if (this.aiAssistantPanel) {
+                            console.log('AIAssistantPanel now available, sending message');
+                            this.aiAssistantPanel.sendMessageToWebview({
+                                command: 'triggerSendMessage'
+                            });
+                        } else {
+                            console.warn('AIAssistantPanel still not available after focus');
+                        }
+                    }, 500);
+                }
+            })
         );
     }
 
     // Helper methods to work with private AIAssistantPanel methods
-    private attachFile(): void {
-        if (this.aiAssistantPanel) {
-            vscode.commands.executeCommand('smile-ai.assistant.focus');
-            vscode.commands.executeCommand('smile-ai.assistant.attachFile');
-        }
-    }
-
-    private attachFolder(): void {
-        if (this.aiAssistantPanel) {
-            vscode.commands.executeCommand('smile-ai.assistant.focus');
-            vscode.commands.executeCommand('smile-ai.assistant.attachFolder');
-        }
-    }
-
     public dispose() {
         this.statusBarItem.dispose();
         // Dispose the completion manager

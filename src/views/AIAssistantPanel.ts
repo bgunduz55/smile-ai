@@ -227,7 +227,8 @@ export class AIAssistantPanel {
         try {
             console.log("Handling user message with options:", JSON.stringify({
                 hasAttachments: options && options.attachments ? options.attachments.length : 0,
-                originalText: options.originalText || text
+                originalText: options.originalText || text,
+                includeCodebaseContext: !!options?.includeCodebaseContext
             }));
             
             // Check if the message already contains file content
@@ -235,6 +236,51 @@ export class AIAssistantPanel {
                                        (text.includes('### File:') || 
                                         text.includes('# ') || 
                                         text.includes('## '));
+
+            // If we need to include codebase context based on Ctrl+Enter
+            if (options?.includeCodebaseContext && !containsFileContent && 
+                (!options.attachments || options.attachments.length === 0)) {
+                console.log("Including codebase context automatically (Ctrl+Enter request)");
+
+                // Get the active editor file as context if available
+                const editor = vscode.window.activeTextEditor;
+                if (editor) {
+                    try {
+                        const filePath = editor.document.uri.fsPath;
+                        console.log(`Including active file as context: ${filePath}`);
+                        
+                        // Create attachment for the active file
+                        if (!options.attachments) {
+                            options.attachments = [];
+                        }
+                        
+                        const fileContent = editor.document.getText();
+                        options.attachments.push({
+                            type: 'file',
+                            path: filePath,
+                            name: path.basename(filePath),
+                            content: fileContent
+                        });
+                        
+                        // Also add to codebase indexer
+                        await this.codebaseIndexer.attachFile(filePath);
+                        console.log(`Added active file to context: ${filePath}, length: ${fileContent.length} characters`);
+                    } catch (err) {
+                        console.error("Error adding active file to context:", err);
+                    }
+                    
+                    // Add project structure summary
+                    try {
+                        const projectInfo = await this.getSummaryOfProject();
+                        if (projectInfo) {
+                            text = `${text}\n\nCodebase Context:\n${projectInfo}`;
+                            console.log("Added project structure summary to message");
+                        }
+                    } catch (err) {
+                        console.error("Error creating project summary:", err);
+                    }
+                }
+            }
             
             // Process attachments if they exist and the message doesn't already have file content
             if (!containsFileContent && options && options.attachments && Array.isArray(options.attachments) && options.attachments.length > 0) {
@@ -772,7 +818,12 @@ export class AIAssistantPanel {
     }
 
     public sendMessageToWebview(message: any): void {
-        WebviewManager.getInstance().sendMessage('assistant', message);
+        if (this.webviewView?.webview) {
+            console.log('Sending message to webview:', message);
+            this.webviewView.webview.postMessage(message);
+        } else {
+            console.warn('Cannot send message to webview: webview not available');
+        }
     }
 
     public addMessage(message: AIMessage): void {
@@ -810,5 +861,39 @@ export class AIAssistantPanel {
                 this.handleAttachFolder();
             })
         );
+    }
+
+    private async getSummaryOfProject(): Promise<string | null> {
+        try {
+            const workspaceFolders = vscode.workspace.workspaceFolders;
+            if (!workspaceFolders || workspaceFolders.length === 0) {
+                return null;
+            }
+            
+            let summary = "Project Structure:\n";
+            
+            // Get top-level structure
+            for (const folder of workspaceFolders) {
+                summary += `\n📁 ${folder.name}\n`;
+                
+                // Get key files
+                const pattern = new vscode.RelativePattern(folder, "{package.json,tsconfig.json,*.md,src/**/*.ts,src/**/*.js}");
+                const files = await vscode.workspace.findFiles(pattern, "**/node_modules/**", 50);
+                
+                // Sort files by path to organize them
+                files.sort((a, b) => a.fsPath.localeCompare(b.fsPath));
+                
+                // List key files
+                for (const file of files) {
+                    const relativePath = path.relative(folder.uri.fsPath, file.fsPath);
+                    summary += `  • ${relativePath}\n`;
+                }
+            }
+            
+            return summary;
+        } catch (error) {
+            console.error("Error generating project summary:", error);
+            return null;
+        }
     }
 } 
