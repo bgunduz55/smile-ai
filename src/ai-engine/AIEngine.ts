@@ -7,6 +7,7 @@ import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
 import { RAGService } from '../indexing/RAGService';
+import { ResponseCache } from './ResponseCache';
 
 export interface AIEngineConfig {
     provider: {
@@ -27,6 +28,8 @@ export interface ProcessMessageOptions {
         includeImports?: boolean;
         includeTips?: boolean;
         includeTests?: boolean;
+        stream?: boolean;
+        onChunk?: (chunk: string) => void;
     };
     codebaseIndex?: CodebaseIndex;
 }
@@ -42,16 +45,35 @@ export class AIEngine {
     private conversationHistory: AIMessage[] = [];
     private ragService: RAGService | null = null;
     private codebaseIndex: CodebaseIndex | null = null;
+    private responseCache: ResponseCache;
+    private streamingEnabled: boolean = true;
+    private responseChunkSize: number = 200;
 
     constructor(config: AIEngineConfig) {
         this.config = config;
+        this.responseCache = ResponseCache.getInstance();
+        this.updatePerformanceSettings();
+        
+        vscode.workspace.onDidChangeConfiguration(e => {
+            if (e.affectsConfiguration('smile-ai.performance')) {
+                this.updatePerformanceSettings();
+            }
+        });
     }
 
-    // Initialize RAG service with a codebase index
+    private updatePerformanceSettings(): void {
+        const config = vscode.workspace.getConfiguration('smile-ai');
+        const perfConfig = config.get<any>('performance', {});
+        
+        this.streamingEnabled = perfConfig.enableStreamingResponses !== false;
+        this.responseChunkSize = perfConfig.responseChunkSize || 200;
+        
+        console.log(`AI Engine performance settings: streaming=${this.streamingEnabled}, chunkSize=${this.responseChunkSize}`);
+    }
+
     public initRAG(codebaseIndex: CodebaseIndex): void {
         this.codebaseIndex = codebaseIndex;
         this.ragService = RAGService.getInstance(this, codebaseIndex);
-        // Set RAG enabled based on config
         if (this.ragService && this.config.enableRAG !== undefined) {
             this.ragService.setEnabled(this.config.enableRAG);
         }
@@ -73,15 +95,48 @@ export class AIEngine {
 
     public async processMessage(text: string, options: ProcessOptions): Promise<string> {
         try {
-            // Check if we have file attachments
             const hasAttachments = options?.options?.attachments?.length > 0;
             
-            // Standard message processing
-            console.log('Processing message with attachments:', hasAttachments);
-            const response = await this.sendRequest(text, options, 'chat');
+            let queryEmbedding: number[] | null = null;
             
-            // Process any file updates found in the response, regardless of request type
+            if (!hasAttachments) {
+                try {
+                    queryEmbedding = await this.generateEmbeddings(text);
+                    
+                    if (queryEmbedding) {
+                        const cachedResponse = this.responseCache.findSimilarResponse(
+                            text, 
+                            queryEmbedding, 
+                            'chat'
+                        );
+                        
+                        if (cachedResponse) {
+                            console.log('Found cached response, returning immediately');
+                            return cachedResponse;
+                        }
+                    }
+                } catch (error) {
+                    console.warn('Error generating embedding for cache check:', error);
+                }
+            }
+            
+            console.log('Processing message with attachments:', hasAttachments);
+            
+            const shouldStream = this.streamingEnabled && options?.options?.stream === true;
+            const onChunk = options?.options?.onChunk;
+            
+            let response;
+            if (shouldStream && onChunk) {
+                response = await this.sendStreamingRequest(text, options, 'chat', onChunk);
+            } else {
+                response = await this.sendRequest(text, options, 'chat');
+            }
+            
             await this.processFileOperations(response);
+            
+            if (queryEmbedding && !hasAttachments) {
+                this.responseCache.addResponse(text, queryEmbedding, response, 'chat');
+            }
             
             return response;
         } catch (error) {
@@ -91,12 +146,9 @@ export class AIEngine {
     }
 
     public async processAgentMessage(message: string, options: ProcessOptions): Promise<string> {
-        // Agent mode processing - more autonomous and can take actions
         try {
-            // First get the response from the AI
             const response = await this.sendRequest(message, options, 'agent');
             
-            // Process file operations, using the same generic method
             await this.processFileOperations(response);
             
             return response;
@@ -107,7 +159,6 @@ export class AIEngine {
     }
 
     public async processAskMessage(message: string, options: ProcessOptions): Promise<string> {
-        // Ask mode processing - focused on answering questions about code
         return await this.sendRequest(message, options, 'ask');
     }
 
@@ -115,16 +166,13 @@ export class AIEngine {
         try {
             console.log(`Sending ${mode} request to ${this.config.provider.name} at ${this.config.provider.apiEndpoint}`);
             
-            // Create a copy of the message for enhancement
             let enhancedMessage = message;
             
-            // Check if the message already contains file content markers
             const containsFileContent = message.includes('```') && 
                                       (message.includes('### File:') || 
                                        message.includes('# ') || 
                                        message.includes('## '));
             
-            // Handle file attachments
             const hasAttachments = options?.options?.attachments?.length > 0;
             if (hasAttachments && !containsFileContent) {
                 const attachmentsWithContent = options?.options?.attachments?.filter((a: any) => a.type === 'file' && a.content) || [];
@@ -133,17 +181,14 @@ export class AIEngine {
                     console.log(`Enhancing message with ${attachmentsWithContent.length} file attachments`);
                     enhancedMessage += "\n\n";
                     
-                    // Add file content
                     attachmentsWithContent.forEach((attachment: any) => {
                         const fileName = attachment.name || attachment.path.split(/[\/\\]/).pop() || 'file';
                         console.log(`Adding content for ${fileName} to message`);
                         enhancedMessage += `### File: ${fileName}\n\`\`\`\n${attachment.content}\n\`\`\`\n\n`;
                     });
                     
-                    // Check if this is a translation request
                     const isTranslationRequest = this.isTranslationRequest(message);
                     
-                    // For translation requests, add clear instructions
                     if (isTranslationRequest) {
                         enhancedMessage += "\nPlease translate the content of these files and return the full translated content in code blocks with the original file names. Your response will be used to update the original files.";
                     }
@@ -152,13 +197,11 @@ export class AIEngine {
                 }
             }
             
-            // Check if user is asking about the codebase
             const isCodebaseQuery = message.toLowerCase().includes('codebase') || 
                                   message.startsWith('@') || 
                                   message.includes('code base') || 
                                   message.includes('kod taban');
             
-            // Prepare relevant codebase context using RAG if available
             let codebaseContext = '';
             if (isCodebaseQuery) {
                 if (this.ragService && this.ragService.isEnabled()) {
@@ -171,7 +214,6 @@ export class AIEngine {
                 }
             }
             
-            // Check if we're using Ollama and use the correct endpoint
             let endpoint = this.config.provider.apiEndpoint;
             
             if (this.config.provider.name === 'ollama') {
@@ -180,13 +222,11 @@ export class AIEngine {
                 endpoint = `${this.config.provider.apiEndpoint}/v1/chat/completions`;
             }
             
-            // Construct system prompt with codebase context if available
             let systemPrompt = this.getSystemPrompt(mode);
             if (codebaseContext) {
                 systemPrompt += `\n\nHere is information about the codebase:\n${codebaseContext}`;
             }
 
-            // Include conversation history if provided
             let contextualHistory = '';
             if (options.contextHistory && options.contextHistory.length > 0) {
                 contextualHistory = "\n\nHere is some context from previous messages:\n";
@@ -200,11 +240,8 @@ export class AIEngine {
                 systemPrompt += contextualHistory;
             }
             
-            // Create a clean copy of options to avoid duplication
             const cleanOptions = options.options || {};
             
-            // If message is already enhanced with file content, remove attachments 
-            // to prevent duplication in the request body
             if (enhancedMessage !== message) {
                 console.log('Message already enhanced with attachments, clearing attachments in request body');
                 if (cleanOptions.attachments) {
@@ -212,7 +249,6 @@ export class AIEngine {
                 }
             }
             
-            // Construct the request body with options
             const requestBody = this.config.provider.name === 'ollama' ? {
                 model: this.config.provider.modelName,
                 prompt: `${systemPrompt}\n\nUser: ${enhancedMessage}\n\nAssistant:`,
@@ -236,15 +272,12 @@ export class AIEngine {
                 codebaseIndex: options.codebaseIndex || null
             };
 
-            // Log the complete request body for debugging
             console.log('Request body:', JSON.stringify(requestBody));
 
-            // Try to make API request with timeout
             const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 180000); // Increased timeout to 3 minutes
+            const timeoutId = setTimeout(() => controller.abort(), 180000);
             
             try {
-                // Make the API request
                 const response = await fetch(endpoint, {
                     method: 'POST',
                     headers: {
@@ -261,30 +294,25 @@ export class AIEngine {
                 }
 
                 const data = await response.json();
-                console.log('Received response:', data); // Log the response for debugging
+                console.log('Received response:', data);
                 
-                // Process response based on provider
                 let content = '';
                 if (this.config.provider.name === 'ollama') {
                     content = data.response || data.message?.content || 'No response content received';
-                    // Clean up any <think> tags that might be in the response
                     content = content.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
                 } else {
                     content = data.choices?.[0]?.message?.content || 'No response content received';
                 }
 
-                // Log the final content
                 console.log('Processed content:', content);
                 return content;
             } catch (fetchError: unknown) {
                 console.error('Fetch error:', fetchError);
                 
-                // Handle specific error cases
                 if (fetchError instanceof Error && fetchError.name === 'AbortError') {
                     return `I couldn't get a response from the AI provider within the time limit. The request timed out after 3 minutes.\n\nPlease check that ${this.config.provider.name} is running correctly at ${this.config.provider.apiEndpoint} with the model "${this.config.provider.modelName}" and try again with a simpler request.`;
                 }
                 
-                // Provide a fallback response
                 return `I received your request in ${mode} mode, but I couldn't connect to the AI provider.\n\nPlease make sure ${this.config.provider.name} is running at ${this.config.provider.apiEndpoint} with the model "${this.config.provider.modelName}" available.`;
             } finally {
                 clearTimeout(timeoutId);
@@ -292,13 +320,11 @@ export class AIEngine {
         } catch (error) {
             console.error('Error in sendRequest:', error);
             
-            // Always return a helpful response instead of throwing
             return `I received your message: "${message.substring(0, 50)}${message.length > 50 ? '...' : ''}"\n\nHowever, there was an error processing your request. ${error instanceof Error ? error.message : 'Please try again later.'}`;
         }
     }
 
     private getSystemPrompt(mode: 'chat' | 'agent' | 'ask'): string {
-        // Check if the input message suggests a translation request
         const isTranslationMode = mode === 'chat' && this.detectTranslationRequest();
         
         if (isTranslationMode) {
@@ -353,13 +379,9 @@ export class AIEngine {
         }
     }
 
-    /**
-     * Detects if the current context indicates a translation request
-     */
     private detectTranslationRequest(): boolean {
-        // Check the most recent messages in the conversation history
         if (this.conversationHistory.length > 0) {
-            const recentMessages = this.conversationHistory.slice(-3); // Check last 3 messages
+            const recentMessages = this.conversationHistory.slice(-3);
             
             for (const message of recentMessages) {
                 if (message.role === 'user' && this.isTranslationRequest(message.content)) {
@@ -374,7 +396,6 @@ export class AIEngine {
     public updateConfig(newConfig: Partial<AIEngineConfig>) {
         this.config = { ...this.config, ...newConfig };
         
-        // Update RAG service settings if enableRAG has changed
         if (this.ragService && newConfig.enableRAG !== undefined) {
             this.ragService.setEnabled(newConfig.enableRAG);
         }
@@ -501,24 +522,17 @@ export class AIEngine {
     public async generateEmbeddings(text: string): Promise<number[]> {
         console.log("Generating embeddings for text", text.length > 50 ? text.substring(0, 50) + "..." : text);
         try {
-            // For now, generate a simple dummy embedding
-            // In a real application, you would use a proper embedding model
-            // This is just to enable the codebase indexing to function without requiring external embeddings models
-            
             console.log("Using dummy embeddings for testing purposes");
             
-            // Create a random embedding vector of length 1536 (typical for many embedding models)
             const embeddingLength = 1536;
             const embedding = new Array(embeddingLength).fill(0).map(() => Math.random() * 2 - 1);
             
-            // Normalize the embedding to unit length to mimic real embeddings
             const magnitude = Math.sqrt(embedding.reduce((sum, val) => sum + val * val, 0));
             const normalizedEmbedding = embedding.map(val => val / magnitude);
             
             return normalizedEmbedding;
         } catch (error) {
             console.error("Error generating embeddings:", error);
-            // Return a default embedding in case of error
             return new Array(1536).fill(0);
         }
     }
@@ -552,18 +566,13 @@ export class AIEngine {
         }
         
         try {
-            // Extract project name functionality planned but not implemented yet
-            
-            // Get relevant files for the query
             const files = codebaseIndex.getAllDocuments();
             if (!files || files.length === 0) {
                 return "Codebase is indexed but no files were found.";
             }
             
-            // Prepare an overview of the codebase structure
             let result = `Found ${files.length} files in the codebase.\n\n`;
             
-            // Group files by directory for better structure understanding
             const filesByDir = new Map<string, string[]>();
             files.forEach((file: IndexedFile) => {
                 const filePath = file.path;
@@ -574,16 +583,13 @@ export class AIEngine {
                 filesByDir.get(dir)?.push(filePath);
             });
             
-            // Add directory structure to the context
             result += "Directory structure:\n";
             filesByDir.forEach((files, dir) => {
                 result += `- ${dir}: ${files.length} files\n`;
             });
             
-            // Add high-level description of key files
             result += "\nKey files:\n";
             
-            // Find interesting files (like README, index, etc.)
             const keyFiles = files.filter((file: IndexedFile) => 
                 file.path.toLowerCase().includes('readme') || 
                 file.path.toLowerCase().includes('index') ||
@@ -592,13 +598,11 @@ export class AIEngine {
                 file.path.toLowerCase().includes('main')
             );
             
-            // Add snippets from key files
             keyFiles.forEach((file: IndexedFile) => {
                 const preview = file.content.substring(0, 300) + (file.content.length > 300 ? '...' : '');
                 result += `\n## ${file.path}\n${preview}\n`;
             });
             
-            // Add list of all file types in the codebase
             const fileExtensions = new Set<string>();
             files.forEach((file: IndexedFile) => {
                 const ext = file.path.split('.').pop() || '';
@@ -614,28 +618,17 @@ export class AIEngine {
         }
     }
 
-    /**
-     * Generic method to process file operations in AI responses
-     * Handles all types of file updates (translations, edits, code changes, etc.)
-     */
     private async processFileOperations(response: string): Promise<void> {
         try {
             console.log('Processing file operations in response');
             
-            // Check for file content in the response
             await this.extractAndProcessFileContent(response);
             
-            // Legacy functionality can go here if needed
-            // You can add more specific processing here if required
         } catch (error) {
             console.error('Error processing file operations:', error);
         }
     }
 
-    /**
-     * Extracts and processes file content from AI responses
-     * Handles various code block formats and file patterns
-     */
     private async extractAndProcessFileContent(response: string): Promise<void> {
         try {
             console.log('Extracting file content from response');
@@ -643,24 +636,12 @@ export class AIEngine {
             
             const fileOperationManager = FileOperationManager.getInstance();
             
-            // Regular expressions to find file blocks in various formats
             const fileBlockRegexes = [
-                // Default format: ```[language] file/path.ext content ```
                 /```(?:file|[\w-]+)?\s*(?:title=)?[`'"]?([\w\-\./\\]+\.\w+)[`'"]?\s*\n([\s\S]*?)```/g,
-                
-                // Markdown format with "### File:" and triple backticks
                 /### File: ([\w\-\./\\]+\.\w+)\s*```(?:[\w-]+)?\s*\n([\s\S]*?)```/g,
-                
-                // Markdown format with filename in block
                 /```(?:markdown|md)?\s*\n### File: ([\w\-\./\\]+\.\w+)\s*\n\n([\s\S]*?)```/g,
-                
-                // Ollama format with markdown header inside the code block
                 /```markdown\n### File: ([\w\-\./\\]+\.\w+)\s*\n([\s\S]*?)```/g,
-                
-                // Ollama gemma format
                 /```markdown\n### File: ([\w\-\./\\]+\.\w+)\n\n([\s\S]*?)```/g,
-                
-                // Generic file pattern - captures various formats
                 /File: ([\w\-\./\\]+\.\w+)[\s\n]+([\s\S]*?)(?=```|$)/g
             ];
             
@@ -687,7 +668,6 @@ export class AIEngine {
                     
                     console.log(`Found file content for: ${filePath}`);
                     
-                    // Get the absolute path
                     let absolutePath = filePath;
                     if (!path.isAbsolute(filePath)) {
                         if (vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders.length > 0) {
@@ -698,15 +678,12 @@ export class AIEngine {
                         }
                     }
                     
-                    // Check if file exists
                     const fileExists = fs.existsSync(absolutePath);
                     console.log(`File exists: ${fileExists}`);
                     
                     if (fileExists) {
-                        // Update existing file
                         const originalContent = fs.readFileSync(absolutePath, 'utf8');
                         
-                        // Only create operation if content changed
                         if (originalContent !== fileContent) {
                             const description = `Update file ${path.basename(filePath)} with AI-generated content`;
                             const operation = await fileOperationManager.createUpdateOperation(absolutePath, originalContent, fileContent, description);
@@ -717,12 +694,10 @@ export class AIEngine {
                             console.log(`File content unchanged, no update needed for ${filePath}`);
                         }
                     } else {
-                        // Create new file
                         const description = `Create new file ${path.basename(filePath)} with AI-generated content`;
                         const operation = await fileOperationManager.createAddOperation(absolutePath, fileContent, description);
                         await fileOperationManager.acceptOperation(operation.id);
                         
-                        // Create directories if they don't exist
                         const dirPath = path.dirname(absolutePath);
                         if (!fs.existsSync(dirPath)) {
                             fs.mkdirSync(dirPath, { recursive: true });
@@ -743,14 +718,9 @@ export class AIEngine {
         }
     }
 
-    /**
-     * Checks if the given message is a translation request
-     */
     private isTranslationRequest(message: string): boolean {
-        // Normalize the message for consistent matching
         const normalizedMessage = message.toLowerCase();
         
-        // Define patterns that suggest translation requests
         const translationPatterns = [
             'translate', 'translation', 'çevir', 'çeviri', 'türkçe', 
             'übersetz', 'traducir', 'tradui', 'tradução', 'traduzione',
@@ -758,12 +728,143 @@ export class AIEngine {
             'güncelleyelim'
         ];
         
-        // Check if the message contains any of the translation patterns
         const isTranslation = translationPatterns.some(pattern => normalizedMessage.includes(pattern));
         
         console.log(`Checking if message is a translation request: ${isTranslation}`, 
                    isTranslation ? `Matched pattern in: ${normalizedMessage.substring(0, 50)}...` : '');
         
         return isTranslation;
+    }
+
+    private async sendStreamingRequest(
+        message: string, 
+        options: ProcessOptions, 
+        mode: 'chat' | 'agent' | 'ask',
+        onChunk: (chunk: string) => void
+    ): Promise<string> {
+        let enhancedMessage = message;
+        
+        const containsFileContent = message.includes('```') && 
+                                  (message.includes('### File:') || 
+                                   message.includes('# ') || 
+                                   message.includes('## '));
+        
+        const hasAttachments = options?.options?.attachments?.length > 0;
+        if (hasAttachments && !containsFileContent) {
+            const attachmentsWithContent = options?.options?.attachments?.filter((a: any) => a.type === 'file' && a.content) || [];
+            
+            if (attachmentsWithContent.length > 0) {
+                enhancedMessage += "\n\n";
+                
+                attachmentsWithContent.forEach((attachment: any) => {
+                    const fileName = attachment.name || attachment.path.split(/[\/\\]/).pop() || 'file';
+                    enhancedMessage += `### File: ${fileName}\n\`\`\`\n${attachment.content}\n\`\`\`\n\n`;
+                });
+                
+                const isTranslationRequest = this.isTranslationRequest(message);
+                
+                if (isTranslationRequest) {
+                    enhancedMessage += "\nPlease translate the content of these files and return the full translated content in code blocks with the original file names.";
+                }
+            }
+        }
+        
+        let codebaseContext = '';
+        const isCodebaseQuery = message.toLowerCase().includes('codebase') || 
+                              message.startsWith('@') || 
+                              message.includes('code base');
+                              
+        if (isCodebaseQuery) {
+            if (this.ragService && this.ragService.isEnabled()) {
+                const enhancedContext = await this.ragService.enhanceQueryWithContext(message);
+                codebaseContext = enhancedContext.relevantContext;
+            } else if (options.codebaseIndex) {
+                codebaseContext = this.prepareCodebaseContext(message, options.codebaseIndex);
+            }
+        }
+        
+        let systemPrompt = this.getSystemPrompt(mode);
+        if (codebaseContext) {
+            systemPrompt += `\n\nHere is information about the codebase:\n${codebaseContext}`;
+        }
+        
+        let contextualHistory = '';
+        if (options.contextHistory && options.contextHistory.length > 0) {
+            contextualHistory = "\n\nHere is some context from previous messages:\n";
+            options.contextHistory.forEach(msg => {
+                contextualHistory += `${msg.role === 'user' ? 'User' : 'Assistant'}: ${msg.content}\n`;
+            });
+            contextualHistory += "\nPlease consider the above context when responding.";
+        }
+        
+        if (contextualHistory) {
+            systemPrompt += contextualHistory;
+        }
+        
+        const cleanOptions = options.options || {};
+        
+        if (this.config.provider.name === 'ollama') {
+            let endpoint = `${this.config.provider.apiEndpoint}/api/generate`;
+            
+            const requestBody = {
+                model: this.config.provider.modelName,
+                prompt: `${systemPrompt}\n\nUser: ${enhancedMessage}\n\nAssistant:`,
+                stream: true,
+                options: {
+                    ...cleanOptions,
+                    num_predict: this.responseChunkSize
+                }
+            };
+            
+            try {
+                let fullResponse = '';
+                
+                const response = await fetch(endpoint, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(requestBody)
+                });
+                
+                if (!response.body) {
+                    throw new Error('Response body is null');
+                }
+                
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
+                
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+                    
+                    const chunk = decoder.decode(value, { stream: true });
+                    try {
+                        const lines = chunk.split('\n');
+                        
+                        for (const line of lines) {
+                            if (line.trim() === '') continue;
+                            
+                            const jsonResponse = JSON.parse(line);
+                            
+                            if (jsonResponse.response) {
+                                fullResponse += jsonResponse.response;
+                                
+                                onChunk(jsonResponse.response);
+                            }
+                        }
+                    } catch (parseError) {
+                        console.warn('Error parsing streaming chunk:', parseError);
+                    }
+                }
+                
+                return fullResponse;
+            } catch (error) {
+                console.error('Error in streaming request:', error);
+                throw error;
+            }
+        } else {
+            return await this.sendRequest(message, options, mode);
+        }
     }
 } 

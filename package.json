@@ -97,6 +97,18 @@
         "title": "Smile AI: Reindex Codebase"
       },
       {
+        "command": "smile-ai.toggleCodeCompletion",
+        "title": "Toggle Code Completion",
+        "category": "Smile AI",
+        "icon": "$(light-bulb)"
+      },
+      {
+        "command": "smile-ai.toggleInlineCompletion",
+        "title": "Toggle Inline Completion",
+        "category": "Smile AI",
+        "icon": "$(lightbulb-autofix)"
+      },
+      {
         "command": "smile-ai.addModel",
         "title": "Add AI Model",
         "category": "Smile AI"
@@ -155,6 +167,11 @@
         "title": "Ask/Edit/Agent",
         "category": "Smile AI",
         "icon": "$(comment)"
+      },
+      {
+        "command": "smile-ai.sendChatMessage",
+        "title": "Send Chat Message",
+        "category": "Smile AI"
       }
     ],
     "menus": {
@@ -212,6 +229,12 @@
         "command": "smile-ai.switchMode",
         "key": "ctrl+shift+m",
         "mac": "cmd+shift+m"
+      },
+      {
+        "command": "smile-ai.sendChatMessage",
+        "key": "ctrl+enter",
+        "mac": "cmd+enter",
+        "when": "view == smile-ai.assistant && focusedView == smile-ai.assistant"
       }
     ],
     "configuration": {
@@ -346,48 +369,112 @@
         },
         "smile-ai.behavior": {
           "type": "object",
-          "description": "Behavior settings",
+          "description": "Behavior settings for the extension",
           "properties": {
             "autoComplete": {
               "type": "boolean",
               "default": true,
-              "description": "Enable auto-completion suggestions"
+              "description": "Enable AI-powered code completion in the editor"
             },
             "inlineCompletion": {
               "type": "boolean",
               "default": true,
-              "description": "Show inline completion suggestions"
+              "description": "Enable AI-powered inline completions (ghost text)"
             },
             "autoImport": {
               "type": "boolean",
               "default": true,
-              "description": "Automatically add imports for suggestions"
+              "description": "Automatically add imports for code completions when possible"
+            },
+            "enableAgent": {
+              "type": "boolean",
+              "default": true,
+              "description": "Enable AI agent functionality for assistant view"
+            }
+          }
+        },
+        "smile-ai.performance": {
+          "type": "object",
+          "description": "Performance settings for the extension",
+          "properties": {
+            "enableStreamingResponses": {
+              "type": "boolean",
+              "default": true,
+              "description": "Enable streaming responses for faster initial feedback (when supported by provider)"
+            },
+            "responseChunkSize": {
+              "type": "number",
+              "default": 200,
+              "description": "Maximum number of tokens to request in each chunk when streaming is enabled"
+            },
+            "cacheResponses": {
+              "type": "boolean",
+              "default": true,
+              "description": "Cache AI responses for similar queries to improve performance"
+            },
+            "maxCacheSize": {
+              "type": "number",
+              "default": 50,
+              "description": "Maximum number of responses to keep in the cache"
+            },
+            "indexingBatchSize": {
+              "type": "number",
+              "default": 20,
+              "description": "Number of files to process in a batch during codebase indexing"
+            },
+            "contextWindow": {
+              "type": "number",
+              "default": 10000,
+              "description": "Maximum number of tokens to use for context window (adjust based on your model's capabilities)"
             }
           }
         },
         "smile-ai.shortcuts": {
           "type": "object",
-          "description": "Keyboard shortcut settings",
+          "description": "Keyboard shortcuts for completion features",
           "properties": {
-            "toggleAssistant": {
-              "type": "string",
-              "default": "ctrl+shift+space",
-              "description": "Toggle AI Assistant panel"
-            },
             "acceptSuggestion": {
               "type": "string",
               "default": "tab",
-              "description": "Accept current suggestion"
+              "description": "Keyboard shortcut to accept the current suggestion"
             },
             "nextSuggestion": {
               "type": "string",
               "default": "alt+]",
-              "description": "Move to next suggestion"
+              "description": "Keyboard shortcut to navigate to the next suggestion"
             },
             "previousSuggestion": {
               "type": "string",
               "default": "alt+[",
-              "description": "Move to previous suggestion"
+              "description": "Keyboard shortcut to navigate to the previous suggestion"
+            },
+            "toggleAssistant": {
+              "type": "string",
+              "default": "ctrl+shift+space",
+              "description": "Keyboard shortcut to toggle the AI assistant"
+            }
+          }
+        },
+        "smile-ai.completion": {
+          "type": "object",
+          "description": "Settings for the code completion feature",
+          "properties": {
+            "maxTokens": {
+              "type": "number",
+              "default": 100,
+              "description": "Maximum tokens to use for code completion requests"
+            },
+            "temperature": {
+              "type": "number",
+              "default": 0.2,
+              "minimum": 0,
+              "maximum": 1,
+              "description": "Temperature setting for code completions (lower means more deterministic)"
+            },
+            "debounceTime": {
+              "type": "number",
+              "default": 300,
+              "description": "Time in milliseconds to wait after typing before requesting completions"
             }
           }
         },
@@ -427,6 +514,7 @@
     "jest-environment-node": "^29.7.0",
     "mocha": "^10.2.0",
     "style-loader": "^4.0.0",
+    "terser-webpack-plugin": "^5.3.14",
     "ts-jest": "^29.1.2",
     "ts-loader": "^9.5.1",
     "typescript": "^5.8.3",
