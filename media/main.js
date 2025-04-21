@@ -242,7 +242,7 @@
     }
 
     // Function to add message to the chat
-    function addMessage(role, content) {
+    function addMessage(role, content, id) {
         // Safety check for content
         if (content === undefined || content === null) {
             console.warn("Received null or undefined content in addMessage");
@@ -253,6 +253,12 @@
         
         const messageElement = document.createElement('div');
         messageElement.classList.add('message', role);
+        
+        // Add message ID as data attribute if available
+        if (id) {
+            messageElement.setAttribute('data-message-id', id);
+            log(`Added message with ID: ${id}`);
+        }
         
         const avatar = document.createElement('div');
         avatar.classList.add('avatar');
@@ -284,6 +290,12 @@
             const markdownContent = document.createElement('div');
             markdownContent.classList.add('markdown-content');
             markdownContent.innerHTML = processedContent;
+            
+            // Add event listeners to copy buttons
+            const copyButtons = markdownContent.querySelectorAll('.copy-code-button');
+            copyButtons.forEach(button => {
+                button.addEventListener('click', handleCodeCopy);
+            });
             
             messageContent.appendChild(markdownContent);
         } catch (error) {
@@ -317,8 +329,20 @@
         // Replace code blocks with properly formatted HTML
         return content.replace(/```(\w+)?\n([\s\S]*?)```/g, (match, language, code) => {
             const languageClass = language ? `language-${language}` : '';
-            return `<pre class="code-block ${languageClass}"><code>${escapeHtml(code)}</code></pre>`;
-        });
+            const languageLabel = language ? `<span class="language-label">${language}</span>` : '';
+            
+            return `<div class="code-block ${languageClass}">
+                <div class="code-header">
+                    ${languageLabel}
+                    <button class="copy-code-button" title="Copy code">
+                        <i class="codicon codicon-copy"></i>
+                    </button>
+                </div>
+                <pre><code>${escapeHtml(code)}</code></pre>
+            </div>`;
+        })
+        // Also handle inline code with single backticks
+        .replace(/`([^`\n]+)`/g, '<code class="inline-code">$1</code>');
     }
 
     // Escape HTML special characters
@@ -560,11 +584,21 @@
                     if (message.message && typeof message.message === 'object') {
                         addMessage(
                             message.message.role || 'system', 
-                            message.message.content || 'No content provided'
+                            message.message.content || 'No content provided',
+                            message.message.id // Pass message ID for later updates
                         );
                     } else {
                         console.warn('Received invalid message object:', message.message);
                         addMessage('error', 'Error: Invalid message format received');
+                    }
+                    break;
+                
+                case 'updateMessage':
+                    if (message.id && message.content !== undefined) {
+                        log(`Updating message ${message.id} with content length: ${message.content.length}`);
+                        updateMessage(message.id, message.content);
+                    } else {
+                        console.warn('Received invalid updateMessage data:', message);
                     }
                     break;
                     
@@ -575,7 +609,8 @@
                             if (msg && typeof msg === 'object') {
                                 addMessage(
                                     msg.role || 'system',
-                                    msg.content || 'No content provided'
+                                    msg.content || 'No content provided',
+                                    msg.id
                                 );
                             }
                         });
@@ -987,6 +1022,91 @@
                 updateAttachmentsUI();
             }
         }
+    }
+
+    // Function to update an existing message by ID
+    function updateMessage(messageId, content) {
+        if (!messageId || content === undefined) {
+            console.warn('Invalid parameters for updateMessage:', { messageId, contentLength: content ? content.length : 0 });
+            return;
+        }
+        
+        const messageElement = document.querySelector(`.message[data-message-id="${messageId}"]`);
+        if (!messageElement) {
+            console.warn(`Message element with ID ${messageId} not found`);
+            // Create a new message if it doesn't exist
+            if (content) {
+                addMessage('assistant', content, messageId);
+            }
+            return;
+        }
+        
+        const markdownContent = messageElement.querySelector('.markdown-content');
+        if (!markdownContent) {
+            console.warn(`No markdown content found in message with ID ${messageId}`);
+            return;
+        }
+        
+        try {
+            // Process content for code blocks
+            const processedContent = processCodeBlocks(content);
+            
+            // Show streaming indicator
+            messageElement.setAttribute('data-is-streaming', 'true');
+            
+            // Update the content
+            markdownContent.innerHTML = processedContent;
+            
+            // Add event listeners to any new copy buttons in code blocks
+            const copyButtons = markdownContent.querySelectorAll('.copy-code-button');
+            copyButtons.forEach(button => {
+                button.addEventListener('click', handleCodeCopy);
+            });
+            
+            // Check if this is the final update (content ends with a period, question mark, or new line)
+            const isComplete = /[.?!]\s*$/.test(content) || content.endsWith('\n');
+            
+            if (isComplete) {
+                // Remove streaming indicator if message seems complete
+                messageElement.removeAttribute('data-is-streaming');
+            }
+            
+            // Scroll to bottom
+            const chatContainer = document.querySelector('.chat-container .messages');
+            if (chatContainer) {
+                chatContainer.scrollTop = chatContainer.scrollHeight;
+            }
+            
+            log(`Updated message ${messageId} (content length: ${content.length})`);
+        } catch (error) {
+            console.error(`Error updating message ${messageId}:`, error);
+        }
+    }
+
+    // Handle code copy button clicks
+    function handleCodeCopy(event) {
+        const button = event.target;
+        const codeBlock = button.closest('.code-block');
+        if (!codeBlock) return;
+        
+        const codeElement = codeBlock.querySelector('code');
+        if (!codeElement) return;
+        
+        const code = codeElement.innerText;
+        
+        // Copy to clipboard
+        navigator.clipboard.writeText(code)
+            .then(() => {
+                // Show success feedback
+                const originalText = button.innerText;
+                button.innerText = 'Copied!';
+                setTimeout(() => {
+                    button.innerText = originalText;
+                }, 1500);
+            })
+            .catch(err => {
+                console.error('Failed to copy code:', err);
+            });
     }
 
     log("Initialization script loaded");

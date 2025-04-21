@@ -7,6 +7,8 @@ export interface TaskMetadata {
     codeAnalysis: CodeAnalysis;
     taskAnalysis?: any;
     subtaskAnalysis?: any;
+    planId?: any;
+    completedAt?: any;
     [key: string]: any;
 }
 

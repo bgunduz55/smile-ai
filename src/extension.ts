@@ -22,6 +22,8 @@ import { ModelManager } from './utils/ModelManager';
 import { AIEngineConfig } from './ai-engine/AIEngineConfig';
 import { RAGService } from './indexing/RAGService';
 import { CompletionManager } from './completion/CompletionManager';
+import { AgentCommandHandler } from './agent/AgentCommandHandler';
+import { TaskManager } from './agent/TaskManager';
 
 // Export the main extension class
 export class SmileAIExtension {
@@ -205,6 +207,19 @@ export class SmileAIExtension {
 
             // Add other initialization tasks here
             this.showReady('Smile AI ready');
+
+            // Initialize the Task Manager
+            const taskManager = new TaskManager();
+            
+            // Initialize the Agent Command Handler
+            const agentCommandHandler = new AgentCommandHandler(
+                this.aiEngine,
+                taskManager,
+                this.codebaseIndexer
+            );
+            
+            // Register agent commands
+            agentCommandHandler.registerCommands(this.context);
         } catch (error) {
             this.showError(`Initialization error: ${error instanceof Error ? error.message : String(error)}`);
             console.error('Initialization error:', error);

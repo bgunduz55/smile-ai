@@ -172,6 +172,16 @@
         "command": "smile-ai.sendChatMessage",
         "title": "Send Chat Message",
         "category": "Smile AI"
+      },
+      {
+        "command": "smileai.runAgentCommand",
+        "title": "Smile AI: Run Agent Command",
+        "category": "Smile AI"
+      },
+      {
+        "command": "smileai.runAgentWithSelection",
+        "title": "Smile AI: Run Agent with Selection",
+        "category": "Smile AI"
       }
     ],
     "menus": {
@@ -197,6 +207,13 @@
           "command": "smile-ai.dismissImprovement",
           "when": "view == smile-ai.futureImprovements && viewItem == improvementNotePending",
           "group": "2_status"
+        }
+      ],
+      "editor/context": [
+        {
+          "command": "smileai.runAgentWithSelection",
+          "when": "editorHasSelection",
+          "group": "smileai"
         }
       ]
     },
@@ -417,6 +434,31 @@
               "default": 50,
               "description": "Maximum number of responses to keep in the cache"
             },
+            "skipEmbeddingCheck": {
+              "type": "boolean",
+              "default": true,
+              "description": "Skip slow embedding similarity check in cache and use faster hash-based matching (improves chat responsiveness)"
+            },
+            "adaptiveThreshold": {
+              "type": "boolean",
+              "default": true,
+              "description": "Automatically adjust similarity threshold based on cache hit rate"
+            },
+            "similarityThreshold": {
+              "type": "number",
+              "default": 0.92,
+              "description": "Minimum similarity score (0-1) for considering a cached response"
+            },
+            "minSimilarityThreshold": {
+              "type": "number",
+              "default": 0.85,
+              "description": "Minimum possible similarity threshold when using adaptive adjustment"
+            },
+            "parallelProcessingEnabled": {
+              "type": "boolean",
+              "default": true,
+              "description": "Enable parallel processing of embeddings and model calls when possible"
+            },
             "indexingBatchSize": {
               "type": "number",
               "default": 20,
@@ -501,14 +543,15 @@
     "@types/jest": "^29.5.12",
     "@types/marked": "^5.0.2",
     "@types/mocha": "^10.0.6",
-    "@types/node": "20.x",
+    "@types/node": "^18.18.0",
     "@types/vscode": "^1.99.0",
-    "@typescript-eslint/eslint-plugin": "^6.13.1",
-    "@typescript-eslint/parser": "^6.13.1",
-    "@vscode/test-electron": "^2.3.8",
+    "@typescript-eslint/eslint-plugin": "^6.19.1",
+    "@typescript-eslint/parser": "^6.19.1",
+    "@vscode/test-electron": "^2.3.9",
+    "@vscode/vsce": "^2.24.0",
     "concurrently": "^9.1.2",
     "css-loader": "^7.1.2",
-    "eslint": "^8.54.0",
+    "eslint": "^8.56.0",
     "glob": "^10.3.10",
     "jest": "^29.7.0",
     "jest-environment-node": "^29.7.0",
@@ -517,15 +560,16 @@
     "terser-webpack-plugin": "^5.3.14",
     "ts-jest": "^29.1.2",
     "ts-loader": "^9.5.1",
-    "typescript": "^5.8.3",
+    "typescript": "^5.3.3",
     "webpack": "^5.89.0",
     "webpack-cli": "^5.1.4"
   },
   "dependencies": {
     "@types/uuid": "^10.0.0",
-    "axios": "^1.6.2",
+    "axios": "^1.6.7",
     "diff": "^5.1.0",
     "ignore": "^5.3.1",
+    "langchain": "^0.1.17",
     "marked": "^11.2.0",
     "smile-ai": "file:",
     "uuid": "^11.0.5",

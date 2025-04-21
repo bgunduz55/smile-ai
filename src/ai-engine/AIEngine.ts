@@ -340,26 +340,58 @@ export class AIEngine {
         
         switch (mode) {
             case 'agent':
-                return `You are an AI coding agent that can autonomously perform tasks. You can:
+                return `You are an AI coding agent that can autonomously perform tasks in the VSCode workspace. You can:
                     - Analyze code and suggest improvements
                     - Create new files and implement features
                     - Debug issues and fix problems
                     - Refactor code following best practices
                     
-                    IMPORTANT INSTRUCTIONS FOR FILE CREATION:
-                    - When asked to create a file, ALWAYS provide the full file content inside a code block
-                    - Format file creation as: \`\`\`language\npath/to/file.ext\ncode content here\n\`\`\`
-                    - Do not just describe what would be in the file; ACTUALLY create it
-                    - If the user says a previous file creation attempt failed, create the file again with the complete content
-                    - When translating or updating files, include the full new content, not just the changes
-                    - Remember to create proper directory structure in paths
-                    - When a user mentions "dosya" (Turkish for "file"), treat it as a file creation request
+                    IMPORTANT FILE OPERATION INSTRUCTIONS:
                     
-                    When responding to follow-up requests:
-                    - If the user indicates you didn't complete a task correctly, apologize and immediately fix the issue
-                    - Maintain context from previous messages to understand ongoing requests
-                    - Be proactive and take initiative when helping the user
-                    - If unsure about what exactly to create, ask clarifying questions first, then provide a complete solution`;
+                    1. FILE CREATION:
+                    - When asked to create a file, format it as:
+                      \`\`\`[language]\n[path/to/file.ext]\n[complete code content]\n\`\`\`
+                    - Example:
+                      \`\`\`typescript\nsrc/utils/formatter.ts\nexport function format() {...}\n\`\`\`
+                    - You can use any of these formats:
+                      - With language specifier: \`\`\`typescript\npath/to/file.ts\ncontent\n\`\`\`
+                      - With file path as first line: \`\`\`\npath/to/file.ts\ncontent\n\`\`\`
+                      - Alternative format: \`\`\`file\nfilename: path/to/file.ts\n\ncontent\n\`\`\`
+                    
+                    2. FILE UPDATES:
+                    - For file updates, provide the FULL new content, not just changes
+                    - Always indicate clearly what changes you've made to the file
+                    - Show understanding of the existing code structure
+                    - Preserve imports, module structure, and formatting conventions
+                    
+                    3. CONTEXT AWARENESS:
+                    - First analyze the codebase structure and understand existing patterns
+                    - Follow existing code style, naming conventions, and design patterns
+                    - For new files, check related files to maintain consistency
+                    - Understand project architecture before making changes
+                    - Use existing dependencies rather than introducing new ones
+                    
+                    4. RELIABILITY BEST PRACTICES:
+                    - Provide complete implementations, not just stubs or examples
+                    - Include robust error handling in your code
+                    - Include imports needed for your code to work
+                    - Make sure generated code is properly indented and formatted
+                    - When updating files, make sure your changes won't break existing functionality
+                    - Think through edge cases and handle them appropriately
+                    
+                    5. CLEAR COMMUNICATION:
+                    - Clearly explain what files you're creating/modifying and why
+                    - Describe the purpose and functionality of added code
+                    - If you're uncertain about something, describe alternatives
+                    - When working on complex tasks, describe your approach first
+                    
+                    GENERAL PRINCIPLES:
+                    - Be proactive and thorough in your implementations
+                    - If a previous file creation failed, try an alternative format
+                    - Maintain context from previous messages in ongoing conversations
+                    - When unclear about requirements, ask clarifying questions first
+                    - If asked to implement a feature, provide a complete implementation
+                    - Follow clean code principles and project conventions`;
             
             case 'ask':
                 return `You are an AI assistant focused on answering questions about code. You:
@@ -618,17 +650,6 @@ export class AIEngine {
         }
     }
 
-    private async processFileOperations(response: string): Promise<void> {
-        try {
-            console.log('Processing file operations in response');
-            
-            await this.extractAndProcessFileContent(response);
-            
-        } catch (error) {
-            console.error('Error processing file operations:', error);
-        }
-    }
-
     private async extractAndProcessFileContent(response: string): Promise<void> {
         try {
             console.log('Extracting file content from response');
@@ -636,14 +657,39 @@ export class AIEngine {
             
             const fileOperationManager = FileOperationManager.getInstance();
             
+            // Enhanced regex patterns to handle more formats including those used by newer AI models
             const fileBlockRegexes = [
+                // Original patterns
                 /```(?:file|[\w-]+)?\s*(?:title=)?[`'"]?([\w\-\./\\]+\.\w+)[`'"]?\s*\n([\s\S]*?)```/g,
                 /### File: ([\w\-\./\\]+\.\w+)\s*```(?:[\w-]+)?\s*\n([\s\S]*?)```/g,
                 /```(?:markdown|md)?\s*\n### File: ([\w\-\./\\]+\.\w+)\s*\n\n([\s\S]*?)```/g,
                 /```markdown\n### File: ([\w\-\./\\]+\.\w+)\s*\n([\s\S]*?)```/g,
                 /```markdown\n### File: ([\w\-\./\\]+\.\w+)\n\n([\s\S]*?)```/g,
-                /File: ([\w\-\./\\]+\.\w+)[\s\n]+([\s\S]*?)(?=```|$)/g
+                /File: ([\w\-\./\\]+\.\w+)[\s\n]+([\s\S]*?)(?=```|$)/g,
+                
+                // New patterns for more robust detection
+                /```([\w-]*)\n([\w\-\./\\]+\.\w+)\n([\s\S]*?)```/g, // Format used by Claude and GPT models
+                /```\s*([a-zA-Z0-9_\-\.\/\\]+\.[a-zA-Z0-9]+)\s*\n([\s\S]*?)```/g, // File path directly in code fence
+                /```[\w-]+\s*path=["|']?([\w\-\./\\]+\.\w+)["|']?\s*\n([\s\S]*?)```/g, // Path attribute format
+                /Create file[:\s]*([\w\-\./\\]+\.\w+)[\s\n]+```(?:[\w-]+)?\s*\n([\s\S]*?)```/gi, // Create file instruction
+                /```[\w-]*\s*\[\[file:([\w\-\./\\]+\.\w+)\]\]\s*\n([\s\S]*?)```/g, // Cursor-style file notation
+                /<file[\s]+path=["|']([\w\-\./\\]+\.\w+)["|'][\s]*>\n([\s\S]*?)<\/file>/g, // XML-like tag format
+                /```file\n(?:filename|path): ([\w\-\./\\]+\.\w+)\n\n([\s\S]*?)```/g, // Filename/path declaration format
+                /\bFile\b[:\s]+"([\w\-\./\\]+\.\w+)"[\s\n]+([\s\S]*?)(?=(?:```|$))/g // "File: filename" with quotes
             ];
+            
+            // Parse file operations from the response
+            interface ExtractedFileOperation {
+                type: 'add' | 'update';
+                filePath: string;
+                absolutePath: string;
+                fileContent: string;
+                exists: boolean;
+                originalContent?: string;
+            }
+            
+            // Track all file operations to handle multi-file operations better
+            const extractedOperations: ExtractedFileOperation[] = [];
             
             let filesFound = false;
             let regexIndex = 0;
@@ -655,7 +701,7 @@ export class AIEngine {
                 while ((match = regex.exec(response)) !== null) {
                     filesFound = true;
                     const filePath = match[1].trim();
-                    const fileContent = match[2];
+                    const fileContent = match[regex === fileBlockRegexes[6] ? 3 : 2]; // Special case for the pattern with language in group 1
                     
                     console.log(`Match found with regex ${regexIndex+1}:`);
                     console.log(`- File path: ${filePath}`);
@@ -683,27 +729,22 @@ export class AIEngine {
                     
                     if (fileExists) {
                         const originalContent = fs.readFileSync(absolutePath, 'utf8');
-                        
-                        if (originalContent !== fileContent) {
-                            const description = `Update file ${path.basename(filePath)} with AI-generated content`;
-                            const operation = await fileOperationManager.createUpdateOperation(absolutePath, originalContent, fileContent, description);
-                            await fileOperationManager.acceptOperation(operation.id);
-                            
-                            console.log(`File ${filePath} updated with new content`);
-                        } else {
-                            console.log(`File content unchanged, no update needed for ${filePath}`);
-                        }
+                        extractedOperations.push({
+                            type: 'update',
+                            filePath,
+                            absolutePath,
+                            fileContent,
+                            exists: true,
+                            originalContent
+                        });
                     } else {
-                        const description = `Create new file ${path.basename(filePath)} with AI-generated content`;
-                        const operation = await fileOperationManager.createAddOperation(absolutePath, fileContent, description);
-                        await fileOperationManager.acceptOperation(operation.id);
-                        
-                        const dirPath = path.dirname(absolutePath);
-                        if (!fs.existsSync(dirPath)) {
-                            fs.mkdirSync(dirPath, { recursive: true });
-                        }
-                        
-                        console.log(`New file ${filePath} created with content`);
+                        extractedOperations.push({
+                            type: 'add',
+                            filePath,
+                            absolutePath,
+                            fileContent,
+                            exists: false
+                        });
                     }
                 }
                 
@@ -712,9 +753,117 @@ export class AIEngine {
             
             if (!filesFound) {
                 console.log('No file content blocks found in the AI response');
+                return;
+            }
+            
+            // Extract task/feature description from the AI response
+            let operationDescription = "AI-generated file operations";
+            
+            // Try to extract a description from the first paragraph of the response
+            const firstParagraphMatch = response.match(/^([^\n]+)/);
+            if (firstParagraphMatch && firstParagraphMatch[1].length > 10 && firstParagraphMatch[1].length < 100) {
+                operationDescription = firstParagraphMatch[1];
+            }
+            
+            // Create file operations group based on the extracted operations
+            if (extractedOperations.length > 0) {
+                const operationsList = extractedOperations.map(op => {
+                    if (op.type === 'add') {
+                        return {
+                            type: 'add' as const,
+                            filePath: op.absolutePath,
+                            content: op.fileContent
+                        };
+                    } else {
+                        return {
+                            type: 'update' as const,
+                            filePath: op.absolutePath,
+                            content: op.fileContent,
+                            originalContent: op.originalContent
+                        };
+                    }
+                });
+                
+                try {
+                    if (extractedOperations.length === 1) {
+                        // For single file operations, process directly
+                        const op = extractedOperations[0];
+                        
+                        if (op.type === 'add') {
+                            const description = `Create new file ${path.basename(op.filePath)} with AI-generated content`;
+                            const operation = await fileOperationManager.createAddOperation(op.absolutePath, op.fileContent, description);
+                            await fileOperationManager.acceptOperation(operation.id);
+                            console.log(`New file ${op.filePath} created with content`);
+                        } else if (op.type === 'update' && op.originalContent !== undefined) {
+                            // Only update if content is different
+                            if (op.originalContent !== op.fileContent) {
+                                const description = `Update file ${path.basename(op.filePath)} with AI-generated content`;
+                                const operation = await fileOperationManager.createUpdateOperation(
+                                    op.absolutePath, 
+                                    op.originalContent, 
+                                    op.fileContent, 
+                                    description
+                                );
+                                await fileOperationManager.acceptOperation(operation.id);
+                                console.log(`File ${op.filePath} updated with new content`);
+                            } else {
+                                console.log(`File content unchanged, no update needed for ${op.filePath}`);
+                            }
+                        }
+                    } else {
+                        // For multiple files, create an operation group
+                        const group = await fileOperationManager.createOperationGroup(
+                            operationsList,
+                            operationDescription
+                        );
+                        
+                        // Show a summary of the changes
+                        const message = `${group.operations.length} file operations proposed by AI. Would you like to apply all changes?`;
+                        const result = await vscode.window.showInformationMessage(
+                            message,
+                            { modal: false },
+                            'Apply All', 
+                            'Review Each', 
+                            'Cancel'
+                        );
+                        
+                        if (result === 'Apply All') {
+                            await fileOperationManager.acceptGroup(group.id);
+                            console.log(`Applied all operations in group ${group.id}`);
+                        } else if (result === 'Review Each') {
+                            for (const operation of group.operations) {
+                                const filePath = operation.filePath;
+                                const operationType = operation.type === 'add' ? 'Create' : 'Update';
+                                const message = `${operationType} file ${path.basename(filePath)}?`;
+                                
+                                const review = await vscode.window.showInformationMessage(
+                                    message,
+                                    { modal: false },
+                                    'Apply', 
+                                    'Skip'
+                                );
+                                
+                                if (review === 'Apply') {
+                                    await fileOperationManager.acceptOperation(operation.id);
+                                    console.log(`Applied operation: ${operation.id}`);
+                                } else {
+                                    await fileOperationManager.rejectOperation(operation.id);
+                                    console.log(`Skipped operation: ${operation.id}`);
+                                }
+                            }
+                        } else {
+                            await fileOperationManager.rejectGroup(group.id);
+                            console.log('All operations cancelled');
+                        }
+                    }
+                } catch (error) {
+                    console.error('Error processing file operations:', error);
+                    vscode.window.showErrorMessage(`Error processing file operations: ${error instanceof Error ? error.message : String(error)}`);
+                }
             }
         } catch (error) {
             console.error('Error extracting file content:', error);
+            vscode.window.showErrorMessage(`Error processing file operations: ${error instanceof Error ? error.message : String(error)}`);
         }
     }
 
@@ -812,12 +961,13 @@ export class AIEngine {
                 stream: true,
                 options: {
                     ...cleanOptions,
-                    num_predict: this.responseChunkSize
+                    num_predict: this.responseChunkSize * 2 // Double the chunk size for Ollama to reduce round trips
                 }
             };
             
             try {
                 let fullResponse = '';
+                let buffer = ''; // Buffer for collecting incomplete JSON
                 
                 const response = await fetch(endpoint, {
                     method: 'POST',
@@ -840,21 +990,49 @@ export class AIEngine {
                     
                     const chunk = decoder.decode(value, { stream: true });
                     try {
-                        const lines = chunk.split('\n');
+                        // Handle potential multiple or incomplete JSON objects in a chunk
+                        buffer += chunk;
                         
-                        for (const line of lines) {
-                            if (line.trim() === '') continue;
-                            
-                            const jsonResponse = JSON.parse(line);
-                            
-                            if (jsonResponse.response) {
-                                fullResponse += jsonResponse.response;
-                                
-                                onChunk(jsonResponse.response);
+                        // Try to extract complete JSON objects
+                        let startPos = 0;
+                        let endPos = buffer.indexOf('\n', startPos);
+                        
+                        while (endPos !== -1) {
+                            const jsonStr = buffer.substring(startPos, endPos).trim();
+                            if (jsonStr) {
+                                try {
+                                    const jsonResponse = JSON.parse(jsonStr);
+                                    
+                                    if (jsonResponse.response) {
+                                        fullResponse += jsonResponse.response;
+                                        onChunk(jsonResponse.response);
+                                    }
+                                } catch (innerError) {
+                                    console.warn('Invalid JSON in streaming chunk, will retry with complete data');
+                                }
                             }
+                            
+                            startPos = endPos + 1;
+                            endPos = buffer.indexOf('\n', startPos);
                         }
+                        
+                        // Keep the remaining incomplete data
+                        buffer = buffer.substring(startPos);
                     } catch (parseError) {
-                        console.warn('Error parsing streaming chunk:', parseError);
+                        console.warn('Error processing streaming chunk:', parseError);
+                    }
+                }
+                
+                // Process any remaining buffer content
+                if (buffer.trim()) {
+                    try {
+                        const jsonResponse = JSON.parse(buffer.trim());
+                        if (jsonResponse.response) {
+                            fullResponse += jsonResponse.response;
+                            onChunk(jsonResponse.response);
+                        }
+                    } catch (e) {
+                        console.warn('Error parsing final buffer content:', e);
                     }
                 }
                 
@@ -863,8 +1041,209 @@ export class AIEngine {
                 console.error('Error in streaming request:', error);
                 throw error;
             }
+        } else if (this.config.provider.name === 'lmstudio' || this.config.provider.name === 'openai') {
+            // Implement streaming for LM Studio and OpenAI
+            try {
+                let endpoint = this.config.provider.apiEndpoint;
+                if (!endpoint.endsWith('/v1/chat/completions')) {
+                    endpoint = `${endpoint}/v1/chat/completions`;
+                }
+                
+                const messages = [
+                    {
+                        role: 'system',
+                        content: systemPrompt
+                    },
+                    {
+                        role: 'user',
+                        content: enhancedMessage
+                    }
+                ];
+                
+                const requestOptions = {
+                    model: this.config.provider.modelName,
+                    messages,
+                    stream: true,
+                    max_tokens: this.config.maxTokens || 2048,
+                    temperature: this.config.temperature || 0.7,
+                    // Include any provider-specific options
+                    ...cleanOptions
+                };
+                
+                const response = await fetch(endpoint, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        ...(this.config.provider.name === 'openai' && process.env.OPENAI_API_KEY ? 
+                            { 'Authorization': `Bearer ${process.env.OPENAI_API_KEY}` } : {})
+                    },
+                    body: JSON.stringify(requestOptions)
+                });
+                
+                if (!response.body) {
+                    throw new Error('Response body is null');
+                }
+                
+                let fullResponse = '';
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
+                
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+                    
+                    const chunk = decoder.decode(value, { stream: true });
+                    const lines = chunk.split('\n').filter(line => line.trim() !== '');
+                    
+                    for (const line of lines) {
+                        if (line.startsWith('data: ')) {
+                            const data = line.substring(6);
+                            if (data === '[DONE]') {
+                                continue;
+                            }
+                            
+                            try {
+                                const parsedData = JSON.parse(data);
+                                if (parsedData.choices && parsedData.choices.length > 0) {
+                                    const content = parsedData.choices[0].delta?.content;
+                                    if (content) {
+                                        fullResponse += content;
+                                        onChunk(content);
+                                    }
+                                }
+                            } catch (e) {
+                                console.warn('Error parsing streaming data:', e);
+                            }
+                        }
+                    }
+                }
+                
+                return fullResponse;
+            } catch (error) {
+                console.error('Error in OpenAI/LMStudio streaming request:', error);
+                return await this.sendRequest(message, options, mode);
+            }
         } else {
             return await this.sendRequest(message, options, mode);
+        }
+    }
+
+    // New helper method to process message more efficiently
+    public async processMessageWithStream(
+        text: string, 
+        options: ProcessOptions, 
+        mode: 'chat' | 'agent' | 'ask',
+        onProgress: (chunk: string) => void
+    ): Promise<string> {
+        try {
+            const hasAttachments = options?.options?.attachments?.length > 0;
+            
+            // Skip embedding and cache check when attachments are present
+            if (!hasAttachments) {
+                // Optimization: Only generate embeddings for cache lookup in non-streaming mode
+                // or if explicitly requested (to avoid the embedding generation overhead when streaming)
+                const shouldCheckCache = options?.options?.checkCache !== false;
+                
+                if (shouldCheckCache) {
+                    try {
+                        const queryEmbedding = await this.generateEmbeddings(text);
+                        
+                        if (queryEmbedding) {
+                            const cachedResponse = this.responseCache.findSimilarResponse(
+                                text, 
+                                queryEmbedding, 
+                                mode
+                            );
+                            
+                            if (cachedResponse) {
+                                console.log('Found cached response, returning immediately');
+                                // For cached responses, we still want the streaming experience
+                                // Send chunks of the cached response to simulate streaming
+                                if (onProgress) {
+                                    const chunkSize = 50;
+                                    for (let i = 0; i < cachedResponse.length; i += chunkSize) {
+                                        const chunk = cachedResponse.substring(i, i + chunkSize);
+                                        onProgress(chunk);
+                                        // Small delay to simulate streaming
+                                        await new Promise(resolve => setTimeout(resolve, 10));
+                                    }
+                                }
+                                return cachedResponse;
+                            }
+                        }
+                    } catch (error) {
+                        console.warn('Error generating embedding for cache check:', error);
+                    }
+                }
+            }
+            
+            // Stream the response
+            const response = await this.sendStreamingRequest(text, options, mode, onProgress);
+            
+            // Process any file operations
+            await this.processFileOperations(response);
+            
+            // Cache the response if it wasn't an attachment-based query
+            if (!hasAttachments && options?.options?.saveToCache !== false) {
+                try {
+                    const queryEmbedding = await this.generateEmbeddings(text);
+                    if (queryEmbedding) {
+                        this.responseCache.addResponse(text, queryEmbedding, response, mode);
+                    }
+                } catch (error) {
+                    console.warn('Error saving response to cache:', error);
+                }
+            }
+            
+            return response;
+        } catch (error) {
+            console.error('Error in processMessageWithStream:', error);
+            const errorMessage = `I encountered an error while processing your request: ${error instanceof Error ? error.message : String(error)}`;
+            if (onProgress) {
+                onProgress(errorMessage);
+            }
+            return errorMessage;
+        }
+    }
+
+    /**
+     * Process file operations from a response and return the result
+     * Public method for agent system to use
+     */
+    public async processFileOperations(response: string): Promise<{
+        success: boolean;
+        operationIds: string[];
+        filePaths: string[];
+    }> {
+        try {
+            // Store original operations count to track new operations
+            const fileOperationManager = FileOperationManager.getInstance();
+            const originalOperations = fileOperationManager.getPendingOperations();
+            const originalCount = originalOperations.length;
+            
+            // Extract and process file content
+            await this.extractAndProcessFileContent(response);
+            
+            // Get new operations
+            const currentOperations = fileOperationManager.getPendingOperations();
+            const newOperations = currentOperations.slice(originalCount);
+            
+            // Extract operation IDs and file paths
+            const operationIds = newOperations.map(op => op.id);
+            const filePaths = newOperations.map(op => op.filePath);
+            
+            return {
+                success: true,
+                operationIds,
+                filePaths
+            };
+        } catch (error) {
+            console.error('Error processing file operations:', error);
+            return {
+                success: false,
+                operationIds: [],
+                filePaths: []
+            };
         }
     }
 } 
