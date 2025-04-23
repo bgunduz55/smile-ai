@@ -281,4 +281,19 @@ export class CodebaseIndexer {
 
         return references || [];
     }
+
+    /**
+     * Find files matching a pattern in the workspace
+     * @param pattern Glob pattern to match files
+     * @returns Array of matched file URIs
+     */
+    public async findFiles(pattern: string): Promise<vscode.Uri[]> {
+        try {
+            // Use VSCode API to find files
+            return await vscode.workspace.findFiles(pattern);
+        } catch (error) {
+            console.error(`Error finding files with pattern ${pattern}:`, error);
+            return [];
+        }
+    }
 }

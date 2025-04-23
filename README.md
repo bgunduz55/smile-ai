@@ -1,75 +1,139 @@
-# Smile AI - Local AI Powered Coding Assistant
+# Smile AI - Agent-based Coding Assistant for VSCode
 
-<!-- ![Smile AI Logo](resources/smile-ai-logo.png) -->
+Smile AI is an intelligent coding assistant for VSCode that uses agent-based architecture to help you with complex coding tasks. The assistant can create files, modify code, and understand the structure of your codebase - all with the power of AI.
 
-## 🎯 Vision
+## Features
 
-Smile AI is a powerful code assistant developed for VSCode that operates using completely local AI models. Similar to Cursor with comprehensive features, this assistant can work without requiring an internet connection and provides coding assistant support using local AI models (Ollama, LM Studio, etc.).
+### 🧠 Agent-based Architecture
 
-## 🌟 Core Features
+Smile AI uses a sophisticated agent system to:
 
-### 🤖 Local AI Integration
-- Integration with local AI models like Ollama and LM Studio
-- Customizable model selection and configuration 
-- Optimized AI usage for low resource consumption
+- **Plan complex tasks**: Break down your request into subtasks
+- **Work with context**: Understand your codebase structure
+- **Create and modify files**: Automatically implement code changes
+- **Handle errors**: Self-recover from failures with alternative approaches
 
-### 💡 Smart Code Assistant
-- **AI-powered code completions and inline suggestions**
-- Intelligent context-aware code recommendations
-- Code explanation and documentation generation
-- Bug detection and solution suggestions
-- Code refactoring suggestions
-- Test scenario creation
+### 🚀 Multiple AI Provider Support
 
-### 🔄 Agent Capabilities
-- Breaking complex tasks into subtasks
-- Multi-file editing and management
-- Smart context understanding and maintenance
-- Showing change suggestions as previews
-- Step-by-step code change implementation
+- **Local models**: Ollama, LM Studio, LocalAI, Deepseek, Qwen
+- **Cloud models**: OpenAI, Anthropic Claude
 
-### 🛠️ Developer Experience
-- GitHub Copilot-like inline completions
-- IntelliSense integration with AI suggestions
-- Intuitive user interface
-- Customizable keyboard shortcuts
-- Detailed change previews
-- Real-time code analysis
-- Multi-language support
+### 📝 Code Operations
 
-## 🔧 Technical Architecture
+- **Create new files** with proper directory structure
+- **Update existing files** with intelligent diff handling
+- **Multi-file operations** handled as atomic transactions
+- **Error recovery** with automatic retries and alternative approaches
 
-### AI Engine Layer
-- Local LLM integration (Ollama, LM Studio)
-- Model management and optimization
-- Context management and memory optimization
+### 🔍 Context-Aware Assistance
 
-### Code Completion System
-- Intelligent code suggestions as you type
-- Context-aware completions using file and workspace analysis
-- Inline (ghost text) completions for multi-line suggestions
-- Integration with VS Code's IntelliSense system
+- **Codebase indexing** for relevant context
+- **RAG integration** for semantic search
+- **File and folder attachments** for specific context
+- **Selection-based assistance** for targeted help
 
-### Agent System
-- Task planning and management
-- Subtask creation and monitoring
-- File system integration
-- Code analysis engine
+## Getting Started
 
-### VSCode Integration
-- Extension API integration
-- Editor services
-- Language services
-- Diagnostic services
+1. Install the extension from the VSCode marketplace
+2. Configure your preferred AI provider in the settings
+3. Start using the commands to interact with Smile AI:
+   - `Smile AI: Start Chat` - Open the chat panel
+   - `Smile AI: Run Agent Command` - Execute a full agent task
+   - `Smile AI: Run Agent with Selection` - Use selected code as context
 
-### User Interface
+## How It Works: Agent System
+
+Smile AI's agent system follows this workflow:
+
+1. **Planning**: When you submit a request, the agent first analyzes it and creates a detailed plan with subtasks
+2. **Context Gathering**: The agent collects necessary context from your codebase
+3. **Task Execution**: Each subtask is executed in sequence, with dependencies tracked
+4. **File Operations**: The agent creates or modifies files automatically
+5. **Error Recovery**: If a task fails, the agent attempts to recover automatically
+
+### Example Agent Request
+
+```
+Create a React component that displays a list of users with search functionality
+```
+
+The agent will:
+1. Plan the necessary files (component, styles, tests)
+2. Create each file with complete implementations
+3. Show you a summary of the changes
+
+## Configuration
+
+### Local Models
+
+To use local models like Ollama:
+
+```json
+{
+  "smile-ai.provider": "ollama",
+  "smile-ai.endpoint": "http://localhost:11434",
+  "smile-ai.model": "codellama"
+}
+```
+
+### Cloud Models
+
+For cloud providers like OpenAI:
+
+```json
+{
+  "smile-ai.provider": "openai",
+  "smile-ai.apiKey": "your-api-key",
+  "smile-ai.model": "gpt-4-turbo"
+}
+```
+
+## Developing & Contributing
+
+This extension is written in TypeScript and follows a clean architecture pattern:
+
+- `src/agent`: Agent system components
+- `src/ai-engine`: AI provider integrations  
+- `src/utils`: Utility functions and helpers
+- `src/indexing`: Codebase indexing components
+- `src/views`: UI components and panels
+
+To contribute:
+1. Clone the repository
+2. Run `npm install`
+3. Make your changes
+4. Run `npm run compile` to build
+5. Use F5 in VSCode to run the extension in development mode
+
+## Implementation Status
+
+As of the latest update, we have completed the implementation of our agent-based architecture:
+
+✅ **Enhanced Agent System**
+- TaskPlanning with decomposition and dependency management
+- Context gathering for relevant files
+- Sequential execution with error handling
+- Comprehensive summary generation
+
+✅ **File Operation Integration**
+- Reliable file creation and modification
+- Tracking of operations for potential rollback
+- Multiple format support for different AI responses
+- Error recovery with automatic retries
+
+✅ **VSCode Integration**
 - Command palette integration
-- Webview panels
-- Status bar notifications
-- Code lens and decoration support
+- Status bar updates and progress reporting
+- Selection-based contextual commands
+- Output channel for detailed logs
 
-## Documentation
+The agent system now works like Cursor, able to:
+- Analyze user requests and break them down into manageable tasks
+- Create and modify files in your workspace based on the plan
+- Recover from failures with intelligent retry mechanisms
+- Provide detailed summaries of actions taken
 
-For more information on specific features, check the docs directory:
-- [Code Completion](docs/code-completion.md)
+## License
+
+MIT
 
