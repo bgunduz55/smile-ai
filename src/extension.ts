@@ -24,6 +24,9 @@ import { RAGService } from './indexing/RAGService';
 import { CompletionManager } from './completion/CompletionManager';
 import { AgentCommandHandler } from './agent/AgentCommandHandler';
 import { TaskManager } from './agent/TaskManager';
+import { MCPController } from './models/mcp/MCPController';
+import { MCPAgentService } from './models/mcp/services/MCPAgentService';
+import { AIEngineAdapter } from './models/mcp/adapters/AIEngineAdapter';
 
 // Export the main extension class
 export class SmileAIExtension {
@@ -212,14 +215,35 @@ export class SmileAIExtension {
             const taskManager = new TaskManager();
             
             // Initialize the Agent Command Handler
-            const agentCommandHandler = new AgentCommandHandler(
-                this.aiEngine,
-                taskManager,
-                this.codebaseIndexer
-            );
+            const agentCommandHandler = AgentCommandHandler.initialize(this.aiEngine, taskManager, this.codebaseIndexer);
             
             // Register agent commands
             agentCommandHandler.registerCommands(this.context);
+
+            // Initialize MCP components
+            const mcpController = MCPController.getInstance();
+            mcpController.initialize()
+                .then(() => {
+                    console.log('MCP controller initialized');
+                    
+                    // Register AIEngine adapter
+                    const aiEngineAdapter = new AIEngineAdapter(this.aiEngine);
+                    mcpController.registerLocalHandler('model:chat', async (request) => {
+                        const response = await aiEngineAdapter.processMCPRequest(request);
+                        return response;
+                    });
+                    
+                    // Initialize and register the agent service
+                    const mcpAgentService = MCPAgentService.getInstance();
+                    mcpAgentService.initialize();
+                    
+                    console.log('MCP components fully initialized');
+                })
+                .catch(error => {
+                    console.error('Error initializing MCP components:', error);
+                });
+
+            this.statusBarItem.text = "$(rocket) Smile AI";
         } catch (error) {
             this.showError(`Initialization error: ${error instanceof Error ? error.message : String(error)}`);
             console.error('Initialization error:', error);
