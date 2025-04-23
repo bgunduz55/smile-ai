@@ -338,3 +338,30 @@ graph LR
 - Güvenli model yönetimi
 - Yapılandırılabilir izinler
 - Şifreleme desteği (gerektiğinde) 
+
+
+
+## Notes
+Based on examining the code, we can enhance the file operation handling in Smile AI to make it more like Cursor. Here are the key improvements we could implement:
+More robust file format detection: Add more regex patterns to handle different ways AI models might structure file content, including formats commonly used by newer models.
+Diff-based updates: Instead of replacing entire files, implement a diff mechanism that shows users exactly what changes will be made before applying them.
+Improved error handling: Add better error recovery if file creation/modification fails.
+Multi-file operations: Better support for operations that involve multiple related files.
+File context awareness: Enhance the system prompt to make the AI more aware of existing file contents and project structure.
+Interactive file edits: Allow users to interactively approve/modify proposed changes.
+
+
+Implementation Plan
+Here's what I recommend:
+Enhance the Agent System:
+Implement a planning phase before execution
+Add a feedback loop to monitor success/failure
+Create a context manager that builds codebase understanding
+Improve File Operation Handling:
+Ensure file content detection works consistently
+Add more robust error handling
+Implement automatic retries
+Add Agentic Capabilities:
+Enable multi-step reasoning
+Add self-critique mechanisms
+Implement code analysis before changes

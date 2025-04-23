@@ -149,6 +149,7 @@ function updateAttachmentUI() {
 
 // Define ChatMessage interface
 interface ChatMessage {
+    id?: string;
     role: "user" | "assistant" | "system";
     content: string;
     timestamp: number;
@@ -170,6 +171,7 @@ interface VSCodeMessage {
     models?: any[];
     operations?: FileOperation[];
     id?: string;
+    content?: string;
     diff?: { added: boolean; removed: boolean; value: string; }[];
 }
 
@@ -183,6 +185,12 @@ window.addEventListener('message', (event: MessageEvent<VSCodeMessage>) => {
             if (message.message) {
                 console.log('Adding message to UI:', message.message); // Debug message
                 addMessage(message.message);
+            }
+            break;
+        case 'updateMessage':
+            if (message.id && message.content !== undefined) {
+                console.log('Updating message content:', message.id, message.content.length); // Debug message
+                updateMessage(message.id, message.content);
             }
             break;
         case 'showLoading':
@@ -243,6 +251,11 @@ function addMessage(message: ChatMessage) {
 
     if (!messageDiv || !avatar || !content) return;
 
+    // Store message ID as data attribute for later updates
+    if (message.id) {
+        messageDiv.setAttribute('data-message-id', message.id);
+    }
+
     messageDiv.classList.add(message.role);
     avatar.classList.add(message.role === 'user' ? 'codicon-account' : 'codicon-hubot');
 
@@ -297,6 +310,46 @@ function addMessage(message: ChatMessage) {
             }
         });
     });
+}
+
+function updateMessage(messageId: string, content: string) {
+    if (!messagesContainer) return;
+    
+    const messageDiv = messagesContainer.querySelector(`.message[data-message-id="${messageId}"]`);
+    if (messageDiv) {
+        const contentDiv = messageDiv.querySelector('.markdown-content');
+        if (contentDiv) {
+            // Update with new content
+            const formattedContent = formatMessage(content);
+            contentDiv.innerHTML = formattedContent;
+            
+            // Add click handler for new code blocks
+            const codeBlocks = messageDiv.querySelectorAll('.code-block .copy-button');
+            codeBlocks.forEach(button => {
+                button.addEventListener('click', (e) => {
+                    const codeBlock = (e.target as HTMLElement).closest('.code-block');
+                    const codeContent = codeBlock?.querySelector('code')?.textContent;
+                    if (codeContent) {
+                        navigator.clipboard.writeText(codeContent)
+                            .then(() => {
+                                // Optionally show feedback for successful copy
+                                const copyButton = (e.target as HTMLElement).closest('.copy-button') as HTMLElement;
+                                if (copyButton) {
+                                    const originalHTML = copyButton.innerHTML;
+                                    copyButton.innerHTML = '<i class="codicon codicon-check"></i>';
+                                    setTimeout(() => {
+                                        copyButton.innerHTML = originalHTML;
+                                    }, 1000);
+                                }
+                            });
+                    }
+                });
+            });
+            
+            // Scroll to bottom to show new content
+            messagesContainer.scrollTop = messagesContainer.scrollHeight;
+        }
+    }
 }
 
 function formatMessage(content: string): string {

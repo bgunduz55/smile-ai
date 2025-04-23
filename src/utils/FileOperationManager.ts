@@ -11,15 +11,26 @@ export interface FileOperation {
     description?: string;
     created: number;
     isApplied: boolean; // Track if operation has been applied
+    diff?: any;
+}
+
+export interface FileOperationGroup {
+    id: string;
+    description: string;
+    operations: FileOperation[];
+    created: number;
+    isApplied: boolean;
 }
 
 export class FileOperationManager {
     private static instance: FileOperationManager;
     private pendingOperations: Map<string, FileOperation>;
+    private operationGroups: Map<string, FileOperationGroup>;
     private webviewView: vscode.WebviewView | undefined;
 
     private constructor() {
         this.pendingOperations = new Map();
+        this.operationGroups = new Map();
     }
 
     public static getInstance(): FileOperationManager {
@@ -61,7 +72,13 @@ export class FileOperationManager {
         }
     }
 
-    public async createUpdateOperation(filePath: string, originalContent: string, newContent: string, description?: string): Promise<FileOperation> {
+    public async createUpdateOperation(
+        filePath: string, 
+        originalContent: string, 
+        newContent: string, 
+        description?: string,
+        generateDiff: boolean = false
+    ): Promise<FileOperation> {
         const operation: FileOperation = {
             id: Date.now().toString(),
             type: 'update',
@@ -70,7 +87,8 @@ export class FileOperationManager {
             newContent,
             description,
             created: Date.now(),
-            isApplied: false
+            isApplied: false,
+            diff: generateDiff ? this.generateDiff(originalContent, newContent) : undefined
         };
         
         // Apply the update immediately
@@ -81,6 +99,11 @@ export class FileOperationManager {
             // Store the operation for potential undo
             this.pendingOperations.set(operation.id, operation);
             this.notifyWebview();
+            
+            // If diff was generated, show it to the user
+            if (generateDiff && operation.diff) {
+                await this.showDiff(filePath, originalContent, newContent);
+            }
             
             console.log(`File updated and pending approval: ${filePath}`);
             return operation;
@@ -223,57 +246,100 @@ export class FileOperationManager {
     }
 
     private async addFile(filePath: string, content: string): Promise<void> {
-        // Ensure the directory exists
-        const dir = path.dirname(filePath);
-        if (!fs.existsSync(dir)) {
-            fs.mkdirSync(dir, { recursive: true });
+        try {
+            // Ensure the directory exists
+            const dir = path.dirname(filePath);
+            if (!fs.existsSync(dir)) {
+                fs.mkdirSync(dir, { recursive: true });
+            }
+            
+            // Write the file
+            fs.writeFileSync(filePath, content, 'utf8');
+            
+            // Open the file in the editor
+            const document = await vscode.workspace.openTextDocument(vscode.Uri.file(filePath));
+            await vscode.window.showTextDocument(document);
+        } catch (error) {
+            console.error(`Error in addFile for ${filePath}:`, error);
+            await this.handleFileOperationError('add', filePath, error, content);
         }
-        
-        // Write the file
-        fs.writeFileSync(filePath, content, 'utf8');
-        
-        // Open the file in the editor
-        const document = await vscode.workspace.openTextDocument(vscode.Uri.file(filePath));
-        await vscode.window.showTextDocument(document);
     }
 
     private async updateFile(filePath: string, content: string): Promise<void> {
-        const uri = vscode.Uri.file(filePath);
-        const edit = new vscode.WorkspaceEdit();
-        
         try {
-            // Open the document to get its content
+            const uri = vscode.Uri.file(filePath);
+            const edit = new vscode.WorkspaceEdit();
+            
+            try {
+                // Open the document to get its content
+                const document = await vscode.workspace.openTextDocument(uri);
+                
+                // Replace the entire content
+                const fullRange = new vscode.Range(
+                    document.positionAt(0),
+                    document.positionAt(document.getText().length)
+                );
+                edit.replace(uri, fullRange, content);
+                
+                // Apply the edit
+                const success = await vscode.workspace.applyEdit(edit);
+                if (!success) {
+                    throw new Error('Failed to apply edit');
+                }
+                
+                // Save the document
+                await document.save();
+                
+            } catch (error) {
+                // Fallback approach if edit fails: write directly to file
+                console.warn(`Falling back to direct file write for ${filePath}:`, error);
+                fs.writeFileSync(filePath, content, 'utf8');
+            }
+            
+            // Open the document in the editor
             const document = await vscode.workspace.openTextDocument(uri);
-            
-            // Replace the entire content
-            const fullRange = new vscode.Range(
-                document.positionAt(0),
-                document.positionAt(document.getText().length)
-            );
-            
-            edit.replace(uri, fullRange, content);
-            await vscode.workspace.applyEdit(edit);
+            await vscode.window.showTextDocument(document);
         } catch (error) {
-            console.error('Error updating file:', error);
-            throw error;
+            console.error(`Error in updateFile for ${filePath}:`, error);
+            await this.handleFileOperationError('update', filePath, error, content);
         }
     }
 
     private async deleteFile(filePath: string): Promise<void> {
         try {
-            const uri = vscode.Uri.file(filePath);
-            await vscode.workspace.fs.delete(uri, { useTrash: true });
+            if (fs.existsSync(filePath)) {
+                // Get URI for the file
+                const uri = vscode.Uri.file(filePath);
+                
+                // Create a workspace edit to delete the file
+                const edit = new vscode.WorkspaceEdit();
+                edit.deleteFile(uri, { ignoreIfNotExists: true });
+                
+                // Apply the edit
+                const success = await vscode.workspace.applyEdit(edit);
+                if (!success) {
+                    // Fallback: use fs.unlinkSync
+                    fs.unlinkSync(filePath);
+                }
+            }
         } catch (error) {
-            console.error('Error deleting file:', error);
-            throw error;
+            console.error(`Error in deleteFile for ${filePath}:`, error);
+            await this.handleFileOperationError('delete', filePath, error);
         }
     }
 
     private notifyWebview(): void {
-        if (this.webviewView?.webview) {
+        if (this.webviewView && this.webviewView.visible) {
             this.webviewView.webview.postMessage({
-                command: 'updatePendingOperations',
-                operations: this.getPendingOperations()
+                command: 'updateFileOperations',
+                operations: this.getPendingOperations(),
+                groups: Array.from(this.operationGroups.values()).map(group => ({
+                    id: group.id,
+                    description: group.description,
+                    fileCount: group.operations.length,
+                    created: group.created,
+                    isApplied: group.isApplied
+                }))
             });
         }
     }
@@ -387,6 +453,364 @@ export class FileOperationManager {
 
     public clearOperations(): void {
         this.pendingOperations.clear();
+        this.notifyWebview();
+    }
+
+    /**
+     * Generate a detailed diff between old and new content
+     */
+    private generateDiff(oldContent: string, newContent: string): any {
+        try {
+            // Simple line-by-line diff implementation
+            const oldLines = oldContent.split('\n');
+            const newLines = newContent.split('\n');
+            
+            const result: Array<{type: number, text: string}> = [];
+            
+            // Find common prefix
+            let commonPrefixLength = 0;
+            const maxPrefix = Math.min(oldLines.length, newLines.length);
+            while (commonPrefixLength < maxPrefix && 
+                   oldLines[commonPrefixLength] === newLines[commonPrefixLength]) {
+                result.push({ type: 0, text: oldLines[commonPrefixLength] });
+                commonPrefixLength++;
+            }
+            
+            // Find common suffix
+            let commonSuffixLength = 0;
+            const maxSuffix = Math.min(oldLines.length - commonPrefixLength, 
+                                      newLines.length - commonPrefixLength);
+            while (commonSuffixLength < maxSuffix && 
+                   oldLines[oldLines.length - 1 - commonSuffixLength] === 
+                   newLines[newLines.length - 1 - commonSuffixLength]) {
+                commonSuffixLength++;
+            }
+            
+            // Process middle section with differences
+            for (let i = commonPrefixLength; i < oldLines.length - commonSuffixLength; i++) {
+                result.push({ type: -1, text: oldLines[i] });
+            }
+            
+            for (let i = commonPrefixLength; i < newLines.length - commonSuffixLength; i++) {
+                result.push({ type: 1, text: newLines[i] });
+            }
+            
+            // Add common suffix
+            for (let i = 0; i < commonSuffixLength; i++) {
+                const idx = newLines.length - commonSuffixLength + i;
+                result.push({ type: 0, text: newLines[idx] });
+            }
+            
+            return result;
+        } catch (error) {
+            console.error('Error generating diff:', error);
+            return [];
+        }
+    }
+    
+    /**
+     * Show a diff editor with the changes
+     */
+    private async showDiff(filePath: string, oldContent: string, _newContent: string): Promise<void> {
+        try {
+            const fileName = path.basename(filePath);
+            
+            // Create temporary URI for old version
+            const oldUri = vscode.Uri.parse(`untitled:${fileName}.previous`);
+            const newUri = vscode.Uri.file(filePath);
+            
+            // Insert old content in a temporary document
+            await vscode.workspace.openTextDocument(oldUri);
+            const edit = new vscode.WorkspaceEdit();
+            edit.insert(oldUri, new vscode.Position(0, 0), oldContent);
+            await vscode.workspace.applyEdit(edit);
+            
+            // Show diff editor
+            await vscode.commands.executeCommand('vscode.diff', 
+                oldUri, 
+                newUri, 
+                `${fileName} (Changes)`
+            );
+        } catch (error) {
+            console.error('Error showing diff:', error);
+        }
+    }
+
+    /**
+     * Handle errors in file operations with recovery options
+     */
+    private async handleFileOperationError(
+        operationType: 'add' | 'update' | 'delete',
+        filePath: string,
+        error: unknown,
+        content?: string
+    ): Promise<void> {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        
+        // Show error notification with retry option
+        const action = await vscode.window.showErrorMessage(
+            `Failed to ${operationType} file ${path.basename(filePath)}: ${errorMessage}`,
+            'Retry',
+            'Alternative Method',
+            'Show Details'
+        );
+        
+        if (action === 'Retry') {
+            // Try the operation again
+            if (operationType === 'add' && content) {
+                await this.retryWithDelay(() => this.addFile(filePath, content), 500);
+            } else if (operationType === 'update' && content) {
+                await this.retryWithDelay(() => this.updateFile(filePath, content), 500);
+            } else if (operationType === 'delete') {
+                await this.retryWithDelay(() => this.deleteFile(filePath), 500);
+            }
+        } else if (action === 'Alternative Method' && content) {
+            // Try alternative approach for file operations
+            try {
+                if (operationType === 'add' || operationType === 'update') {
+                    // Create backup of existing file if it exists
+                    if (fs.existsSync(filePath)) {
+                        const backupPath = `${filePath}.backup-${Date.now()}`;
+                        fs.copyFileSync(filePath, backupPath);
+                        vscode.window.showInformationMessage(`Created backup at ${backupPath}`);
+                    }
+                    
+                    // Ensure directory exists
+                    const dir = path.dirname(filePath);
+                    if (!fs.existsSync(dir)) {
+                        fs.mkdirSync(dir, { recursive: true });
+                    }
+                    
+                    // Use direct file system write
+                    fs.writeFileSync(filePath, content, 'utf8');
+                    vscode.window.showInformationMessage(`Successfully saved ${filePath} using alternative method`);
+                    
+                    // Open the file
+                    const document = await vscode.workspace.openTextDocument(vscode.Uri.file(filePath));
+                    await vscode.window.showTextDocument(document);
+                }
+            } catch (alternativeError) {
+                console.error(`Alternative method failed for ${filePath}:`, alternativeError);
+                vscode.window.showErrorMessage(`Alternative method also failed: ${alternativeError instanceof Error ? alternativeError.message : String(alternativeError)}`);
+            }
+        } else if (action === 'Show Details') {
+            // Show detailed error information in output channel
+            const channel = vscode.window.createOutputChannel('Smile AI File Operations');
+            channel.appendLine(`=== Error Details for ${operationType} operation on ${filePath} ===`);
+            channel.appendLine(`Time: ${new Date().toISOString()}`);
+            channel.appendLine(`Error: ${errorMessage}`);
+            if (error instanceof Error && error.stack) {
+                channel.appendLine(`Stack: ${error.stack}`);
+            }
+            channel.appendLine(`Operation Type: ${operationType}`);
+            channel.appendLine(`File Path: ${filePath}`);
+            channel.appendLine(`Absolute Path: ${path.resolve(filePath)}`);
+            channel.appendLine(`Directory Exists: ${fs.existsSync(path.dirname(filePath))}`);
+            channel.appendLine(`File Exists: ${fs.existsSync(filePath)}`);
+            if (fs.existsSync(filePath)) {
+                try {
+                    const stats = fs.statSync(filePath);
+                    channel.appendLine(`File Stats: ${JSON.stringify(stats)}`);
+                    channel.appendLine(`Is Directory: ${stats.isDirectory()}`);
+                    channel.appendLine(`Is File: ${stats.isFile()}`);
+                    channel.appendLine(`Size: ${stats.size} bytes`);
+                    channel.appendLine(`Permissions: ${stats.mode.toString(8)}`);
+                } catch (statsError) {
+                    channel.appendLine(`Error getting file stats: ${statsError}`);
+                }
+            }
+            channel.show();
+        }
+    }
+    
+    /**
+     * Retry an operation with a delay
+     */
+    private async retryWithDelay<T>(operation: () => Promise<T>, delayMs: number): Promise<T> {
+        await new Promise(resolve => setTimeout(resolve, delayMs));
+        return operation();
+    }
+
+    /**
+     * Create a group of related file operations
+     */
+    public async createOperationGroup(
+        operations: Array<{
+            type: 'add' | 'update' | 'delete';
+            filePath: string;
+            content?: string;
+            originalContent?: string;
+        }>, 
+        description: string
+    ): Promise<FileOperationGroup> {
+        // Generate a unique ID for the group
+        const groupId = `group-${Date.now()}`;
+        
+        // Process each operation and collect the created operations
+        const createdOperations: FileOperation[] = [];
+        
+        for (const operation of operations) {
+            try {
+                let fileOp: FileOperation;
+                
+                if (operation.type === 'add' && operation.content) {
+                    fileOp = await this.createAddOperation(
+                        operation.filePath, 
+                        operation.content, 
+                        `[Group: ${description}] Add ${path.basename(operation.filePath)}`
+                    );
+                } else if (operation.type === 'update' && operation.content && operation.originalContent) {
+                    fileOp = await this.createUpdateOperation(
+                        operation.filePath,
+                        operation.originalContent,
+                        operation.content,
+                        `[Group: ${description}] Update ${path.basename(operation.filePath)}`
+                    );
+                } else if (operation.type === 'delete' && operation.originalContent) {
+                    fileOp = await this.createDeleteOperation(
+                        operation.filePath,
+                        operation.originalContent,
+                        `[Group: ${description}] Delete ${path.basename(operation.filePath)}`
+                    );
+                } else {
+                    console.error(`Invalid operation type or missing content: ${operation.type}`);
+                    continue;
+                }
+                
+                createdOperations.push(fileOp);
+            } catch (error) {
+                console.error(`Error creating operation for ${operation.filePath}:`, error);
+            }
+        }
+        
+        // Create the operation group
+        const group: FileOperationGroup = {
+            id: groupId,
+            description,
+            operations: createdOperations,
+            created: Date.now(),
+            isApplied: createdOperations.every(op => op.isApplied)
+        };
+        
+        // Store the group
+        this.operationGroups.set(groupId, group);
+        
+        // Notify webview
+        this.notifyWebview();
+        
+        return group;
+    }
+    
+    /**
+     * Get all operation groups
+     */
+    public getOperationGroups(): FileOperationGroup[] {
+        return Array.from(this.operationGroups.values());
+    }
+    
+    /**
+     * Accept all operations in a group
+     */
+    public async acceptGroup(groupId: string): Promise<boolean> {
+        const group = this.operationGroups.get(groupId);
+        if (!group) return false;
+        
+        let allSucceeded = true;
+        
+        for (const operation of group.operations) {
+            try {
+                const success = await this.acceptOperation(operation.id);
+                if (!success) {
+                    allSucceeded = false;
+                }
+            } catch (error) {
+                console.error(`Error accepting operation ${operation.id}:`, error);
+                allSucceeded = false;
+            }
+        }
+        
+        // Remove the group if all operations are applied
+        if (allSucceeded) {
+            this.operationGroups.delete(groupId);
+            this.notifyWebview();
+        }
+        
+        return allSucceeded;
+    }
+    
+    /**
+     * Reject all operations in a group
+     */
+    public async rejectGroup(groupId: string): Promise<boolean> {
+        const group = this.operationGroups.get(groupId);
+        if (!group) return false;
+        
+        // Process operations in reverse order (newest first)
+        const operations = [...group.operations].reverse();
+        
+        let allSucceeded = true;
+        
+        for (const operation of operations) {
+            try {
+                const success = await this.rejectOperation(operation.id);
+                if (!success) {
+                    allSucceeded = false;
+                }
+            } catch (error) {
+                console.error(`Error rejecting operation ${operation.id}:`, error);
+                allSucceeded = false;
+            }
+        }
+        
+        // Remove the group
+        this.operationGroups.delete(groupId);
+        this.notifyWebview();
+        
+        return allSucceeded;
+    }
+    
+    /**
+     * Detect related file operations and group them
+     * This can be called after multiple files have been processed
+     */
+    public groupRelatedOperations(): void {
+        // Map to track operations by directory
+        const operationsByDir: Map<string, FileOperation[]> = new Map();
+        
+        // Group operations by directory
+        for (const operation of this.pendingOperations.values()) {
+            const dir = path.dirname(operation.filePath);
+            if (!operationsByDir.has(dir)) {
+                operationsByDir.set(dir, []);
+            }
+            operationsByDir.get(dir)?.push(operation);
+        }
+        
+        // Create groups for directories with multiple operations
+        for (const [dir, operations] of operationsByDir.entries()) {
+            if (operations.length > 1) {
+                const groupId = `group-${Date.now()}-${dir.replace(/[^a-z0-9]/gi, '-')}`;
+                
+                // Create the group
+                const group: FileOperationGroup = {
+                    id: groupId,
+                    description: `Multiple file operations in ${path.basename(dir)}`,
+                    operations,
+                    created: Date.now(),
+                    isApplied: operations.every(op => op.isApplied)
+                };
+                
+                // Store the group
+                this.operationGroups.set(groupId, group);
+                
+                // Remove individual operations from pending list
+                for (const op of operations) {
+                    this.pendingOperations.delete(op.id);
+                }
+            }
+        }
+        
+        // Notify webview of changes
         this.notifyWebview();
     }
 } 
