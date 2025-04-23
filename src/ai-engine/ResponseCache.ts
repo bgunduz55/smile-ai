@@ -28,6 +28,9 @@ export class ResponseCache {
     private hitCount: number = 0;
     private missCount: number = 0;
     private enabled: boolean = true;
+    private skipEmbeddingCheck: boolean = false;
+    private queryHashMap: Map<string, string> = new Map();
+    private cachePriority: Map<string, number> = new Map(); // Higher number = higher priority
 
     private constructor() {
         // Initialize settings from configuration
@@ -61,6 +64,7 @@ export class ResponseCache {
         this.enabled = performanceConfig.cacheResponses !== false;
         this.maxCacheSize = performanceConfig.maxCacheSize || 50;
         this.adaptiveThreshold = performanceConfig.adaptiveThreshold !== false;
+        this.skipEmbeddingCheck = performanceConfig.skipEmbeddingCheck === true;
         
         if (typeof performanceConfig.similarityThreshold === 'number') {
             this.similarityThreshold = performanceConfig.similarityThreshold;
@@ -74,21 +78,67 @@ export class ResponseCache {
     }
     
     /**
-     * Check if a similar query exists in cache and return its response
-     * @param query User query
-     * @param embedding Vector embedding of the query
-     * @param mode Interaction mode (chat, agent, ask, completion)
-     * @returns Cached response if available, null otherwise
+     * Compute a simple hash of a string for quick-matching
      */
-    public findSimilarResponse(_query: string, embedding: number[], mode: 'chat' | 'agent' | 'ask' | 'completion'): string | null {
+    private computeQueryHash(query: string): string {
+        // Normalize the query and remove common tokens
+        const normalizedQuery = query
+            .toLowerCase()
+            .replace(/[.,\/#!$%\^&\*;:{}=\-_`~()]/g, '')
+            .replace(/\s+/g, ' ')
+            .trim();
+        
+        // Use a simple hash for string comparison to avoid computing embeddings
+        // when queries are very similar
+        return normalizedQuery.substring(0, 50);
+    }
+    
+    /**
+     * Check if a similar query exists in cache and return its response
+     */
+    public findSimilarResponse(query: string, embedding: number[], mode: 'chat' | 'agent' | 'ask' | 'completion'): string | null {
         if (!this.enabled) {
             return null;
         }
         
-        // Adaptively adjust the similarity threshold based on cache hit rate
+        // First try exact match with hash for very fast response
+        const queryHash = this.computeQueryHash(query);
+        const cachedResponseId = this.queryHashMap.get(queryHash);
+        
+        if (cachedResponseId) {
+            const exactMatch = this.cache.find(entry => 
+                entry.mode === mode && 
+                entry.query === query
+            );
+            
+            if (exactMatch) {
+                console.log('Cache hit: Exact match found');
+                // Increase the priority of this entry
+                this.increaseCachePriority(exactMatch);
+                this.hitCount++;
+                return exactMatch.response;
+            }
+            
+            // If not exact but hash matches, we still have a good candidate
+            const hashMatch = this.cache.find(entry => entry.mode === mode && this.computeQueryHash(entry.query) === queryHash);
+            if (hashMatch) {
+                console.log('Cache hit: Hash match found');
+                // Increase the priority of this entry
+                this.increaseCachePriority(hashMatch);
+                this.hitCount++;
+                return hashMatch.response;
+            }
+        }
+        
+        // If we didn't get a hash hit and embedding check is disabled, return null
+        if (this.skipEmbeddingCheck || !embedding) {
+            this.missCount++;
+            return null;
+        }
+        
+        // Fall back to embedding similarity check
         const effectiveThreshold = this.getEffectiveThreshold();
         
-        // Find best match in cache
         let bestMatch: CacheEntry | null = null;
         let highestSimilarity = 0;
         
@@ -109,14 +159,21 @@ export class ResponseCache {
         
         if (bestMatch) {
             console.log(`Cache hit for query with similarity ${highestSimilarity.toFixed(3)}, effective threshold: ${effectiveThreshold.toFixed(3)}`);
+            // Increase the priority of this entry
+            this.increaseCachePriority(bestMatch);
             this.hitCount++;
             return bestMatch.response;
         }
         
         // Cache miss
         this.missCount++;
-        
         return null;
+    }
+    
+    private increaseCachePriority(entry: CacheEntry): void {
+        // Use a combination of timestamp and access count to create a priority score
+        const currentPriority = this.cachePriority.get(entry.query) || 0;
+        this.cachePriority.set(entry.query, currentPriority + 1);
     }
     
     /**
@@ -149,17 +206,39 @@ export class ResponseCache {
     
     /**
      * Add a new response to the cache
-     * @param query User query
-     * @param embedding Vector embedding of the query
-     * @param response AI response
-     * @param mode Interaction mode
      */
     public addResponse(query: string, embedding: number[], response: string, mode: 'chat' | 'agent' | 'ask' | 'completion'): void {
         if (!this.enabled) {
             return;
         }
         
-        // Add to cache
+        // Store the hash mapping for quick lookup later
+        const queryHash = this.computeQueryHash(query);
+        this.queryHashMap.set(queryHash, query);
+        
+        // Check if this query already exists in the cache
+        const existingIndex = this.cache.findIndex(entry => 
+            entry.query === query && entry.mode === mode
+        );
+        
+        if (existingIndex !== -1) {
+            // Update existing entry
+            this.cache[existingIndex] = {
+                query,
+                embedding,
+                response,
+                timestamp: Date.now(),
+                mode
+            };
+            
+            // Increase its priority
+            this.increaseCachePriority(this.cache[existingIndex]);
+            
+            console.log(`Updated existing cache entry for query: ${query.substring(0, 30)}...`);
+            return;
+        }
+        
+        // Add new entry to cache
         this.cache.push({
             query,
             embedding,
@@ -168,11 +247,34 @@ export class ResponseCache {
             mode
         });
         
+        // Initialize priority
+        this.cachePriority.set(query, 1);
+        
         // Trim cache if exceeds maximum size
         if (this.cache.length > this.maxCacheSize) {
-            // Remove oldest entries
-            this.cache.sort((a, b) => b.timestamp - a.timestamp);
-            this.cache = this.cache.slice(0, this.maxCacheSize);
+            // Sort by priority (higher priority items are kept)
+            this.cache.sort((a, b) => {
+                const priorityA = this.cachePriority.get(a.query) || 0;
+                const priorityB = this.cachePriority.get(b.query) || 0;
+                
+                if (priorityA !== priorityB) {
+                    return priorityB - priorityA; // Higher priority first
+                }
+                
+                // If same priority, newer items are kept
+                return b.timestamp - a.timestamp;
+            });
+            
+            const removed = this.cache.splice(this.maxCacheSize);
+            
+            // Clean up hash map and priority map for removed entries
+            removed.forEach(entry => {
+                const hash = this.computeQueryHash(entry.query);
+                if (this.queryHashMap.get(hash) === entry.query) {
+                    this.queryHashMap.delete(hash);
+                }
+                this.cachePriority.delete(entry.query);
+            });
         }
         
         // Log cache stats periodically
@@ -188,6 +290,8 @@ export class ResponseCache {
      */
     public clearCache(): void {
         this.cache = [];
+        this.queryHashMap.clear();
+        this.cachePriority.clear();
         console.log('Response cache cleared');
     }
     

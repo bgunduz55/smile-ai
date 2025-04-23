@@ -340,28 +340,58 @@ export class AIAssistantPanel {
                 delete cleanOptions.originalText;
             }
 
-            // Process with AI and get response
-            const response = await this.aiEngine.processMessage(text, { 
-                options: cleanOptions,
-                codebaseIndex: this.codebaseIndexer.getIndex()
-            });
-            
-            // Add assistant response
+            // Create a placeholder message for streaming
+            const assistantMessageId = `msg_${Date.now()}`;
             const assistantMessage: Message = {
+                id: assistantMessageId,
                 role: 'assistant',
-                content: response,
+                content: '',
                 timestamp: Date.now()
             };
             this.messages.push(assistantMessage);
-
-            // Hide loading and show response
-            this.webviewView.webview.postMessage({
-                command: 'hideLoading'
-            });
             
+            // Add empty message to UI that will be updated with streaming content
             this.webviewView.webview.postMessage({
                 command: 'addMessage',
                 message: assistantMessage
+            });
+
+            // Use streaming API to get response chunks
+            let fullResponse = '';
+            const onChunk = (chunk: string) => {
+                fullResponse += chunk;
+                
+                // Update UI with the accumulated response so far
+                this.webviewView.webview.postMessage({
+                    command: 'updateMessage',
+                    id: assistantMessageId,
+                    content: fullResponse
+                });
+            };
+
+            // Process with AI and get response with streaming
+            await this.aiEngine.processMessageWithStream(
+                text, 
+                {
+                    options: {
+                        ...cleanOptions,
+                        stream: true
+                    },
+                    codebaseIndex: this.codebaseIndexer.getIndex()
+                }, 
+                'chat',
+                onChunk
+            );
+
+            // Update the stored message with final content
+            const messageIndex = this.messages.findIndex(m => m.id === assistantMessageId);
+            if (messageIndex !== -1) {
+                this.messages[messageIndex].content = fullResponse;
+            }
+
+            // Hide loading state (streaming is complete)
+            this.webviewView.webview.postMessage({
+                command: 'hideLoading'
             });
         } catch (error: any) {
             // Hide loading state
