@@ -7,6 +7,7 @@ import { TaskManager } from './TaskManager';
 import { CodebaseIndexer } from '../indexing/CodebaseIndexer';
 import { exec } from 'child_process';
 import { promisify } from 'util';
+import { AIProvider } from '../mcp/interfaces';
 
 const execPromise = promisify(exec);
 
@@ -15,10 +16,14 @@ const execPromise = promisify(exec);
  */
 export class AgentCommandHandler {
     private static instance: AgentCommandHandler;
+    private _aiEngine: AIEngine | AIProvider;
+    private _taskManager: TaskManager;
+    private _codebaseIndexer: CodebaseIndexer;
     private agentEngine: AgentEngine;
     private outputChannel: vscode.OutputChannel;
     private statusBarItem: vscode.StatusBarItem;
     private isProcessing: boolean = false;
+    private _context: vscode.ExtensionContext;
 
     /**
      * Get the singleton instance
@@ -34,22 +39,55 @@ export class AgentCommandHandler {
      * Initialize the singleton instance
      */
     public static initialize(
-        aiEngine: AIEngine,
+        context: vscode.ExtensionContext,
+        aiEngine: AIEngine | AIProvider,
         taskManager: TaskManager,
         codebaseIndexer: CodebaseIndexer
     ): AgentCommandHandler {
         if (!AgentCommandHandler.instance) {
-            AgentCommandHandler.instance = new AgentCommandHandler(aiEngine, taskManager, codebaseIndexer);
+            AgentCommandHandler.instance = new AgentCommandHandler(context, aiEngine, taskManager, codebaseIndexer);
+        } else {
+            AgentCommandHandler.instance._aiEngine = aiEngine;
+            AgentCommandHandler.instance._taskManager = taskManager;
+            AgentCommandHandler.instance._codebaseIndexer = codebaseIndexer;
         }
         return AgentCommandHandler.instance;
     }
 
     constructor(
-        aiEngine: AIEngine,
+        context: vscode.ExtensionContext,
+        aiEngine: AIEngine | AIProvider,
         taskManager: TaskManager,
         codebaseIndexer: CodebaseIndexer
     ) {
-        this.agentEngine = AgentEngine.getInstance(aiEngine, taskManager, codebaseIndexer);
+        this._context = context;
+        this._aiEngine = aiEngine;
+        this._taskManager = taskManager;
+        this._codebaseIndexer = codebaseIndexer;
+        
+        // AgentEngine sadece AIEngine ile çalışıyor, tip uyumsuzluğunu kontrol et
+        if ('config' in aiEngine) {
+            // AIEngine instance'ı
+            this.agentEngine = AgentEngine.getInstance(aiEngine as AIEngine, taskManager, codebaseIndexer);
+        } else {
+            // AIProvider instance'ı - bu durumda MCPAgentAdapter kullanılacak
+            // AgentEngine oluşturmadan önce bir uyarı göster
+            console.warn('Using MCPAgentAdapter instead of AIEngine for agent commands');
+            
+            // Burada gerçek bir AIEngine oluşturmak yerine, eklentiden alınabilir
+            const dummyEngine = new AIEngine({
+                provider: {
+                    name: 'local-dummy',
+                    modelName: 'dummy-model',
+                    apiEndpoint: 'http://localhost'
+                },
+                temperature: 0.7,
+                maxTokens: 2048
+            });
+            
+            this.agentEngine = AgentEngine.getInstance(dummyEngine, taskManager, codebaseIndexer);
+        }
+        
         this.outputChannel = vscode.window.createOutputChannel('Smile AI Agent');
         this.statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
         this.statusBarItem.text = '$(rocket) Smile AI';
@@ -370,5 +408,12 @@ export class AgentCommandHandler {
         
         // Join with workspace root
         return path.join(workspaceRoot, inputPath);
+    }
+
+    /**
+     * AIEngine veya AIProvider'ı günceller
+     */
+    public updateAIProvider(aiProvider: AIEngine | AIProvider): void {
+        this._aiEngine = aiProvider;
     }
 } 

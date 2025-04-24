@@ -369,19 +369,68 @@ export class AIAssistantPanel {
                 });
             };
 
-            // Process with AI and get response with streaming
-            await this.aiEngine.processMessageWithStream(
-                text, 
+            // Try to get MCP provider from SmileAIExtension
+            let aiProvider = this.aiEngine;
+            try {
+                const extensionExports = require('../extension');
+                if (extensionExports && extensionExports.extension) {
+                    const extension = extensionExports.extension;
+                    if (extension.getAIProvider) {
+                        const provider = extension.getAIProvider();
+                        if (provider && provider.constructor && provider.constructor.name !== 'AIEngine') {
+                            console.log('🌐 Using SmileAgent Server provider for AI request');
+                            aiProvider = provider;
+                        }
+                    }
+                }
+            } catch (error) {
+                console.warn('❌ Failed to get MCP provider, using local AI engine:', error);
+            }
+
+            // Convert messages for AIProvider format
+            const aiMessages: AIMessage[] = [
                 {
-                    options: {
-                        ...cleanOptions,
-                        stream: true
-                    },
-                    codebaseIndex: this.codebaseIndexer.getIndex()
-                }, 
-                'chat',
-                onChunk
-            );
+                    role: 'user',
+                    content: text
+                }
+            ];
+
+            // Use chat method from AIProvider
+            if (aiProvider.chat) {
+                console.log('🚀 Using AIProvider.chat method with streaming support');
+                const systemPrompt = "You are an AI coding assistant that helps with programming tasks. You can:\n                    - Write and modify code\n                    - Answer questions\n                    - Provide suggestions\n                    - Help with debugging\n                    Aim to be helpful while following the user's lead.";
+                
+                const response = await aiProvider.chat(aiMessages, systemPrompt, {
+                    ...cleanOptions,
+                    stream: true,
+                    onChunk
+                });
+                
+                if (response && response.message && !fullResponse) {
+                    fullResponse = response.message;
+                    
+                    // Update UI with the final response if streaming didn't work
+                    this.webviewView.webview.postMessage({
+                        command: 'updateMessage',
+                        id: assistantMessageId,
+                        content: fullResponse
+                    });
+                }
+            } else {
+                // Fallback to processMessageWithStream if chat method not available
+                await this.aiEngine.processMessageWithStream(
+                    text, 
+                    {
+                        options: {
+                            ...cleanOptions,
+                            stream: true
+                        },
+                        codebaseIndex: this.codebaseIndexer.getIndex()
+                    }, 
+                    'chat',
+                    onChunk
+                );
+            }
 
             // Update the stored message with final content
             const messageIndex = this.messages.findIndex(m => m.id === assistantMessageId);
