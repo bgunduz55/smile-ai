@@ -27,6 +27,11 @@ import { TaskManager } from './agent/TaskManager';
 import { MCPController } from './models/mcp/MCPController';
 import { MCPAgentService } from './models/mcp/services/MCPAgentService';
 import { AIEngineAdapter } from './models/mcp/adapters/AIEngineAdapter';
+import { MCPService } from './mcp/MCPService';
+import { MCPAgentAdapter } from './mcp/MCPAgentAdapter';
+import { AIProvider } from './mcp/interfaces';
+import { ChatService } from './utils/ChatService';
+import { ChatViewProvider } from './webview/ChatViewProvider';
 
 // Export the main extension class
 export class SmileAIExtension {
@@ -42,6 +47,9 @@ export class SmileAIExtension {
     private readonly completionManager: CompletionManager;
     private aiAssistantPanel: AIAssistantPanel | undefined;
     private readonly context: vscode.ExtensionContext;
+    private mcpService: MCPService | undefined;
+    private mcpAgentAdapter: MCPAgentAdapter | undefined;
+    private chatService: ChatService | undefined;
 
     constructor(context: vscode.ExtensionContext) {
         this.context = context;
@@ -206,6 +214,11 @@ export class SmileAIExtension {
                 if (e.affectsConfiguration('smile-ai.behavior')) {
                     this.completionManager.updateFromConfig();
                 }
+                
+                // Update MCP settings when mcp config changes
+                if (e.affectsConfiguration('smile-ai.mcp')) {
+                    this.updateMCPSettings();
+                }
             });
 
             // Add other initialization tasks here
@@ -215,7 +228,12 @@ export class SmileAIExtension {
             const taskManager = new TaskManager();
             
             // Initialize the Agent Command Handler
-            const agentCommandHandler = AgentCommandHandler.initialize(this.aiEngine, taskManager, this.codebaseIndexer);
+            const agentCommandHandler = AgentCommandHandler.initialize(
+                this.context,
+                this.aiEngine,
+                taskManager,
+                this.codebaseIndexer
+            );
             
             // Register agent commands
             agentCommandHandler.registerCommands(this.context);
@@ -244,6 +262,10 @@ export class SmileAIExtension {
                 });
 
             this.statusBarItem.text = "$(rocket) Smile AI";
+
+            // Force initialize MCP Service regardless of config
+            console.log('🚀 Initializing MCP Service for SmileAgent Server connection');
+            await this.initializeMCPService();
         } catch (error) {
             this.showError(`Initialization error: ${error instanceof Error ? error.message : String(error)}`);
             console.error('Initialization error:', error);
@@ -308,6 +330,36 @@ export class SmileAIExtension {
         
         // Update AI engine config
         this.aiEngine.updateConfig({ enableRAG });
+    }
+
+    /**
+     * MCP ayarlarını günceller
+     */
+    private async updateMCPSettings(): Promise<void> {
+        try {
+            const config = vscode.workspace.getConfiguration('smile-ai');
+            const useLocalServer = config.get<boolean>('mcp.useLocalServer', true);
+            
+            if (useLocalServer) {
+                const mcpServerUrl = config.get<string>('mcp.serverUrl', 'ws://localhost:3010');
+                
+                // MCP servisi zaten başlatıldıysa ve URL değiştiyse yeniden bağlan
+                if (this.mcpService && this.mcpService.isConnected()) {
+                    await vscode.commands.executeCommand('smile-ai.reconnectServer');
+                } else if (!this.mcpService) {
+                    // MCP servisi hiç başlatılmadıysa başlat
+                    await this.initializeMCPService();
+                }
+            } else {
+                // Lokal server kullanılmayacaksa ve bağlantı varsa kapat
+                if (this.mcpService) {
+                    this.mcpService.dispose();
+                    this.mcpService = undefined;
+                }
+            }
+        } catch (error) {
+            console.error('Error updating MCP settings:', error);
+        }
     }
 
     private registerCommands(): void {
@@ -607,6 +659,121 @@ export class SmileAIExtension {
         );
     }
 
+    /**
+     * MCP Servisini başlatır ve SmileAgent Server'a bağlanır
+     */
+    private async initializeMCPService(): Promise<boolean> {
+        try {
+            console.log('🌐 Starting MCP Service initialization');
+            
+            // Her durumda bağlantıyı deneyeceğiz
+            // Config default değerlerini değiştirsek de olur
+            const mcpServerUrl = 'ws://localhost:3010';
+            console.log(`🌐 Trying to connect to SmileAgent Server at ${mcpServerUrl}`);
+            
+            this.mcpService = new MCPService({
+                serverUrl: mcpServerUrl,
+                reconnectInterval: 5000,
+                maxReconnectAttempts: 5
+            });
+            
+            // MCPService'i başlat ve bağlantıyı kur
+            const connected = await this.mcpService.initialize();
+            
+            if (connected) {
+                // Bağlantı başarılıysa MCPAgentAdapter'ı oluştur
+                this.mcpAgentAdapter = new MCPAgentAdapter(this.mcpService);
+                console.log('✅ MCPAgentAdapter initialized successfully');
+                
+                // Initialize chat functionality
+                await this.initializeChatService();
+                
+                vscode.window.showInformationMessage('✅ Connected to SmileAgent Server. AI requests will be processed on the server.');
+                return true;
+            } else {
+                console.warn('⚠️ Failed to connect to SmileAgent Server, MCPAgentAdapter not initialized');
+                vscode.window.showWarningMessage('⚠️ Could not connect to SmileAgent Server. Using local AI engine.');
+                return false;
+            }
+        } catch (error) {
+            console.error('❌ Error initializing MCPService:', error);
+            vscode.window.showErrorMessage(`❌ Error connecting to SmileAgent Server: ${error instanceof Error ? error.message : String(error)}`);
+            return false;
+        }
+    }
+
+    /**
+     * Sunucu bağlantısına göre AI Engine veya MCP Agent Adapter'ı döndürür
+     */
+    public getAIProvider(): AIProvider {
+        // MCP bağlantısı varsa ve kullanımı etkinse, MCP Agent Adapter'ı kullan
+        console.log('🔍 getAIProvider called, checking MCP adapter status');
+        
+        try {
+            // Önce MCPService bağlantısını kontrol et
+            if (this.mcpService) {
+                const mcpConnected = this.mcpService.isConnected();
+                console.log(`⚡ MCPService connection status: ${mcpConnected ? 'Connected' : 'Not connected'}`);
+                
+                // Sonra MCPAgentAdapter'ı kontrol et
+                if (this.mcpAgentAdapter) {
+                    const adapterConnected = this.mcpAgentAdapter.isConnected();
+                    console.log(`⚡ MCPAgentAdapter connection status: ${adapterConnected ? 'Connected' : 'Not connected'}`);
+                    
+                    if (adapterConnected) {
+                        console.log('✅ Using MCPAgentAdapter as AI provider (SmileAgent Server)');
+                        return this.mcpAgentAdapter;
+                    } else {
+                        console.log('⚠️ MCPAgentAdapter exists but reports not connected');
+                    }
+                } else {
+                    console.log('⚠️ MCPService exists but MCPAgentAdapter not initialized');
+                    
+                    // MCPService varsa ama adapter yoksa, adapter'ı oluştur ve dene
+                    if (mcpConnected) {
+                        console.log('🔄 Creating MCPAgentAdapter from existing MCPService');
+                        this.mcpAgentAdapter = new MCPAgentAdapter(this.mcpService);
+                        
+                        if (this.mcpAgentAdapter.isConnected()) {
+                            console.log('✅ Newly created MCPAgentAdapter is connected, using it');
+                            return this.mcpAgentAdapter;
+                        }
+                    }
+                }
+            } else {
+                console.log('⚠️ MCPService not initialized');
+                
+                // MCPService yoksa, oluşturmayı dene
+                const config = vscode.workspace.getConfiguration('smile-ai');
+                const useLocalServer = config.get<boolean>('mcp.useLocalServer', true);
+                
+                if (useLocalServer) {
+                    console.log('🔄 Trying to initialize MCPService on-demand');
+                    // Explicit type cast to Promise<boolean>
+                    const initPromise = this.initializeMCPService() as Promise<boolean>;
+                    initPromise.then(success => {
+                        if (success) {
+                            console.log('MCPService initialization successful');
+                            if (this.mcpAgentAdapter && this.mcpAgentAdapter.isConnected()) {
+                                console.log('✅ New MCPAgentAdapter is connected and ready for next request');
+                            }
+                        } else {
+                            console.log('MCPService initialization failed');
+                        }
+                    }).catch(error => {
+                        console.error('Error initializing MCPService:', error);
+                    });
+                }
+            }
+        } catch (error) {
+            console.error('❌ Error checking MCP provider:', error);
+        }
+        
+        // Yoksa yerel AI Engine'i kullan
+        console.log('⚙️ Using local AIEngine as provider');
+        return this.aiEngine;
+    }
+
     // Helper methods to work with private AIAssistantPanel methods
     public dispose() {
         this.statusBarItem.dispose();
@@ -615,6 +782,36 @@ export class SmileAIExtension {
         // Note: CodebaseIndexer and ImprovementManager don't need dispose methods
         if (this.aiAssistantPanel) {
             this.aiAssistantPanel.dispose();
+        }
+        
+        // MCP servisi ve adaptörü varsa dispose et
+        if (this.mcpService) {
+            this.mcpService.dispose();
+            this.mcpService = undefined;
+            this.mcpAgentAdapter = undefined;
+        }
+    }
+
+    // Initialize chat functionality with server connectivity
+    private async initializeChatService(): Promise<void> {
+        try {
+            if (!this.mcpService) {
+                console.error('❌ Cannot initialize ChatService - MCPService not available');
+                return;
+            }
+
+            console.log('🚀 Initializing ChatService for server-based chat');
+            this.chatService = ChatService.getInstance(this.mcpService.getClient(), this.context);
+            
+            // Register the chat view provider
+            const chatViewProvider = new ChatViewProvider(this.context.extensionUri, this.chatService);
+            this.context.subscriptions.push(
+                vscode.window.registerWebviewViewProvider('smile-ai.chatView', chatViewProvider)
+            );
+            
+            console.log('✅ ChatService initialized and Chat View registered');
+        } catch (error) {
+            console.error('❌ Error initializing ChatService:', error);
         }
     }
 }

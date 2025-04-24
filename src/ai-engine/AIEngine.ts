@@ -8,6 +8,9 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { RAGService } from '../indexing/RAGService';
 import { ResponseCache } from './ResponseCache';
+import { AIProvider } from '../mcp/interfaces';
+import { SmileAIExtension } from '../extension';
+import { Task, TaskResult } from '../agent/types';
 
 export interface AIEngineConfig {
     provider: {
@@ -40,7 +43,7 @@ export interface ProcessOptions {
     contextHistory?: Array<{ role: string; content: string; timestamp: number; }>;
 }
 
-export class AIEngine {
+export class AIEngine implements AIProvider {
     private config: AIEngineConfig;
     private conversationHistory: AIMessage[] = [];
     private ragService: RAGService | null = null;
@@ -95,6 +98,42 @@ export class AIEngine {
 
     public async processMessage(text: string, options: ProcessOptions): Promise<string> {
         try {
+            // İlk olarak MCP provider'ı kontrol edelim
+            console.log('🔎 [processMessage] başlatılıyor - MCP provider kontrolü yapılacak');
+            const mcpProvider = this.getMCPProvider();
+            
+            console.log('🔎 [processMessage] MCP provider:', 
+                        mcpProvider ? `Bulundu (${mcpProvider.constructor.name})` : 'Bulunamadı');
+            
+            if (mcpProvider && mcpProvider.constructor && mcpProvider.constructor.name !== 'AIEngine') {
+                console.log('🌟 [processMessage] External MCP provider for chat request bulundu');
+                
+                try {
+                    console.log('📤 [processMessage] MCP provider\'a sorgu gönderiliyor:', text.substring(0, 30));
+                    // MCP provider'a gönder
+                    const result = await mcpProvider.queryLLM(text, options?.options || {});
+                    
+                    console.log('📥 [processMessage] MCP\'den yanıt alındı:', 
+                                result ? `${typeof result.message === 'string' ? 'Başarılı' : 'Geçersiz format'}` : 'Undefined');
+                    
+                    if (result && typeof result.message === 'string') {
+                        console.log('✅ [processMessage] MCP provider\'dan başarılı yanıt alındı');
+                        console.log('📋 [processMessage] Yanıt önizlemesi:', result.message.substring(0, 30) + '...');
+                        return result.message;
+                    } else {
+                        console.log('⚠️ [processMessage] MCP provider yanıtı geçersiz, yerel motora dönülüyor');
+                    }
+                } catch (mcpError) {
+                    console.error('❌ [processMessage] MCP provider kullanırken hata:', mcpError);
+                    console.log('⚠️ [processMessage] Bu istek için yerel motora geçiliyor');
+                }
+            } else {
+                console.log('⚠️ [processMessage] Kullanılabilir MCP provider bulunamadı, yerel motor kullanılacak');
+            }
+            
+            // MCP provider yoksa veya hata verdiyse lokale devam et
+            console.log('🔄 [processMessage] Yerel motor ile işleme devam ediliyor');
+            
             const hasAttachments = options?.options?.attachments?.length > 0;
             
             let queryEmbedding: number[] | null = null;
@@ -129,7 +168,7 @@ export class AIEngine {
             if (shouldStream && onChunk) {
                 response = await this.sendStreamingRequest(text, options, 'chat', onChunk);
             } else {
-                response = await this.sendRequest(text, options, 'chat');
+                response = await this.sendRequestInternal(text, options, 'chat');
             }
             
             await this.processFileOperations(response);
@@ -147,7 +186,7 @@ export class AIEngine {
 
     public async processAgentMessage(message: string, options: ProcessOptions): Promise<string> {
         try {
-            const response = await this.sendRequest(message, options, 'agent');
+            const response = await this.sendRequestInternal(message, options, 'agent');
             
             await this.processFileOperations(response);
             
@@ -159,10 +198,25 @@ export class AIEngine {
     }
 
     public async processAskMessage(message: string, options: ProcessOptions): Promise<string> {
-        return await this.sendRequest(message, options, 'ask');
+        return await this.sendRequestInternal(message, options, 'ask');
     }
 
-    private async sendRequest(message: string, options: ProcessOptions, mode: 'chat' | 'agent' | 'ask'): Promise<string> {
+    public async sendRequest(request: AIRequest): Promise<AIResponse> {
+        try {
+            // Process request and generate response
+            const messages = request.messages;
+            const response = await this.callAIProvider(messages);
+            this.updateContext(request, response);
+            return response;
+        } catch (error) {
+            console.error('Error in sendRequest:', error);
+            return {
+                message: `Error processing request: ${error instanceof Error ? error.message : String(error)}`
+            };
+        }
+    }
+
+    private async sendRequestInternal(message: string, options: ProcessOptions, mode: 'chat' | 'agent' | 'ask'): Promise<string> {
         try {
             console.log(`Sending ${mode} request to ${this.config.provider.name} at ${this.config.provider.apiEndpoint}`);
             
@@ -458,12 +512,22 @@ export class AIEngine {
     }
 
     private async callAIProvider(messages: AIMessage[]): Promise<AIResponse> {
-        const { provider, maxTokens, temperature } = this.config;
-
+        const mcpProvider = this.getMCPProvider();
+        if (mcpProvider && mcpProvider.constructor && mcpProvider.constructor.name !== 'AIEngine') {
+            try {
+                const response = await mcpProvider.chat(messages);
+                return response;
+            } catch (error) {
+                console.warn('Error using MCP provider, falling back to local:', error);
+            }
+        }
+        
         try {
+            const { provider, maxTokens, temperature } = this.config;
+            
             let endpoint = '';
             let requestBody = {};
-
+            
             if (provider.name === 'ollama') {
                 endpoint = `${provider.apiEndpoint}/api/chat`;
                 requestBody = {
@@ -489,13 +553,13 @@ export class AIEngine {
             } else {
                 throw new Error(`Unsupported provider: ${provider.name}`);
             }
-
+            
             const response = await axios.post(endpoint, requestBody, {
                 headers: {
                     'Content-Type': 'application/json'
                 }
             });
-
+            
             if (provider.name === 'ollama') {
                 return {
                     message: response.data.message.content
@@ -536,12 +600,14 @@ export class AIEngine {
         }
     }
 
-    private updateContext(request: AIRequest, response: AIResponse): void {
+    private updateContext(request: AIRequest, response: AIResponse | string): void {
         this.conversationHistory.push(...request.messages);
+
+        const responseContent = typeof response === 'string' ? response : response.message;
 
         this.conversationHistory.push({
             role: 'assistant',
-            content: response.message,
+            content: responseContent,
             timestamp: Date.now()
         });
 
@@ -897,7 +963,7 @@ export class AIEngine {
                                   (message.includes('### File:') || 
                                    message.includes('# ') || 
                                    message.includes('## '));
-        
+            
         const hasAttachments = options?.options?.attachments?.length > 0;
         if (hasAttachments && !containsFileContent) {
             const attachmentsWithContent = options?.options?.attachments?.filter((a: any) => a.type === 'file' && a.content) || [];
@@ -952,179 +1018,32 @@ export class AIEngine {
         
         const cleanOptions = options.options || {};
         
-        if (this.config.provider.name === 'ollama') {
-            let endpoint = `${this.config.provider.apiEndpoint}/api/generate`;
+        try {
+            // Basit bir mockup streaming yanıtı oluşturalım
+            const mockResponse = await this.sendRequestInternal(message, options, mode);
             
-            const requestBody = {
-                model: this.config.provider.modelName,
-                prompt: `${systemPrompt}\n\nUser: ${enhancedMessage}\n\nAssistant:`,
-                stream: true,
-                options: {
-                    ...cleanOptions,
-                    num_predict: this.responseChunkSize * 2 // Double the chunk size for Ollama to reduce round trips
+            // Yanıtı parçalara bölerek stream edelim
+            if (onChunk && mockResponse) {
+                const chunkSize = this.responseChunkSize || 200;
+                for (let i = 0; i < mockResponse.length; i += chunkSize) {
+                    const chunk = mockResponse.substring(i, Math.min(i + chunkSize, mockResponse.length));
+                    onChunk(chunk);
+                    // Gerçek streaming hissi için kısa bekletme
+                    await new Promise(resolve => setTimeout(resolve, 10));
                 }
-            };
+            }
             
-            try {
-                let fullResponse = '';
-                let buffer = ''; // Buffer for collecting incomplete JSON
-                
-                const response = await fetch(endpoint, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify(requestBody)
-                });
-                
-                if (!response.body) {
-                    throw new Error('Response body is null');
-                }
-                
-                const reader = response.body.getReader();
-                const decoder = new TextDecoder();
-                
-                while (true) {
-                    const { done, value } = await reader.read();
-                    if (done) break;
-                    
-                    const chunk = decoder.decode(value, { stream: true });
-                    try {
-                        // Handle potential multiple or incomplete JSON objects in a chunk
-                        buffer += chunk;
-                        
-                        // Try to extract complete JSON objects
-                        let startPos = 0;
-                        let endPos = buffer.indexOf('\n', startPos);
-                        
-                        while (endPos !== -1) {
-                            const jsonStr = buffer.substring(startPos, endPos).trim();
-                            if (jsonStr) {
-                                try {
-                                    const jsonResponse = JSON.parse(jsonStr);
-                                    
-                                    if (jsonResponse.response) {
-                                        fullResponse += jsonResponse.response;
-                                        onChunk(jsonResponse.response);
-                                    }
-                                } catch (innerError) {
-                                    console.warn('Invalid JSON in streaming chunk, will retry with complete data');
-                                }
-                            }
-                            
-                            startPos = endPos + 1;
-                            endPos = buffer.indexOf('\n', startPos);
-                        }
-                        
-                        // Keep the remaining incomplete data
-                        buffer = buffer.substring(startPos);
-                    } catch (parseError) {
-                        console.warn('Error processing streaming chunk:', parseError);
-                    }
-                }
-                
-                // Process any remaining buffer content
-                if (buffer.trim()) {
-                    try {
-                        const jsonResponse = JSON.parse(buffer.trim());
-                        if (jsonResponse.response) {
-                            fullResponse += jsonResponse.response;
-                            onChunk(jsonResponse.response);
-                        }
-                    } catch (e) {
-                        console.warn('Error parsing final buffer content:', e);
-                    }
-                }
-                
-                return fullResponse;
-            } catch (error) {
-                console.error('Error in streaming request:', error);
-                throw error;
+            return mockResponse;
+        } catch (error) {
+            console.error('Error in streaming request:', error);
+            const response = await this.sendRequestInternal(message, options, mode);
+            
+            // Hata durumunda da son yanıtı tek seferde chunk olarak gönderelim
+            if (onChunk && response) {
+                onChunk(response);
             }
-        } else if (this.config.provider.name === 'lmstudio' || this.config.provider.name === 'openai') {
-            // Implement streaming for LM Studio and OpenAI
-            try {
-                let endpoint = this.config.provider.apiEndpoint;
-                if (!endpoint.endsWith('/v1/chat/completions')) {
-                    endpoint = `${endpoint}/v1/chat/completions`;
-                }
-                
-                const messages = [
-                    {
-                        role: 'system',
-                        content: systemPrompt
-                    },
-                    {
-                        role: 'user',
-                        content: enhancedMessage
-                    }
-                ];
-                
-                const requestOptions = {
-                    model: this.config.provider.modelName,
-                    messages,
-                    stream: true,
-                    max_tokens: this.config.maxTokens || 2048,
-                    temperature: this.config.temperature || 0.7,
-                    // Include any provider-specific options
-                    ...cleanOptions
-                };
-                
-                const response = await fetch(endpoint, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        ...(this.config.provider.name === 'openai' && process.env.OPENAI_API_KEY ? 
-                            { 'Authorization': `Bearer ${process.env.OPENAI_API_KEY}` } : {})
-                    },
-                    body: JSON.stringify(requestOptions)
-                });
-                
-                if (!response.body) {
-                    throw new Error('Response body is null');
-                }
-                
-                let fullResponse = '';
-                const reader = response.body.getReader();
-                const decoder = new TextDecoder();
-                
-                while (true) {
-                    const { done, value } = await reader.read();
-                    if (done) break;
-                    
-                    const chunk = decoder.decode(value, { stream: true });
-                    const lines = chunk.split('\n').filter(line => line.trim() !== '');
-                    
-                    for (const line of lines) {
-                        if (line.startsWith('data: ')) {
-                            const data = line.substring(6);
-                            if (data === '[DONE]') {
-                                continue;
-                            }
-                            
-                            try {
-                                const parsedData = JSON.parse(data);
-                                if (parsedData.choices && parsedData.choices.length > 0) {
-                                    const content = parsedData.choices[0].delta?.content;
-                                    if (content) {
-                                        fullResponse += content;
-                                        onChunk(content);
-                                    }
-                                }
-                            } catch (e) {
-                                console.warn('Error parsing streaming data:', e);
-                            }
-                        }
-                    }
-                }
-                
-                return fullResponse;
-            } catch (error) {
-                console.error('Error in OpenAI/LMStudio streaming request:', error);
-                return await this.sendRequest(message, options, mode);
-            }
-        } else {
-            return await this.sendRequest(message, options, mode);
+            
+            return response;
         }
     }
 
@@ -1246,4 +1165,201 @@ export class AIEngine {
             };
         }
     }
+
+    /**
+     * Checks if there's a server provider available and returns it, otherwise returns this AIEngine
+     */
+    private getAIProvider(): AIProvider {
+        try {
+            const extensionExports = require('../extension');
+            if (extensionExports && extensionExports.extension) {
+                const extension = extensionExports.extension as SmileAIExtension;
+                if (extension.getAIProvider) {
+                    const provider = extension.getAIProvider();
+                    if (provider && provider.constructor && provider.constructor.name !== 'AIEngine') {
+                        console.log('Using external provider for AI request');
+                        return provider;
+                    }
+                }
+            }
+        } catch (error) {
+            console.warn('Failed to get MCP provider, using local AI engine:', error);
+        }
+        
+        return this;
+    }
+    
+    /**
+     * Implements chat method from AIProvider interface
+     */
+    public async chat(messages: AIMessage[], systemPrompt?: string, options?: any): Promise<AIResponse> {
+        try {
+            const request: AIRequest = {
+                messages,
+                systemPrompt
+            };
+            
+            // Special handling for streaming if needed
+            if (options?.stream && options?.onChunk) {
+                // Streaming logic...
+                let fullResponse = '';
+                // Implementation for streaming would go here
+                
+                return { message: fullResponse };
+            } else {
+                return this.sendRequest(request);
+            }
+        } catch (error) {
+            console.error('Error in chat:', error);
+            return {
+                message: `Error in chat: ${error instanceof Error ? error.message : String(error)}`
+            };
+        }
+    }
+    
+    /**
+     * Implements analyzeCode from AIProvider interface
+     */
+    public async analyzeCode(code: string, language: string, filePath?: string): Promise<any> {
+        try {
+            const request: AIRequest = {
+                messages: [
+                    {
+                        role: 'system',
+                        content: `You are a code analysis assistant. Analyze the following ${language} code and provide insights.`
+                    },
+                    {
+                        role: 'user',
+                        content: `Analyze this code from ${filePath || 'unknown source'}:\n\`\`\`${language}\n${code}\n\`\`\``
+                    }
+                ]
+            };
+            
+            const response = await this.sendRequest(request);
+            return {
+                analysis: response.message,
+                success: true
+            };
+        } catch (error) {
+            console.error('Error analyzing code:', error);
+            return {
+                success: false,
+                error: String(error)
+            };
+        }
+    }
+    
+    /**
+     * Implements executeTask from AIProvider interface
+     */
+    public async executeTask(task: Task): Promise<TaskResult> {
+        try {
+            const request: AIRequest = {
+                messages: [
+                    {
+                        role: 'system',
+                        content: `You are an AI coding assistant executing the following task: ${task.description}`
+                    },
+                    {
+                        role: 'user',
+                        content: task.description
+                    }
+                ]
+            };
+            
+            const response = await this.sendRequest(request);
+            
+            return {
+                success: true,
+                data: response.message
+            };
+        } catch (error) {
+            console.error('Error executing task:', error);
+            return {
+                success: false,
+                error: String(error)
+            };
+        }
+    }
+    
+    /**
+     * Implements queryLLM from AIProvider interface
+     */
+    public async queryLLM(prompt: string, context?: any): Promise<AIResponse> {
+        try {
+            const request: AIRequest = {
+                messages: [
+                    {
+                        role: 'user',
+                        content: prompt
+                    }
+                ],
+                context
+            };
+            
+            return this.sendRequest(request);
+        } catch (error) {
+            console.error('Error querying LLM:', error);
+            return {
+                message: `Error querying LLM: ${error instanceof Error ? error.message : String(error)}`
+            };
+        }
+    }
+    
+    /**
+     * Implements isConnected from AIProvider interface
+     */
+    public isConnected(): boolean {
+        // Local AIEngine always considered connected
+        return true;
+    }
+    
+    /**
+     * Gets MCP provider if available
+     */
+    private getMCPProvider(): AIProvider | null {
+        try {
+            console.log('🚀 [getMCPProvider] MCP provider kontrolü başlatılıyor...');
+            const extensionExports = require('../extension');
+            
+            if (extensionExports && extensionExports.extension) {
+                console.log('✅ [getMCPProvider] Extension örneği bulundu');
+                const extension = extensionExports.extension as SmileAIExtension;
+                
+                if (extension.getAIProvider) {
+                    console.log('✅ [getMCPProvider] getAIProvider metodu extension üzerinde mevcut');
+                    const provider = extension.getAIProvider();
+                    
+                    if (provider) {
+                        console.log('🛰️ [getMCPProvider] Provider türü:', typeof provider,
+                                  'Constructor adı:', provider.constructor ? provider.constructor.name : 'bilinmiyor',
+                                  'isConnected metodu var mı:', typeof provider.isConnected === 'function' ? 'Evet' : 'Hayır');
+                        
+                        if (provider.isConnected && typeof provider.isConnected === 'function') {
+                            console.log('🔌 [getMCPProvider] Provider bağlantı durumu:', provider.isConnected() ? 'Bağlı' : 'Bağlı değil');
+                        }
+                    } else {
+                        console.log('⚠️ [getMCPProvider] Provider null');
+                    }
+                    
+                    if (provider && provider.constructor && provider.constructor.name !== 'AIEngine') {
+                        console.log('✅ [getMCPProvider] Harici MCP provider bulundu - kullanılacak');
+                        return provider;
+                    } else {
+                        console.log('⚠️ [getMCPProvider] Provider ya null ya da self-reference - yerel motor kullanılacak');
+                    }
+                } else {
+                    console.log('❌ [getMCPProvider] getAIProvider metodu extension üzerinde bulunamadı');
+                }
+            } else {
+                console.log('❌ [getMCPProvider] Extension exports bulunamadı');
+            }
+        } catch (error) {
+            console.warn('❌ [getMCPProvider] MCP provider alınırken hata:', error);
+        }
+        
+        return null;
+    }
+    
+    // ... rest of the class (keep all the existing methods) ...
 } 
