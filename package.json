@@ -40,6 +40,12 @@
           "icon": "resources/smile-ai-logo.png"
         },
         {
+          "type": "webview",
+          "id": "smile-ai.chatView",
+          "name": "Chat",
+          "icon": "resources/smile-ai-logo.png"
+        },
+        {
           "type": "tree",
           "id": "smile-ai.futureImprovements",
           "name": "Future Improvements",
@@ -525,6 +531,26 @@
           "scope": "resource",
           "default": false,
           "description": "Enable generation and storage of embeddings for code symbols during indexing. Requires a compatible embedding model (e.g., Ollama with 'nomic-embed-text') and significantly increases indexing time."
+        },
+        "smile-ai.mcp.serverUrl": {
+          "type": "string",
+          "default": "ws://localhost:3010",
+          "description": "WebSocket URL for SmileAgent Server connection"
+        },
+        "smile-ai.mcp.useLocalServer": {
+          "type": "boolean",
+          "default": true,
+          "description": "Use local SmileAgent Server instead of cloud services"
+        },
+        "smile-ai.mcp.reconnectInterval": {
+          "type": "integer",
+          "default": 5000,
+          "description": "Reconnect interval in milliseconds"
+        },
+        "smile-ai.mcp.maxReconnectAttempts": {
+          "type": "integer",
+          "default": 5,
+          "description": "Maximum number of reconnect attempts"
         }
       }
     }
@@ -566,15 +592,17 @@
   },
   "dependencies": {
     "@types/uuid": "^10.0.0",
+    "@types/ws": "^8.18.1",
     "axios": "^1.6.7",
     "diff": "^5.1.0",
     "ignore": "^5.3.1",
     "langchain": "^0.1.17",
     "marked": "^11.2.0",
     "smile-ai": "file:",
-    "uuid": "^11.0.5",
+    "uuid": "^11.1.0",
     "vscode-languageclient": "^9.0.1",
     "vscode-languageserver": "^9.0.1",
-    "vscode-languageserver-textdocument": "^1.0.11"
+    "vscode-languageserver-textdocument": "^1.0.11",
+    "ws": "^8.18.1"
   }
 }
