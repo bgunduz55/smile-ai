@@ -400,10 +400,11 @@ export class AIAssistantPanel {
                 console.log('🚀 Using AIProvider.chat method with streaming support');
                 const systemPrompt = "You are an AI coding assistant that helps with programming tasks. You can:\n                    - Write and modify code\n                    - Answer questions\n                    - Provide suggestions\n                    - Help with debugging\n                    Aim to be helpful while following the user's lead.";
                 
-                const response = await aiProvider.chat(aiMessages, systemPrompt, {
+                const response = await aiProvider.chat(aiMessages, {
                     ...cleanOptions,
                     stream: true,
-                    onChunk
+                    onChunk,
+                    conversationId: 'default'
                 });
                 
                 if (response && response.message && !fullResponse) {

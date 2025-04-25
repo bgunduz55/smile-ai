@@ -45,6 +45,18 @@ export class ChatService extends EventEmitter {
      * Send a message to the chat service
      */
     public async sendMessage(content: string, streaming: boolean = true): Promise<void> {
+        // More detailed logging
+        console.log('📩 [ChatService.sendMessage] Message received, length:', content.length);
+        console.log(`📩 [ChatService.sendMessage] Content preview: ${content.substring(0, 50)}${content.length > 50 ? '...' : ''}`);
+        console.log(`📩 [ChatService.sendMessage] Streaming mode: ${streaming}`);
+        console.log(`📩 [ChatService.sendMessage] Conversation ID: ${this.activeConversationId}`);
+        
+        // Check client connection 
+        if (!this.mcpClient) {
+            console.error('❌ [ChatService.sendMessage] MCPClient is null or undefined!');
+            throw new Error('ChatService: MCPClient is not initialized');
+        }
+
         // Create a user message
         const userMessage: Message = {
             role: 'user',
@@ -62,18 +74,57 @@ export class ChatService extends EventEmitter {
         });
         
         try {
+            // Check connection before sending - catch connection issues early
+            if (typeof this.mcpClient.isConnectedToServer === 'function') {
+                const isConnected = this.mcpClient.isConnectedToServer();
+                console.log('🔌 [ChatService.sendMessage] MCPClient connection status:', isConnected ? 'Connected' : 'Not connected');
+                
+                if (!isConnected) {
+                    console.warn('⚠️ [ChatService.sendMessage] MCPClient reports not connected, attempting to reconnect...');
+                    
+                    try {
+                        // Try to reconnect
+                        await this.mcpClient.connect();
+                        console.log('✅ [ChatService.sendMessage] Reconnection successful!');
+                    } catch (connectError) {
+                        console.error('❌ [ChatService.sendMessage] Failed to reconnect:', connectError);
+                        
+                        // Add error message to history
+                        const errorMessage: Message = {
+                            role: 'assistant',
+                            content: 'Error: Failed to connect to server. Please check your connection.',
+                            timestamp: Date.now()
+                        };
+                        
+                        await this.chatHistoryManager.addMessage(this.activeConversationId, errorMessage);
+                        
+                        // Emit event to update UI
+                        this.emit('message', {
+                            message: errorMessage,
+                            conversationId: this.activeConversationId
+                        });
+                        
+                        throw new Error('Failed to connect to server');
+                    }
+                }
+            }
+            
             console.log('📤 [ChatService.sendMessage] Server\'a chat mesajı gönderiliyor');
             console.log(`💬 [ChatService.sendMessage] İçerik: ${content.substring(0, 30)}${content.length > 30 ? '...' : ''}`);
             
             // Send to server with longer timeout (120 seconds)
-            await this.mcpClient.sendChatMessage(content, this.activeConversationId, streaming);
+            console.log('🔄 [ChatService.sendMessage] Calling mcpClient.sendChatMessage');
+            const result = await this.mcpClient.sendChatMessage(content, this.activeConversationId, streaming);
+            console.log('✅ [ChatService.sendMessage] MCPClient.sendChatMessage completed with result:', result);
+            
+            return;
         } catch (error) {
             console.error('❌ [ChatService.sendMessage] Server\'a mesaj gönderirken hata:', error);
             
             // Add error message to history
             const errorMessage: Message = {
                 role: 'assistant',
-                content: 'Error: Failed to send message to server. Please check your connection.',
+                content: `Error: Failed to send message to server. ${error instanceof Error ? error.message : 'Please check your connection.'}`,
                 timestamp: Date.now()
             };
             
@@ -84,6 +135,9 @@ export class ChatService extends EventEmitter {
                 message: errorMessage,
                 conversationId: this.activeConversationId
             });
+            
+            // Rethrow the error for upstream handling
+            throw error;
         }
     }
 
