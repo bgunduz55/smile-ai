@@ -419,13 +419,11 @@ export class MCPClient extends EventEmitter implements vscode.Disposable {
         const messageId = uuidv4();
         console.log(`🆔 [MCPClient.sendChatMessage] Mesaj ID: ${messageId}`);
         
-        // IMPORTANT FIX: Using string literal for message type instead of enum
-        // Ensure the message type is a string that exactly matches what the server expects
-        const messageType = "chat_message"; // Use string literal instead of enum
-        
+        // ÖNEMLİ: Mesaj tipini sabit string olarak ayarla, enum değil
+        // Server tarafında beklenen kesin string değeri kullan
         const message: McpMessage = {
             id: messageId,
-            type: messageType as McpMessageType, // Type assertion to satisfy TypeScript
+            type: "chat_message" as McpMessageType, // String literal kullan, tip uyumluluğu için as ile cast et
             payload: {
                 content,
                 conversationId,
@@ -434,8 +432,7 @@ export class MCPClient extends EventEmitter implements vscode.Disposable {
         };
 
         console.log(`🔍 [MCPClient.sendChatMessage] DEBUG - Message prepared with type: ${message.type}`);
-        console.log(`🔍 [MCPClient.sendChatMessage] DEBUG - Enum value: ${McpMessageType.CHAT_MESSAGE}`);
-        console.log(`🔍 [MCPClient.sendChatMessage] DEBUG - Type match check: ${message.type === McpMessageType.CHAT_MESSAGE ? 'Types match ✓' : 'Types do not match ✗'}`);
+        console.log(`🔍 [MCPClient.sendChatMessage] DEBUG - String literal type used: "chat_message"`);
 
         try {
             if (!streaming) {
@@ -449,9 +446,7 @@ export class MCPClient extends EventEmitter implements vscode.Disposable {
                 console.log('📡 [MCPClient.sendChatMessage] Streaming mode kullanılıyor, sendMessageWithoutWaiting() çağrılacak');
                 console.log('📧 [MCPClient.sendChatMessage] Payload:', JSON.stringify(message.payload));
                 console.log('📧 [MCPClient.sendChatMessage] Message type:', message.type);
-                console.log('📧 [MCPClient.sendChatMessage] McpMessageType.CHAT_MESSAGE value:', McpMessageType.CHAT_MESSAGE);
                 
-                // IMPORTANT: Don't modify the message type here - it's already set correctly above
                 // Streaming mode emits events instead of waiting for a complete response
                 this.sendMessageWithoutWaiting(message);
                 
@@ -473,8 +468,6 @@ export class MCPClient extends EventEmitter implements vscode.Disposable {
         console.log('\n🔍 [MCPClient.sendMessageWithoutWaiting] DEBUG - Message object structure:');
         console.log('🔑 Message ID:', message.id);
         console.log('📝 Message Type:', message.type);
-        console.log('🔢 Message Type (enum value):', McpMessageType.CHAT_MESSAGE);
-        console.log('📤 Type match check:', message.type === McpMessageType.CHAT_MESSAGE ? 'Types match ✓' : 'Types do not match ✗');
         console.log('📦 Payload:', JSON.stringify(message.payload, null, 2));
         console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
 
@@ -496,8 +489,8 @@ export class MCPClient extends EventEmitter implements vscode.Disposable {
         try {
             console.log('📤 [MCPClient.sendMessageWithoutWaiting] Mesaj gönderiliyor, ID:', message.id);
             
-            // FIXED: Don't modify the message type as it's already correctly set in sendChatMessage
-            // Send the message as is, without modification
+            // ÖNEMLİ: Mesaj tipini değiştirme, olduğu gibi gönder
+            // sendChatMessage'da zaten doğru tipte ayarlandı
             const messageStr = JSON.stringify(message);
             console.log('📦 [MCPClient.sendMessageWithoutWaiting] Mesaj içeriği:', messageStr);
             
@@ -735,8 +728,8 @@ export class MCPClient extends EventEmitter implements vscode.Disposable {
                 
                 console.log('📤 [MCPClient.sendMessage] Mesaj gönderiliyor, ID:', message.id);
                 
-                // FIXED: Don't modify message type as it was already correctly set in sendChatMessage
-                // Send message as is
+                // ÖNEMLİ: Mesaj tipini değiştirme, olduğu gibi gönder
+                // sendChatMessage'da zaten doğru tipte ayarlandı
                 const messageStr = JSON.stringify(message);
                 console.log('📦 [MCPClient.sendMessage] Mesaj içeriği:', messageStr.substring(0, 200) + (messageStr.length > 200 ? '...' : ''));
                 
