@@ -79,67 +79,136 @@ export class MCPClient extends EventEmitter implements vscode.Disposable {
     /**
      * Sunucuya bağlanır
      */
-    public connect(): Promise<void> {
-        return new Promise((resolve, reject) => {
-            if (this.isConnected) {
-                resolve();
-                return;
-            }
-
+    public async connect(): Promise<void> {
+        return new Promise<void>((resolve, reject) => {
             try {
-                // WebSocket oluşturma düzeltmesi
-                this.socket = new WebSocketClass(this.config.serverUrl);
+                console.log('🔄 [MCPClient.connect] Bağlantı girişimi başlatılıyor...');
                 
-                // Bağlantı için zaman aşımı ayarla
-                const connectionTimeoutPromise = new Promise<boolean>((_, reject) => {
-                    setTimeout(() => {
-                        if (this.socket && this.socket.readyState as number !== WS_OPEN) {
+                if (this.socket && this.socket.readyState === WebSocket.OPEN) {
+                    console.log('✅ [MCPClient.connect] Zaten bağlı, yeni bağlantı gerekmiyor');
+                    this.isConnected = true;
+                    resolve();
+                    return;
+                }
+                
+                // Eğer varsa mevcut soketi kapat
+                if (this.socket) {
+                    console.log('🔄 [MCPClient.connect] Aktif soket bulundu, kapatılıyor...');
+                    this.socket.close();
+                    this.socket = null;
+                }
+                
+                console.log(`🔄 [MCPClient.connect] WebSocket bağlantısı kuruluyor: ${this.config.serverUrl}`);
+                
+                // Socket oluşturma ve bağlantı kurma
+                try {
+                    // WebSocket yerine WebSocketClass kullanıyoruz (TypeScript hatasını gidermek için)
+                    this.socket = new WebSocketClass(this.config.serverUrl);
+                    console.log('🔄 [MCPClient.connect] WebSocket yapıcısı çağrıldı, socket:', 
+                              this.socket ? 'oluşturuldu' : 'null',
+                              'readyState:', this.socket ? this.socket.readyState : 'N/A');
+                } catch (socketError) {
+                    console.error('❌ [MCPClient.connect] WebSocket oluşturulurken hata:', socketError);
+                    reject(new Error(`WebSocket creation failed: ${socketError instanceof Error ? socketError.message : String(socketError)}`));
+                    return;
+                }
+                
+                // Socket olaylarını dinle
+                if (this.socket) {
+                    this.socket.on('open', () => {
+                        console.log('🎉 [MCPClient.connect] WebSocket bağlantısı açıldı');
+                        this.isConnected = true;
+                        this.reconnectAttempts = 0;
+                        this.emit('connected');
+                        
+                        // Socket durumunu kontrol et ve log'a yaz
+                        if (this.socket) {
+                            console.log('🔄 [MCPClient.connect] WebSocket açıldıktan sonra durum:',
+                                      'readyState:', this.socket.readyState || 'N/A',
+                                      'bufferedAmount:', this.socket.bufferedAmount || 'N/A');
+                            
+                            // Test mesajını kaldırıyoruz çünkü server ping-test mesajını desteklemiyor
+                        }
+                        
+                        resolve();
+                    });
+                    
+                    this.socket.on('message', (data: any) => {
+                        try {
+                            console.log('📥 [MCPClient.socket.onmessage] Yanıt alındı, raw data tipi:', typeof data);
+                            
+                            // WebSocket mesajı parse et - UTF-8 karakter kodlama düzeltmesi
+                            let message: McpMessage;
+                            let jsonString: string;
+                            
+                            if (typeof data === 'string') {
+                                jsonString = data;
+                            } else if (data instanceof Buffer) {
+                                jsonString = data.toString('utf8');
+                            } else if (typeof data.toString === 'function') {
+                                jsonString = data.toString();
+                            } else {
+                                console.error('❌ [MCPClient.socket.onmessage] Geçersiz mesaj formatı:', typeof data);
+                                return;
+                            }
+                            
+                            // UTF-8 karakter sorunlarını kontrol et
+                            try {
+                                message = JSON.parse(jsonString);
+                            } catch (parseError) {
+                                console.error('❌ [MCPClient.socket.onmessage] JSON parse hatası, UTF-8 düzeltmesi denenecek:', parseError);
+                                // Bazı özel karakter sorunlarını düzeltmeyi deneyelim
+                                jsonString = jsonString.replace(/\\u([0-9a-fA-F]{4})/g, (_, p1) => String.fromCharCode(parseInt(p1, 16)));
+                                message = JSON.parse(jsonString);
+                            }
+                            
+                            // ping-test kontrolünü kaldırdık
+                            
+                            // Mesajı işle
+                            console.log(`📩 [MCPClient.socket.onmessage] Mesaj alındı, Tip: ${message.type}, ID: ${message.id}`);
+                            this.handleMessage(message);
+                        } catch (parseError) {
+                            console.error('❌ [MCPClient.socket.onmessage] JSON parse hatası:', parseError);
+                            console.log('❌ [MCPClient.socket.onmessage] Hata veren data:', typeof data === 'string' ? data.substring(0, 200) : data);
+                        }
+                    });
+                    
+                    this.socket.on('error', (error: any) => {
+                        console.error('❌ [MCPClient.socket.onerror] WebSocket hatası:', error);
+                        this.emit('error', error);
+                        if (!this.isConnected) {
+                            reject(error);
+                        }
+                    });
+                    
+                    this.socket.on('close', (code: number, reason: string) => {
+                        console.log(`🔌 [MCPClient.socket.onclose] WebSocket bağlantısı kapandı. Kod: ${code}, Neden: ${reason}`);
+                        this.isConnected = false;
+                        this.socket = null;
+                        this.emit('disconnected');
+                        
+                        // Yeniden bağlantı dene
+                        this.attemptReconnect();
+                    });
+                    
+                    // Zaman aşımı ekle
+                    const timeout = setTimeout(() => {
+                        if (!this.isConnected) {
                             console.error('⏱️ [MCPClient.connect] Bağlantı zaman aşımına uğradı');
-                            reject('Bağlantı zaman aşımına uğradı');
+                            if (this.socket) {
+                                this.socket.close();
+                                this.socket = null;
+                            }
+                            reject(new Error('Connection timeout'));
                         }
                     }, 10000); // 10 saniye zaman aşımı
-                });
-                
-                // WebSocket olaylarını dinle ve bağlantının açılmasını bekle
-                const connectionPromise = new Promise<boolean>((resolve) => {
-                    if (this.socket) {
-                        this.socket.onopen = () => {
-                            resolve(true);
-                        };
-                        
-                        this.socket.onclose = (event) => {
-                            console.log(`🔌 [MCPClient.close] WebSocket bağlantısı kapatıldı, code: ${event.code}, reason: ${event.reason}`);
-                            this.isConnected = false;
-                            this.emit('disconnected');
-                            resolve(false);
-                        };
-                        
-                        this.socket.onerror = (error) => {
-                            console.error('❌ [MCPClient.error] WebSocket bağlantı hatası:', error);
-                            // Error'da resolve etmeyelim, close'da resolve edilecek
-                        };
-                    }
-                });
-                
-                Promise.race([connectionTimeoutPromise, connectionPromise])
-                    .then(result => {
-                        if (result) {
-                            this.isConnected = true;
-                            this.reconnectAttempts = 0;
-                            console.log('🎉 [MCPClient.connect] WebSocket bağlantısı açıldı');
-                            vscode.window.setStatusBarMessage('Connected to SmileAgent Server', 3000);
-                            this.emit('connected');
-                            resolve();
-                        }
-                    })
-                    .catch(error => {
-                        console.error('❌ [MCPClient.connect] Bağlantı kurulurken hata:', error);
-                        this.emit('error', error);
-                        reject(error);
-                    });
+                    
+                    // Zaman aşımını temizle (bağlantı kurulursa ya da hata alınırsa)
+                    this.socket.once('open', () => clearTimeout(timeout));
+                    this.socket.once('error', () => clearTimeout(timeout));
+                }
             } catch (error) {
-                console.error('❌ [MCPClient.connect] WebSocket oluşturma hatası:', error);
-                this.emit('error', error);
+                console.error('❌ [MCPClient.connect] Genel bağlantı hatası:', error);
                 reject(error);
             }
         });
@@ -268,16 +337,95 @@ export class MCPClient extends EventEmitter implements vscode.Disposable {
         console.log(`🔄 [MCPClient.sendChatMessage] Streaming: ${streaming}`);
         console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
 
-        // Bağlantı kontrolü
-        if (!this.isConnectedToServer()) {
-            console.error('❌ [MCPClient.sendChatMessage] Server\'a bağlantı yok!');
-            throw new Error('Not connected to SmileAgent Server');
+        // Bağlantı kontrolü - daha detaylı hata raporlama ve durumu
+        console.log(`🔌 [MCPClient.sendChatMessage] Socket durumu: ${this.socket ? 'Var' : 'Yok'}`);
+        console.log(`🔌 [MCPClient.sendChatMessage] isConnected flag: ${this.isConnected}`);
+        
+        if (this.socket) {
+            console.log(`🔌 [MCPClient.sendChatMessage] Socket readyState: ${this.socket.readyState}`);
+            console.log(`🔌 [MCPClient.sendChatMessage] Socket bufferedAmount: ${this.socket.bufferedAmount}`);
+        }
+        
+        // Geliştirilmiş bağlantı kontrolü
+        if (!this.socket) {
+            console.error('❌ [MCPClient.sendChatMessage] Socket oluşturulmamış!');
+            try {
+                console.log('🔄 [MCPClient.sendChatMessage] Socket oluşturulmamış, bağlantı kuruluyor...');
+                await this.connect();
+                console.log('✅ [MCPClient.sendChatMessage] Bağlantı başarılı, mesaj gönderimine devam ediliyor');
+            } catch (connectError) {
+                console.error('❌ [MCPClient.sendChatMessage] Bağlantı hatası:', connectError);
+                throw new Error('Could not connect to SmileAgent Server');
+            }
+        } else if (this.socket.readyState !== WS_OPEN) {
+            console.error(`❌ [MCPClient.sendChatMessage] Socket var ama hazır değil. readyState: ${this.socket.readyState}`);
+            // Socket durumuna göre farklı işlem yap
+            if (this.socket.readyState === WS_CONNECTING) {
+                console.log('⏳ [MCPClient.sendChatMessage] Socket bağlanıyor, bağlantı tamamlanması bekleniyor...');
+                try {
+                    // Bağlantının tamamlanmasını bekleyelim (max 5 saniye)
+                    await new Promise<void>((resolve, reject) => {
+                        // Bağlantı zaten kurulmaya çalışılıyor, tamamlanmasını bekleyelim
+                        const timeout = setTimeout(() => {
+                            reject(new Error('Connection timeout while waiting for socket to connect'));
+                        }, 5000);
+                        
+                        // Açılma olayını dinle
+                        this.socket!.once('open', () => {
+                            clearTimeout(timeout);
+                            resolve();
+                        });
+                        
+                        // Hata olayını dinle
+                        this.socket!.once('error', (err) => {
+                            clearTimeout(timeout);
+                            reject(err);
+                        });
+                    });
+                    console.log('✅ [MCPClient.sendChatMessage] Socket bağlantısı başarıyla tamamlandı');
+                } catch (waitError) {
+                    console.error('❌ [MCPClient.sendChatMessage] Socket bağlantısı beklenirken hata:', waitError);
+                    throw new Error('Connection timeout while waiting for socket to connect');
+                }
+            } else {
+                // Bağlantı kapanmış veya kapanmakta, yeniden bağlanmayı deneyelim
+                console.log('🔄 [MCPClient.sendChatMessage] Socket kapalı veya kapanıyor, yeniden bağlanmaya çalışılıyor...');
+                try {
+                    // Önce mevcut soketi kapatmaya çalışalım
+                    if (this.socket.readyState !== WS_CLOSED) {
+                        this.socket.close();
+                    }
+                    this.socket = null;
+                    
+                    // Yeniden bağlan
+                    await this.connect();
+                    console.log('✅ [MCPClient.sendChatMessage] Yeniden bağlantı başarılı, mesaj gönderimine devam ediliyor');
+                } catch (connectError) {
+                    console.error('❌ [MCPClient.sendChatMessage] Yeniden bağlantı hatası:', connectError);
+                    throw new Error('Could not reconnect to SmileAgent Server');
+                }
+            }
+        }
+        
+        // Bağlantı durumunu son bir kez kontrol et
+        const connected = this.isConnectedToServer();
+        console.log(`🔌 [MCPClient.sendChatMessage] Bağlantı durumu: ${connected ? 'Aktif' : 'Bağlı değil'}`);
+        
+        if (!connected) {
+            console.error('❌ [MCPClient.sendChatMessage] Tüm kontrollere rağmen bağlantı yok!');
+            throw new Error('Not connected to SmileAgent Server despite connection attempts');
         }
 
         const messageId = uuidv4();
+        console.log(`🆔 [MCPClient.sendChatMessage] Mesaj ID: ${messageId}`);
+        
+        // IMPORTANT FIX: Using string literal for message type instead of enum
+        // Ensure the message type is a string that exactly matches what the server expects
+        const messageType = "chat_message"; // Use string literal instead of enum
+        
         const message: McpMessage = {
             id: messageId,
-            type: McpMessageType.CHAT_MESSAGE,
+            type: messageType as McpMessageType, // Type assertion to satisfy TypeScript
             payload: {
                 content,
                 conversationId,
@@ -285,15 +433,30 @@ export class MCPClient extends EventEmitter implements vscode.Disposable {
             }
         };
 
+        console.log(`🔍 [MCPClient.sendChatMessage] DEBUG - Message prepared with type: ${message.type}`);
+        console.log(`🔍 [MCPClient.sendChatMessage] DEBUG - Enum value: ${McpMessageType.CHAT_MESSAGE}`);
+        console.log(`🔍 [MCPClient.sendChatMessage] DEBUG - Type match check: ${message.type === McpMessageType.CHAT_MESSAGE ? 'Types match ✓' : 'Types do not match ✗'}`);
+
         try {
             if (!streaming) {
+                // Log before sending
+                console.log('📡 [MCPClient.sendChatMessage] Non-streaming mode kullanılıyor, sendMessage() çağrılacak');
+                
                 // Non-streaming mode uses regular message flow
                 return await this.sendMessage(message, 120000); // Extend timeout to 120 seconds
             } else {
+                // Log before sending
+                console.log('📡 [MCPClient.sendChatMessage] Streaming mode kullanılıyor, sendMessageWithoutWaiting() çağrılacak');
+                console.log('📧 [MCPClient.sendChatMessage] Payload:', JSON.stringify(message.payload));
+                console.log('📧 [MCPClient.sendChatMessage] Message type:', message.type);
+                console.log('📧 [MCPClient.sendChatMessage] McpMessageType.CHAT_MESSAGE value:', McpMessageType.CHAT_MESSAGE);
+                
+                // IMPORTANT: Don't modify the message type here - it's already set correctly above
                 // Streaming mode emits events instead of waiting for a complete response
                 this.sendMessageWithoutWaiting(message);
                 
                 // Return the message ID so caller can match response events
+                console.log('✅ [MCPClient.sendChatMessage] Mesaj gönderildi, messageId dönülüyor: ', messageId);
                 return { messageId, status: 'sent' };
             }
         } catch (error) {
@@ -306,16 +469,55 @@ export class MCPClient extends EventEmitter implements vscode.Disposable {
      * Bir mesajı yanıt beklemeden gönderir (streaming için)
      */
     private sendMessageWithoutWaiting(message: McpMessage): void {
-        if (!this.isConnected || !this.socket) {
-            console.error('❌ [MCPClient.sendMessageWithoutWaiting] SmileAgent Server\'a bağlı değil');
-            throw new Error('Not connected to SmileAgent Server');
+        // Add debug logging to show more details about the message being sent
+        console.log('\n🔍 [MCPClient.sendMessageWithoutWaiting] DEBUG - Message object structure:');
+        console.log('🔑 Message ID:', message.id);
+        console.log('📝 Message Type:', message.type);
+        console.log('🔢 Message Type (enum value):', McpMessageType.CHAT_MESSAGE);
+        console.log('📤 Type match check:', message.type === McpMessageType.CHAT_MESSAGE ? 'Types match ✓' : 'Types do not match ✗');
+        console.log('📦 Payload:', JSON.stringify(message.payload, null, 2));
+        console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+
+        if (!this.isConnected || !this.socket || this.socket.readyState !== WS_OPEN) {
+            console.error('❌ [MCPClient.sendMessageWithoutWaiting] SmileAgent Server\'a bağlı değil veya soket hazır değil');
+            console.log(`🔌 [MCPClient.sendMessageWithoutWaiting] Socket durumu: ${this.socket ? this.socket.readyState : 'Yok'}`);
+            
+            // Bağlantıyı yeniden kurma girişimi
+            if (this.socket && this.socket.readyState !== WS_OPEN) {
+                console.log('🔄 [MCPClient.sendMessageWithoutWaiting] Socket var ama açık değil, otomatik yeniden bağlanma tetiklenecek...');
+                // Burada throw etmek yerine event emit edelim ve bir süre sonra yeniden bağlanmayı deneyelim
+                this.emit('needReconnect');
+                this.attemptReconnect();
+            }
+            
+            throw new Error('Not connected to SmileAgent Server or socket not ready');
         }
 
         try {
             console.log('📤 [MCPClient.sendMessageWithoutWaiting] Mesaj gönderiliyor, ID:', message.id);
+            
+            // FIXED: Don't modify the message type as it's already correctly set in sendChatMessage
+            // Send the message as is, without modification
             const messageStr = JSON.stringify(message);
-            this.socket!.send(messageStr);
-            console.log('✅ [MCPClient.sendMessageWithoutWaiting] Mesaj başarıyla gönderildi');
+            console.log('📦 [MCPClient.sendMessageWithoutWaiting] Mesaj içeriği:', messageStr);
+            
+            // Add socket state logging before sending
+            console.log('🔌 [MCPClient.sendMessageWithoutWaiting] Socket state before sending:', 
+                        'readyState:', this.socket.readyState, 
+                        'bufferedAmount:', this.socket.bufferedAmount);
+            
+            this.socket.send(messageStr);
+            
+            // Log successful send attempt
+            console.log('✅ [MCPClient.sendMessageWithoutWaiting] Mesaj gönderme çağrısı başarılı');
+            
+            // Add event listener to confirm message was actually sent (will be triggered when the message is sent)
+            if (typeof this.socket.once === 'function') {
+                this.socket.once('message', (response) => {
+                    console.log('🔄 [MCPClient.sendMessageWithoutWaiting] Server\'dan yanıt alındı:', 
+                                typeof response === 'string' ? response : 'Binary data');
+                });
+            }
         } catch (error) {
             console.error('❌ [MCPClient.sendMessageWithoutWaiting] Mesaj gönderme hatası:', error);
             throw error;
@@ -326,34 +528,32 @@ export class MCPClient extends EventEmitter implements vscode.Disposable {
      * Sunucudan gelen mesajları işler
      */
     private handleMessage(message: McpMessage): void {
+        // Enhanced debugging for incoming messages
+        console.log(`\n🔍 [MCPClient.handleMessage] DEBUG - Incoming message details:`);
+        console.log(`🆔 Message ID: ${message.id}`);
+        console.log(`📋 Message Type: ${message.type}`);
+        console.log(`📦 Payload preview: ${JSON.stringify(message.payload).substring(0, 300)}...`);
+        console.log(`━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
+        
         this.emit('message', message);
 
         console.log(`\n🔍 [MCPClient.handleMessage] Alınan mesaj tipi: ${message.type}`);
         console.log(`📄 [MCPClient.handleMessage] Detaylar: ${JSON.stringify(message.payload).substring(0, 100)}...`);
 
         switch (message.type) {
-            case McpMessageType.RESPONSE:
-                this.handleResponseMessage(message);
-                break;
-            case McpMessageType.ERROR:
-                this.handleErrorMessage(message);
-                break;
             case McpMessageType.INIT:
-                console.log("🚀 [MCPClient.handleMessage] Server bağlantısı başlatıldı!");
-                // Init durumunda bir sorgu mesajı varsa, originalMessageId olabilir
-                if (message.payload && message.payload.originalMessageId) {
-                    // Var olan sorguya cevap olarak INIT mesajı gelmiş
-                    const originalMessageId = message.payload.originalMessageId;
-                    if (this.pendingMessages.has(originalMessageId)) {
-                        const pendingMessage = this.pendingMessages.get(originalMessageId)!;
-                        console.log("⚠️ [MCPClient.handleMessage] Init mesajı, bekleyen bir sorguya yanıt olarak geldi! ID:", originalMessageId);
+                console.log('🚀 [MCPClient.handleMessage] Init mesajı alındı');
+                
+                // İlk bağlantı sonrası test sorgusu yapalım
+                if (message.payload.message && message.payload.message.includes('Connected to SmileAgent Server')) {
+                    console.log('✅ [MCPClient.handleMessage] Başarılı bağlantı mesajı alındı');
+                    
+                    // Eğer bekleyen mesaj varsa, yeniden göndermeyi dene
+                    if (this.pendingMessages.size > 0) {
+                        console.log(`⚠️ [MCPClient.handleMessage] ${this.pendingMessages.size} bekleyen mesaj var. Bunları göndermeyi yeniden deneyeceğiz...`);
                         
-                        // Bağlantı sonrası bir süre bekleyip sorguyu yeniden gönderelim
+                        // 1 saniye sonra çalıştır
                         setTimeout(() => {
-                            // Eğer bekleyen bir istek varsa, timeout'u iptal et
-                            clearTimeout(pendingMessage.timeout);
-                            this.pendingMessages.delete(originalMessageId);
-                            
                             // Kullanıcıya hata bildirimi sunma, çünkü arka planda yeniden deneyeceğiz
                             console.log("🔄 [MCPClient.handleMessage] Sorgu yeniden gönderilecek...");
                         }, 1000);
@@ -361,12 +561,20 @@ export class MCPClient extends EventEmitter implements vscode.Disposable {
                 }
                 this.emit('init', message.payload);
                 break;
+            case McpMessageType.RESPONSE:
+                this.handleResponseMessage(message);
+                break;
+            case McpMessageType.ERROR:
+                this.handleErrorMessage(message);
+                break;
             case McpMessageType.CHAT_RESPONSE:
                 console.log('💬 [MCPClient.handleMessage] Chat yanıtı alındı');
+                console.log('🔍 [MCPClient.handleMessage] DEBUG - Chat response payload:', JSON.stringify(message.payload, null, 2));
                 this.handleChatResponseMessage(message);
                 break;
             case McpMessageType.CHAT_STREAM:
                 console.log('📲 [MCPClient.handleMessage] Chat stream chunk alındı');
+                console.log('🔍 [MCPClient.handleMessage] DEBUG - Chat stream payload:', JSON.stringify(message.payload, null, 2));
                 this.handleChatStreamMessage(message);
                 break;
             default:
@@ -487,11 +695,12 @@ export class MCPClient extends EventEmitter implements vscode.Disposable {
      * Bağlantı durumunu kontrol eder
      */
     public isConnectedToServer(): boolean {
-        const connected = this.isConnected && this.socket !== null;
+        const connected = this.isConnected && this.socket !== null && this.socket.readyState === WS_OPEN;
         console.log('🔌 [MCPClient.isConnectedToServer] WebSocket bağlantı durumu:', 
                    connected ? 'Bağlı' : 'Bağlı değil', 
                    '(socket:', this.socket ? 'Var' : 'Yok', 
-                   'isConnected:', this.isConnected, ')');
+                   'isConnected:', this.isConnected,
+                   'readyState:', this.socket ? this.socket.readyState : 'N/A', ')');
         return connected;
     }
 
@@ -499,16 +708,44 @@ export class MCPClient extends EventEmitter implements vscode.Disposable {
      * Sunucuya mesaj gönderir ve yanıtı bekler
      */
     private async sendMessage(message: McpMessage, timeoutMs: number = 120000): Promise<any> {
-        if (!this.isConnected || !this.socket) {
-            console.error('❌ [MCPClient.sendMessage] SmileAgent Server\'a bağlı değil');
-            throw new Error('Not connected to SmileAgent Server');
+        if (!this.isConnected || !this.socket || this.socket.readyState !== WS_OPEN) {
+            console.error('❌ [MCPClient.sendMessage] SmileAgent Server\'a bağlı değil veya soket hazır değil');
+            console.log(`🔌 [MCPClient.sendMessage] Socket durumu: ${this.socket ? this.socket.readyState : 'Yok'}`);
+            
+            // Bağlantıyı yeniden kurma girişimi
+            if (this.socket && this.socket.readyState !== WS_OPEN) {
+                console.log('🔄 [MCPClient.sendMessage] Socket var ama açık değil, yeniden bağlanmaya çalışılıyor...');
+                try {
+                    await this.connect();
+                    console.log('✅ [MCPClient.sendMessage] Yeniden bağlantı başarılı, mesaj gönderimine devam ediliyor');
+                } catch (connectError) {
+                    console.error('❌ [MCPClient.sendMessage] Yeniden bağlantı hatası:', connectError);
+                    throw new Error('Not connected to SmileAgent Server and reconnection attempt failed');
+                }
+            } else {
+                throw new Error('Not connected to SmileAgent Server');
+            }
         }
 
         return new Promise((resolve, reject) => {
             try {
+                // At this point we know this.socket is not null because we checked above
+                // and would have thrown an error otherwise
+                const socket = this.socket!; // Non-null assertion
+                
                 console.log('📤 [MCPClient.sendMessage] Mesaj gönderiliyor, ID:', message.id);
+                
+                // FIXED: Don't modify message type as it was already correctly set in sendChatMessage
+                // Send message as is
                 const messageStr = JSON.stringify(message);
-                this.socket!.send(messageStr);
+                console.log('📦 [MCPClient.sendMessage] Mesaj içeriği:', messageStr.substring(0, 200) + (messageStr.length > 200 ? '...' : ''));
+                
+                // Add socket state logging before sending
+                console.log('🔌 [MCPClient.sendMessage] Socket state before sending:', 
+                          'readyState:', socket.readyState, 
+                          'bufferedAmount:', socket.bufferedAmount);
+                
+                socket.send(messageStr);
                 console.log('✅ [MCPClient.sendMessage] Mesaj başarıyla gönderildi');
 
                 // Yanıt için bekleyecek Promise oluştur
