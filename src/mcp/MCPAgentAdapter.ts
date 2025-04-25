@@ -57,7 +57,7 @@ export class MCPAgentAdapter implements AIProvider {
     /**
      * Sohbet mesajlarına yanıt verir
      */
-    public async chat(messages: AIMessage[], systemPrompt?: string, options?: any): Promise<AIResponse> {
+    public async chat(messages: AIMessage[], options?: any): Promise<AIResponse> {
         try {
             console.log('💬 [MCPAgentAdapter.chat] Chat isteği alındı, mesaj sayısı:', messages.length);
             
@@ -79,68 +79,69 @@ export class MCPAgentAdapter implements AIProvider {
                        
             // Streaming istendi mi kontrol et
             if (options && options.stream && typeof options.onChunk === 'function') {
-                console.log('🌊 [MCPAgentAdapter.chat] Streaming istendi, elle streaming simülasyonu yapılıyor');
+                console.log('🌊 [MCPAgentAdapter.chat] Streaming istendi, sendChatMessage doğrudan çağrılıyor');
                 
-                // Streaming kullanılan bir yanıt oluşturmak için sorguyu gönder
-                const resultPromise = this.mcpService.queryLLM(userMessage.content, {
-                    messages,
-                    systemPrompt,
-                    ...options,
-                    stream: false // MCP henüz streaming desteklemediği için false
-                });
-                
-                // Arka planda işlemi başlat ve sonucu al
-                resultPromise.then(result => {
-                    if (result && result.message) {
-                        console.log('📥 [MCPAgentAdapter.chat] Yanıt alındı, streaming simülasyonu başlatılıyor');
-                        
-                        // Yanıtı parçalara böl ve onChunk ile gönder
-                        const message = result.message;
-                        const chunkSize = 10; // Her seferinde gönderilecek karakter sayısı
-                        let currentPosition = 0;
-                        
-                        // Manuel olarak streaming simülasyonu yap
-                        const sendNextChunk = () => {
-                            if (currentPosition < message.length) {
-                                const endPosition = Math.min(currentPosition + chunkSize, message.length);
-                                const chunk = message.substring(currentPosition, endPosition);
-                                options.onChunk(chunk);
-                                currentPosition = endPosition;
-                                
-                                // Bir sonraki parçayı göndermek için zamanlayıcı ayarla
-                                setTimeout(sendNextChunk, 10);
-                            }
-                        };
-                        
-                        // İlk parçayı gönder
-                        sendNextChunk();
-                    } else {
-                        console.error('❌ [MCPAgentAdapter.chat] Yanıt alınamadı veya boş');
-                        options.onChunk("Sunucudan yanıt alınamadı.");
+                try {
+                    // Doğrudan MCP client'ını kullanarak streaming chat mesajı gönder
+                    const client = this.mcpService.getClient();
+                    if (!client) {
+                        throw new Error('MCP Client not available');
                     }
-                }).catch(error => {
-                    console.error('❌ [MCPAgentAdapter.chat] Streaming sırasında hata:', error);
-                    options.onChunk(`Hata: ${error.message || 'Bilinmeyen bir hata oluştu'}`);
-                });
-                
-                // Simüle edilmiş bir yanıt dön
-                return {
-                    message: "Streaming yanıt gönderiliyor...",
-                    success: true
-                };
+                    
+                    const conversationId = options.conversationId || 'default';
+                    console.log(`🔑 [MCPAgentAdapter.chat] Doğrudan MCP client sendChatMessage çağrılıyor: ${conversationId}`);
+                    
+                    // Sunucuya doğrudan streaming isteği gönder
+                    const result = await client.sendChatMessage(
+                        userMessage.content,
+                        conversationId,
+                        true // streaming aktif
+                    );
+                    
+                    console.log('✅ [MCPAgentAdapter.chat] sendChatMessage başarıyla tamamlandı:', result);
+                    
+                    // Return success without using messageId property
+                    return {
+                        message: "Streaming yanıt gönderiliyor...",
+                        success: true
+                    };
+                } catch (chatError) {
+                    console.error('❌ [MCPAgentAdapter.chat] Doğrudan chat çağrısı sırasında hata:', chatError);
+                    throw chatError;
+                }
             }
             
             // Normal istek (streaming olmadan)
-            const result = await this.mcpService.queryLLM(userMessage.content, {
-                messages,
-                systemPrompt,
-                ...options
-            });
+            console.log('📤 [MCPAgentAdapter.chat] Normal (non-streaming) chat çağrısı yapılıyor');
             
-            console.log('📥 [MCPAgentAdapter.chat] MCP\'den yanıt alındı:', 
-                       result ? (result.success ? 'Başarılı' : 'Başarısız') : 'Undefined');
-            
-            return result;
+            try {
+                // Doğrudan MCP client'ını kullanarak non-streaming chat mesajı gönder
+                const client = this.mcpService.getClient();
+                if (!client) {
+                    throw new Error('MCP Client not available');
+                }
+                
+                const conversationId = options.conversationId || 'default';
+                console.log(`🔑 [MCPAgentAdapter.chat] Doğrudan MCP client sendChatMessage çağrılıyor: ${conversationId} (streaming=false)`);
+                
+                // Sunucuya doğrudan non-streaming isteği gönder
+                const result = await client.sendChatMessage(
+                    userMessage.content,
+                    conversationId,
+                    false // streaming kapalı
+                );
+                
+                console.log('✅ [MCPAgentAdapter.chat] Non-streaming sendChatMessage başarıyla tamamlandı:', result);
+                
+                // Return success without using messageId property
+                return {
+                    message: result.content || "Yanıt alındı",
+                    success: true
+                };
+            } catch (chatError) {
+                console.error('❌ [MCPAgentAdapter.chat] Doğrudan chat çağrısı sırasında hata:', chatError);
+                throw chatError;
+            }
         } catch (error) {
             console.error('❌ [MCPAgentAdapter.chat] MCP üzerinden chat isteği gönderirken hata:', error);
             return {

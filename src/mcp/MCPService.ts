@@ -170,7 +170,7 @@ export class MCPService {
         try {
             const connected = this.isInitialized && this.client.isConnectedToServer();
             console.log('🔌 [MCPService.isConnected] WebSocket bağlantı durumu:', connected ? 'Bağlı' : 'Bağlı değil',
-                       '(isInitialized:', this.isInitialized, '&& client.isConnectedToServer:', this.client.isConnectedToServer(), ')');
+                      '(isInitialized:', this.isInitialized, '&& client.isConnectedToServer:', this.client.isConnectedToServer(), ')');
             return connected;
         } catch (error) {
             console.error('❌ [MCPService.isConnected] Bağlantı durumu kontrolünde hata:', error);
@@ -179,10 +179,68 @@ export class MCPService {
     }
 
     /**
+     * Bağlantı durumunu kontrol eder, bağlantı yoksa hata fırlatır
+     */
+    private async checkConnection(): Promise<void> {
+        try {
+            const connected = this.isInitialized && this.client.isConnectedToServer();
+            console.log('🔌 [MCPService.checkConnection] WebSocket bağlantı durumu:', 
+                connected ? 'Bağlı' : 'Bağlı değil',
+                '(isInitialized:', this.isInitialized, 
+                '&& client.isConnectedToServer:', this.client.isConnectedToServer(), ')');
+            
+            if (!connected) {
+                console.error('❌ [MCPService.checkConnection] SmileAgent Server bağlantısı yok!');
+                
+                // Bağlantıyı otomatik olarak kurmayı dene
+                if (this.isInitialized) {
+                    console.log('🔄 [MCPService.checkConnection] Servis başlatılmış ama bağlantı yok, yeniden bağlanma deneniyor...');
+                    try {
+                        // Tekrar bağlantı kurmayı dene
+                        await this.client.connect();
+                        console.log('✅ [MCPService.checkConnection] Yeniden bağlantı başarılı!');
+                        return; // Bağlantı başarılı, devam et
+                    } catch (connectError) {
+                        console.error('❌ [MCPService.checkConnection] Yeniden bağlantı hatası:', connectError);
+                        this.statusBarItem.text = '$(error) SmileAgent Server Bağlantı Hatası';
+                        this.statusBarItem.tooltip = `Bağlantı hatası: ${connectError instanceof Error ? connectError.message : String(connectError)}`;
+                        
+                        // Bağlantı kurulamadı, hata fırlat
+                        throw new Error('SmileAgent Server bağlantısı kurulamadı. Lütfen sunucu durumunu kontrol edin.');
+                    }
+                } else {
+                    console.log('🔄 [MCPService.checkConnection] Servis başlatılmamış, başlatmayı deniyor...');
+                    try {
+                        // Servisi başlatmayı dene
+                        const success = await this.initialize();
+                        if (!success) {
+                            throw new Error('Servis başlatılamadı');
+                        }
+                        console.log('✅ [MCPService.checkConnection] Servis başarıyla başlatıldı!');
+                        return; // Başlatma ve bağlantı başarılı, devam et
+                    } catch (initError) {
+                        console.error('❌ [MCPService.checkConnection] Servis başlatma hatası:', initError);
+                        this.statusBarItem.text = '$(error) SmileAgent Server Başlatma Hatası';
+                        this.statusBarItem.tooltip = `Başlatma hatası: ${initError instanceof Error ? initError.message : String(initError)}`;
+                        
+                        // Servis başlatılamadı, hata fırlat
+                        throw new Error('SmileAgent Server servisi başlatılamadı.');
+                    }
+                }
+            }
+            
+            console.log('✅ [MCPService.checkConnection] SmileAgent Server bağlantısı mevcut');
+        } catch (error) {
+            console.error('❌ [MCPService.checkConnection] Bağlantı kontrolü sırasında hata:', error);
+            throw error;
+        }
+    }
+
+    /**
      * Kod analizi yapar ve sunucudan yanıt döndürür
      */
     public async analyzeCode(code: string, context: any = {}): Promise<any> {
-        this.checkConnection();
+        await this.checkConnection();
         
         // Kod analizi isteğini SmileAgent Server'a gönder
         const analysisContext = {
@@ -197,7 +255,13 @@ export class MCPService {
      * LLM'e sorgu gönderir ve yanıt döndürür
      */
     public async queryLLM(query: string, context: any = {}): Promise<any> {
-        this.checkConnection();
+        await this.checkConnection();
+        
+        // Check if this is a chat message
+        if (context.isChatMessage === true) {
+            console.log('🔄 [MCPService.queryLLM] Chat mesajı algılandı, sendChatMessage kullanılacak');
+            return this.sendChatMessage(query, context.conversationId || 'default', context.streaming !== false);
+        }
         
         // Sorguyu SmileAgent Server'a gönder
         const queryContext = {
@@ -208,10 +272,25 @@ export class MCPService {
     }
 
     /**
+     * Chat mesajı gönderir
+     */
+    public async sendChatMessage(content: string, conversationId: string = 'default', streaming: boolean = true): Promise<any> {
+        await this.checkConnection();
+        
+        console.log('📤 [MCPService.sendChatMessage] Chat mesajı gönderiliyor');
+        console.log(`💬 [MCPService.sendChatMessage] İçerik: ${content.substring(0, 30)}${content.length > 30 ? '...' : ''}`);
+        console.log(`🏷️ [MCPService.sendChatMessage] Conversation ID: ${conversationId}`);
+        console.log(`🔄 [MCPService.sendChatMessage] Streaming: ${streaming}`);
+        
+        // Chat mesajını doğrudan MCPClient üzerinden gönder
+        return this.client.sendChatMessage(content, conversationId, streaming);
+    }
+
+    /**
      * SmileAgent Server üzerinde bir ajan görevi yürütür
      */
     public async executeAgentTask(task: string, context: any = {}): Promise<any> {
-        this.checkConnection();
+        await this.checkConnection();
         
         // Görevi SmileAgent Server'a gönder
         const taskContext = {
@@ -225,7 +304,7 @@ export class MCPService {
      * Komut çalıştırır
      */
     public async executeCommand(command: string, workingDirectory?: string): Promise<any> {
-        this.checkConnection();
+        await this.checkConnection();
         return this.client.executeCommand(command, workingDirectory);
     }
 
@@ -233,7 +312,7 @@ export class MCPService {
      * Dosya okur
      */
     public async readFile(filePath: string): Promise<string> {
-        this.checkConnection();
+        await this.checkConnection();
         return this.client.readFile(filePath);
     }
 
@@ -241,19 +320,8 @@ export class MCPService {
      * Dosyaya yazar
      */
     public async writeFile(filePath: string, content: string): Promise<boolean> {
-        this.checkConnection();
+        await this.checkConnection();
         return this.client.writeFile(filePath, content);
-    }
-
-    /**
-     * Bağlantı durumunu kontrol eder, bağlantı yoksa hata fırlatır
-     */
-    private checkConnection(): void {
-        if (!this.isInitialized || !this.client.isConnectedToServer()) {
-            console.error('❌ [MCPService.checkConnection] SmileAgent Server bağlantısı yok!');
-            throw new Error('Not connected to SmileAgent Server. Please check server status and connection.');
-        }
-        console.log('✅ [MCPService.checkConnection] SmileAgent Server bağlantısı mevcut');
     }
 
     /**

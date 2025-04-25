@@ -110,8 +110,13 @@ export class AIEngine implements AIProvider {
                 
                 try {
                     console.log('📤 [processMessage] MCP provider\'a sorgu gönderiliyor:', text.substring(0, 30));
-                    // MCP provider'a gönder
-                    const result = await mcpProvider.queryLLM(text, options?.options || {});
+                    // MCP provider'a gönder - ÖNEMLİ: isChatMessage flag'ini ekleyelim
+                    const result = await mcpProvider.queryLLM(text, {
+                        ...(options?.options || {}),
+                        isChatMessage: true, // Chat mesajı olarak işaretle
+                        conversationId: options?.options?.conversationId || 'default',
+                        streaming: options?.options?.stream === true
+                    });
                     
                     console.log('📥 [processMessage] MCP\'den yanıt alındı:', 
                                 result ? `${typeof result.message === 'string' ? 'Başarılı' : 'Geçersiz format'}` : 'Undefined');
@@ -1055,6 +1060,41 @@ export class AIEngine implements AIProvider {
         onProgress: (chunk: string) => void
     ): Promise<string> {
         try {
+            // İlk olarak MCP provider'ı kontrol edelim
+            console.log('🔎 [processMessageWithStream] başlatılıyor - MCP provider kontrolü yapılacak');
+            const mcpProvider = this.getMCPProvider();
+            
+            if (mcpProvider && mcpProvider.constructor && mcpProvider.constructor.name !== 'AIEngine') {
+                console.log('🌟 [processMessageWithStream] External MCP provider for streaming chat request bulundu');
+                
+                try {
+                    console.log('📤 [processMessageWithStream] MCP provider\'a streaming sorgu gönderiliyor:', text.substring(0, 30));
+                    
+                    // Streaming için onProgress'i onChunk'a dönüştürerek MCP'ye ilet
+                    if (mode === 'chat') {
+                        const streamOptions = {
+                            ...(options?.options || {}),
+                            stream: true,
+                            onChunk: onProgress,
+                            isChatMessage: true, // Chat mesajı olarak işaretle
+                            conversationId: options?.options?.conversationId || 'default',
+                            streaming: true
+                        };
+                        
+                        // MCP provider'a gönder
+                        const result = await mcpProvider.queryLLM(text, streamOptions);
+                        
+                        if (result && typeof result.message === 'string') {
+                            console.log('✅ [processMessageWithStream] MCP provider\'dan başarılı yanıt alındı');
+                            return result.message;
+                        }
+                    }
+                } catch (mcpError) {
+                    console.error('❌ [processMessageWithStream] MCP provider kullanırken hata:', mcpError);
+                    console.log('⚠️ [processMessageWithStream] Bu istek için yerel motora geçiliyor');
+                }
+            }
+            
             const hasAttachments = options?.options?.attachments?.length > 0;
             
             // Skip embedding and cache check when attachments are present

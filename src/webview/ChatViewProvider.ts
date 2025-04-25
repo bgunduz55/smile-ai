@@ -61,8 +61,18 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     }
 
     private handleMessage(message: string): void {
+        // Add more detailed logging
+        console.log('💬 [ChatViewProvider.handleMessage] Received user message:', message.substring(0, 30) + (message.length > 30 ? '...' : ''));
+        console.log('🚀 [ChatViewProvider.handleMessage] Forwarding to ChatService.sendMessage');
+        
         // Send to the chat service
-        this.chatService.sendMessage(message, true);
+        this.chatService.sendMessage(message, true)
+            .then(() => {
+                console.log('✅ [ChatViewProvider.handleMessage] Message successfully sent to ChatService');
+            })
+            .catch(error => {
+                console.error('❌ [ChatViewProvider.handleMessage] Error sending message to ChatService:', error);
+            });
     }
     
     private handleMessageFromService(message: Message): void {
