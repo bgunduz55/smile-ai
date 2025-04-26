@@ -120,7 +120,7 @@ export class SmileAIExtension {
         
         // Initialize tree view provider
         this.improvementProvider = new ImprovementTreeProvider(this.improvementManager);
-        vscode.window.registerTreeDataProvider('smile-ai.futureImprovements', this.improvementProvider);
+        vscode.window.registerTreeDataProvider('smile-ai.improvements', this.improvementProvider);
 
         // Register webview provider
         context.subscriptions.push(
@@ -197,13 +197,15 @@ export class SmileAIExtension {
 
     private async initializeComponents(): Promise<void> {
         try {
-            // Register task executors
+            console.log('🔧 [SmileAIExtension.initializeComponents] Başlatılıyor...');
+            
+            // Register task executors (code modifiers, etc.)
             this.registerTaskExecutors();
-
-            // Start indexing the codebase
+            
+            // Start codebase indexing
             await this.startIndexing();
-
-            // Listen for configuration changes to update RAG settings
+            
+            // Listen for configuration changes
             vscode.workspace.onDidChangeConfiguration(e => {
                 if (e.affectsConfiguration('smile-ai.enableRAG') || 
                     e.affectsConfiguration('smile-ai.rag')) {
@@ -220,12 +222,15 @@ export class SmileAIExtension {
                     this.updateMCPSettings();
                 }
             });
-
+            
             // Add other initialization tasks here
             this.showReady('Smile AI ready');
 
             // Initialize the Task Manager
             const taskManager = new TaskManager();
+            
+            // Improvements provider
+            vscode.window.registerTreeDataProvider('smile-ai.improvements', this.improvementProvider);
             
             // Initialize the Agent Command Handler
             const agentCommandHandler = AgentCommandHandler.initialize(
@@ -237,38 +242,24 @@ export class SmileAIExtension {
             
             // Register agent commands
             agentCommandHandler.registerCommands(this.context);
-
-            // Initialize MCP components
-            const mcpController = MCPController.getInstance();
-            mcpController.initialize()
-                .then(() => {
-                    console.log('MCP controller initialized');
-                    
-                    // Register AIEngine adapter
-                    const aiEngineAdapter = new AIEngineAdapter(this.aiEngine);
-                    mcpController.registerLocalHandler('model:chat', async (request) => {
-                        const response = await aiEngineAdapter.processMCPRequest(request);
-                        return response;
-                    });
-                    
-                    // Initialize and register the agent service
-                    const mcpAgentService = MCPAgentService.getInstance();
-                    mcpAgentService.initialize();
-                    
-                    console.log('MCP components fully initialized');
-                })
-                .catch(error => {
-                    console.error('Error initializing MCP components:', error);
-                });
-
-            this.statusBarItem.text = "$(rocket) Smile AI";
-
-            // Force initialize MCP Service regardless of config
-            console.log('🚀 Initializing MCP Service for SmileAgent Server connection');
-            await this.initializeMCPService();
+            
+            // MCP Bileşenlerini zorunlu başlatma
+            console.log('🧩 [SmileAIExtension.initializeComponents] MCP servisini başlatma girişimi...');
+            const mcpSuccess = await this.initializeMCPService();
+            console.log(`🧩 [SmileAIExtension.initializeComponents] MCP servisi başlatıldı: ${mcpSuccess ? 'Başarılı' : 'Başarısız'}`);
+            
+            if (mcpSuccess) {
+                console.log('🧩 [SmileAIExtension.initializeComponents] ChatService başlatılıyor...');
+                await this.initializeChatService();
+                console.log('✅ [SmileAIExtension.initializeComponents] ChatService başarıyla başlatıldı');
+            } else {
+                console.warn('⚠️ [SmileAIExtension.initializeComponents] MCP bağlantısı kurulamadı, yerel AI kullanılacak');
+            }
+            
+            console.log('✅ [SmileAIExtension.initializeComponents] Tüm bileşenler başlatıldı');
         } catch (error) {
             this.showError(`Initialization error: ${error instanceof Error ? error.message : String(error)}`);
-            console.error('Initialization error:', error);
+            console.error('❌ [SmileAIExtension.initializeComponents] Hata:', error);
         }
     }
 
@@ -801,15 +792,32 @@ export class SmileAIExtension {
             }
 
             console.log('🚀 Initializing ChatService for server-based chat');
+            
+            // Check if ChatService is already initialized
+            if (this.chatService) {
+                console.log('ℹ️ ChatService already initialized, skipping initialization');
+                return;
+            }
+            
             this.chatService = ChatService.getInstance(this.mcpService.getClient(), this.context);
             
-            // Register the chat view provider
-            const chatViewProvider = new ChatViewProvider(this.context.extensionUri, this.chatService);
-            this.context.subscriptions.push(
-                vscode.window.registerWebviewViewProvider('smile-ai.chatView', chatViewProvider)
-            );
-            
-            console.log('✅ ChatService initialized and Chat View registered');
+            // Only register the ChatViewProvider if not already done
+            try {
+                // Register the chat view provider
+                const chatViewProvider = new ChatViewProvider(this.context.extensionUri, this.chatService);
+                this.context.subscriptions.push(
+                    vscode.window.registerWebviewViewProvider('smile-ai.chatView', chatViewProvider)
+                );
+                console.log('✅ ChatService initialized and Chat View registered');
+            } catch (viewError) {
+                if (viewError instanceof Error && viewError.message.includes('already registered')) {
+                    // View provider already registered, just log and continue
+                    console.log('ℹ️ Chat View Provider already registered, continuing with existing provider');
+                } else {
+                    // Re-throw other errors
+                    throw viewError;
+                }
+            }
         } catch (error) {
             console.error('❌ Error initializing ChatService:', error);
         }
@@ -818,6 +826,9 @@ export class SmileAIExtension {
 
 // Extension activation
 let extension: SmileAIExtension | undefined;
+
+// Export the extension instance for other modules to use
+export { extension };
 
 export async function activate(context: vscode.ExtensionContext) {
     console.log('Smile AI active!');

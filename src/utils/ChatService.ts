@@ -43,8 +43,9 @@ export class ChatService extends EventEmitter {
 
     /**
      * Send a message to the chat service
+     * @returns A promise that resolves with the message ID if successful
      */
-    public async sendMessage(content: string, streaming: boolean = true): Promise<void> {
+    public async sendMessage(content: string, streaming: boolean = true): Promise<{ messageId: string, status: string }> {
         // More detailed logging
         console.log('📩 [ChatService.sendMessage] Message received, length:', content.length);
         console.log(`📩 [ChatService.sendMessage] Content preview: ${content.substring(0, 50)}${content.length > 50 ? '...' : ''}`);
@@ -117,7 +118,11 @@ export class ChatService extends EventEmitter {
             const result = await this.mcpClient.sendChatMessage(content, this.activeConversationId, streaming);
             console.log('✅ [ChatService.sendMessage] MCPClient.sendChatMessage completed with result:', result);
             
-            return;
+            // Return the message ID for tracking
+            return {
+                messageId: result.messageId,
+                status: result.status || 'sent'
+            };
         } catch (error) {
             console.error('❌ [ChatService.sendMessage] Server\'a mesaj gönderirken hata:', error);
             
@@ -145,26 +150,74 @@ export class ChatService extends EventEmitter {
      * Handle streaming response from server
      */
     private async handleStreamingResponse(payload: any): Promise<void> {
-        const { status, content, conversationId } = payload;
-        
-        // Create assistant message
-        const assistantMessage: Message = {
-            role: 'assistant',
-            content: content || '',
-            timestamp: Date.now()
-        };
-        
-        // Only store completed messages to avoid duplicates
-        if (status === 'completed') {
-            await this.chatHistoryManager.addMessage(conversationId, assistantMessage);
+        try {
+            // Extract all required fields
+            const { status, content, originalMessageId, messageId } = payload;
+            
+            // Improved logging
+            console.log(`🔄 [ChatService.handleStreamingResponse] Stream response received`);
+            console.log(`  - Status: ${status}`);
+            console.log(`  - OriginalMessageId: ${originalMessageId || 'MISSING'}`);
+            console.log(`  - MessageId: ${messageId || 'MISSING'}`);
+            console.log(`  - Content length: ${content?.length || 0}`);
+            
+            // Create a message object with available data
+            const message: Message = {
+                id: originalMessageId || messageId, // Use originalMessageId first, then fall back to messageId
+                role: 'assistant',
+                content: content || 'No response received from server. Please try again.',
+                timestamp: Date.now()
+            };
+            
+            // Get the ID to use for tracking this message - ensure consistency
+            const messageTrackingId = originalMessageId || messageId || message.id;
+            
+            // Process based on status - IMPORTANT: Removed pending request check
+            switch (status) {
+                case 'started':
+                    console.log(`🟢 [ChatService.handleStreamingResponse] Stream started, messageId: ${messageTrackingId}`);
+                    // Always emit the event regardless of whether we recognize the message ID
+                    this.emit('stream', {
+                        status: 'started',
+                        message,
+                        originalMessageId: messageTrackingId
+                    });
+                    break;
+                    
+                case 'streaming':
+                    console.log(`↔️ [ChatService.handleStreamingResponse] Stream continuing, messageId: ${messageTrackingId}, content length: ${content?.length || 0}`);
+                    // Always emit the event regardless of whether we recognize the message ID
+                    this.emit('stream', {
+                        status: 'streaming',
+                        message,
+                        originalMessageId: messageTrackingId
+                    });
+                    break;
+                    
+                case 'completed':
+                    console.log(`✅ [ChatService.handleStreamingResponse] Stream completed, messageId: ${messageTrackingId}`);
+                    
+                    // Save the completed message
+                    if (content) {
+                        // Add message to conversation
+                        await this.chatHistoryManager.addMessage(this.activeConversationId, message);
+                    }
+                    
+                    // Always emit the event regardless of whether we recognize the message ID
+                    this.emit('stream', {
+                        status: 'completed',
+                        message,
+                        originalMessageId: messageTrackingId
+                    });
+                    break;
+                    
+                default:
+                    console.warn(`⚠️ [ChatService.handleStreamingResponse] Unknown stream status: ${status}`);
+                    break;
+            }
+        } catch (error) {
+            console.error('❌ [ChatService.handleStreamingResponse] Stream processing error:', error);
         }
-        
-        // Emit stream event
-        this.emit('stream', {
-            message: assistantMessage,
-            status,
-            conversationId
-        });
     }
 
     /**
@@ -174,11 +227,11 @@ export class ChatService extends EventEmitter {
         const { status, content, conversationId } = payload;
         
         // Only process completed responses
-        if (status === 'completed' && content) {
+        if (status === 'completed') {
             // Create assistant message
             const assistantMessage: Message = {
                 role: 'assistant',
-                content,
+                content: content || 'No response received from server. Please try again.',
                 timestamp: Date.now()
             };
             

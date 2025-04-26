@@ -100,9 +100,9 @@ export class MCPAgentAdapter implements AIProvider {
                     
                     console.log('✅ [MCPAgentAdapter.chat] sendChatMessage başarıyla tamamlandı:', result);
                     
-                    // Return success without using messageId property
+                    // Return success with empty content instead of "Streaming yanıt gönderiliyor..."
                     return {
-                        message: "Streaming yanıt gönderiliyor...",
+                        message: "",
                         success: true
                     };
                 } catch (chatError) {
@@ -135,7 +135,7 @@ export class MCPAgentAdapter implements AIProvider {
                 
                 // Return success without using messageId property
                 return {
-                    message: result.content || "Yanıt alındı",
+                    message: result.content || "",
                     success: true
                 };
             } catch (chatError) {

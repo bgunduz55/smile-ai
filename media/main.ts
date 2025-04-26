@@ -173,32 +173,69 @@ interface VSCodeMessage {
     id?: string;
     content?: string;
     diff?: { added: boolean; removed: boolean; value: string; }[];
+    messageId?: string;
+    originalMessageId?: string;
+    status?: string;
 }
 
 // Handle messages from extension
 window.addEventListener('message', (event: MessageEvent<VSCodeMessage>) => {
     const message = event.data;
-    console.log('Received message from extension:', message);
+    console.log('SMILE-AI: Received message from extension:', message.command);
 
     switch (message.command) {
         case 'addMessage':
             if (message.message) {
-                console.log('Adding message to UI:', message.message); // Debug message
+                console.log('SMILE-AI: Adding message with ID:', message.message.id);
                 addMessage(message.message);
             }
             break;
         case 'updateMessage':
             if (message.id && message.content !== undefined) {
-                console.log('Updating message content:', message.id, message.content.length); // Debug message
+                console.log('SMILE-AI: Updating message', message.id, 'with content length:', message.content.length);
                 updateMessage(message.id, message.content);
             }
             break;
+        case 'addStreamingMessage':
+            if (message.message && message.messageId) {
+                console.log('SMILE-AI: Starting streaming message with ID:', message.messageId);
+                addStreamingMessage(message.message, message.messageId);
+            }
+            break;
+        case 'updateStreamingMessage':
+            if (message.message && message.messageId) {
+                console.log('SMILE-AI: Updating streaming message', message.messageId, 'with content length:', message.message.content?.length || 0);
+                updateStreamingMessage(message.message, message.messageId);
+            }
+            break;
+        case 'completeStreamingMessage':
+            if (message.message && message.messageId) {
+                console.log('SMILE-AI: Completing streaming message', message.messageId, 'with content length:', message.message.content?.length || 0);
+                completeStreamingMessage(message.message, message.messageId);
+            }
+            break;
+        case 'streamMessage':
+            // Legacy event type maintained for backward compatibility
+            if (message.message && message.originalMessageId) {
+                const messageId = message.originalMessageId;
+                console.log('SMILE-AI: Received legacy stream message event with status:', message.status, 'messageId:', messageId);
+                
+                // Process based on status
+                if (message.status === 'started') {
+                    addStreamingMessage(message.message, messageId);
+                } else if (message.status === 'streaming') {
+                    updateStreamingMessage(message.message, messageId);
+                } else if (message.status === 'completed') {
+                    completeStreamingMessage(message.message, messageId);
+                }
+            }
+            break;
         case 'showLoading':
-            console.log('Showing loading state'); // Debug message
+            console.log('SMILE-AI: Showing loading state');
             showLoading();
             break;
         case 'hideLoading':
-            console.log('Hiding loading state'); // Debug message
+            console.log('SMILE-AI: Hiding loading state');
             hideLoading();
             break;
         case 'showError':
@@ -610,4 +647,122 @@ function updateOperationDiff(operationId: string, diff: { added: boolean; remove
     });
     
     diffElement.appendChild(diffContainer);
+}
+
+// Streaming message functions
+function addStreamingMessage(message: ChatMessage, messageId: string) {
+    if (!messageTemplateElement || !messagesContainer) return;
+
+    console.log(`🟢 [main.addStreamingMessage] Adding streaming message with ID: ${messageId}`);
+
+    // Check if the message already exists (don't duplicate it)
+    const existingMessage = document.querySelector(`.message[data-message-id="${messageId}"]`);
+    if (existingMessage) {
+        console.log(`⚠️ [main.addStreamingMessage] Message with ID ${messageId} already exists, updating instead`);
+        updateStreamingMessage(message, messageId);
+        return;
+    }
+
+    const messageElement = messageTemplateElement.content.cloneNode(true) as DocumentFragment;
+    const messageDiv = messageElement.querySelector('.message') as HTMLDivElement;
+    const avatar = messageElement.querySelector('.avatar i') as HTMLElement;
+    const content = messageElement.querySelector('.markdown-content') as HTMLDivElement;
+
+    if (!messageDiv || !avatar || !content) return;
+
+    // Add streaming indicator class and message ID
+    messageDiv.classList.add(message.role, 'streaming');
+    messageDiv.setAttribute('data-message-id', messageId);
+    
+    avatar.classList.add(message.role === 'user' ? 'codicon-account' : 'codicon-hubot');
+
+    // Initial content might be empty for streaming
+    const formattedContent = formatMessage(message.content || '');
+    content.innerHTML = formattedContent || '<div class="typing-indicator"><span></span><span></span><span></span></div>';
+
+    messagesContainer.appendChild(messageElement);
+    messagesContainer.scrollTop = messagesContainer.scrollHeight;
+    
+    console.log(`✅ [main.addStreamingMessage] Successfully added message with ID: ${messageId}`);
+}
+
+function updateStreamingMessage(message: ChatMessage, messageId: string) {
+    if (!messagesContainer) return;
+    
+    console.log(`🔄 [main.updateStreamingMessage] Updating streaming message with ID: ${messageId}`);
+    
+    const messageDiv = document.querySelector(`.message[data-message-id="${messageId}"]`);
+    if (messageDiv) {
+        const contentDiv = messageDiv.querySelector('.markdown-content');
+        if (contentDiv) {
+            // Update with new content
+            const formattedContent = formatMessage(message.content || '');
+            contentDiv.innerHTML = formattedContent || '<div class="typing-indicator"><span></span><span></span><span></span></div>';
+            
+            // Scroll to bottom to show new content
+            messagesContainer.scrollTop = messagesContainer.scrollHeight;
+            
+            console.log(`✅ [main.updateStreamingMessage] Successfully updated message content for ID: ${messageId}`);
+        } else {
+            console.error(`❌ [main.updateStreamingMessage] Content div not found for message ID: ${messageId}`);
+        }
+    } else {
+        // If message doesn't exist yet (fallback), create it
+        console.log(`⚠️ [main.updateStreamingMessage] Message with ID ${messageId} not found, creating new one`);
+        addStreamingMessage(message, messageId);
+    }
+}
+
+function completeStreamingMessage(message: ChatMessage, messageId: string) {
+    if (!messagesContainer) return;
+    
+    console.log(`✓ [main.completeStreamingMessage] Completing streaming message with ID: ${messageId}`);
+    
+    const messageDiv = document.querySelector(`.message[data-message-id="${messageId}"]`);
+    if (messageDiv) {
+        // Remove streaming indicator class
+        messageDiv.classList.remove('streaming');
+        
+        const contentDiv = messageDiv.querySelector('.markdown-content');
+        if (contentDiv) {
+            // Update with final content
+            const formattedContent = formatMessage(message.content || '');
+            contentDiv.innerHTML = formattedContent;
+            
+            // Add click handler for code blocks
+            const codeBlocks = messageDiv.querySelectorAll('.code-block .copy-button');
+            codeBlocks.forEach(button => {
+                button.addEventListener('click', (e) => {
+                    const codeBlock = (e.target as HTMLElement).closest('.code-block');
+                    const codeContent = codeBlock?.querySelector('code')?.textContent;
+                    if (codeContent) {
+                        navigator.clipboard.writeText(codeContent)
+                            .then(() => {
+                                // Optionally show feedback for successful copy
+                                const copyButton = (e.target as HTMLElement).closest('.copy-button') as HTMLElement;
+                                if (copyButton) {
+                                    const originalHTML = copyButton.innerHTML;
+                                    copyButton.innerHTML = '<i class="codicon codicon-check"></i>';
+                                    setTimeout(() => {
+                                        copyButton.innerHTML = originalHTML;
+                                    }, 1000);
+                                }
+                            });
+                    }
+                });
+            });
+            
+            // Scroll to bottom to show new content
+            messagesContainer.scrollTop = messagesContainer.scrollHeight;
+            
+            console.log(`✅ [main.completeStreamingMessage] Successfully completed message with ID: ${messageId}`);
+        } else {
+            console.error(`❌ [main.completeStreamingMessage] Content div not found for message ID: ${messageId}`);
+        }
+    } else {
+        // If message doesn't exist yet (fallback), create it as a normal message
+        console.log(`⚠️ [main.completeStreamingMessage] Message with ID ${messageId} not found, creating as completed message`);
+        message.id = messageId;
+        addMessage(message);
+    }
 } 

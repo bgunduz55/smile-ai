@@ -59,7 +59,7 @@
         },
         {
           "type": "tree",
-          "id": "smile-ai-improvements",
+          "id": "smile-ai.improvements",
           "name": "Improvements",
           "icon": "resources/improvements.svg"
         }
@@ -201,17 +201,17 @@
       "view/item/context": [
         {
           "command": "smile-ai.setImprovementPriority",
-          "when": "view == smile-ai.futureImprovements && viewItem == improvementNotePending",
+          "when": "view == smile-ai.improvements && viewItem == improvementNotePending",
           "group": "1_modification"
         },
         {
           "command": "smile-ai.markImprovementDone",
-          "when": "view == smile-ai.futureImprovements && viewItem == improvementNotePending",
+          "when": "view == smile-ai.improvements && viewItem == improvementNotePending",
           "group": "2_status"
         },
         {
           "command": "smile-ai.dismissImprovement",
-          "when": "view == smile-ai.futureImprovements && viewItem == improvementNotePending",
+          "when": "view == smile-ai.improvements && viewItem == improvementNotePending",
           "group": "2_status"
         }
       ],
@@ -234,7 +234,7 @@
         "command": "smile-ai.setImprovementPriority",
         "key": "ctrl+alt+p",
         "mac": "cmd+alt+p",
-        "when": "focusedView == smile-ai.futureImprovements"
+        "when": "focusedView == smile-ai.improvements"
       },
       {
         "command": "smile-ai.modifyMultipleFiles",
