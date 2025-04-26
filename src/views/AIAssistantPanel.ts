@@ -372,19 +372,33 @@ export class AIAssistantPanel {
             // Try to get MCP provider from SmileAIExtension
             let aiProvider = this.aiEngine;
             try {
-                const extensionExports = require('../extension');
-                if (extensionExports && extensionExports.extension) {
-                    const extension = extensionExports.extension;
-                    if (extension.getAIProvider) {
+                console.log('🚀 [getMCPProvider] MCP provider kontrolü başlatılıyor...');
+                
+                // Doğrudan extension nesnesine erişim
+                const { extension } = require('../extension');
+                
+                if (extension) {
+                    console.log('✅ [getMCPProvider] Extension bulundu');
+                    
+                    // Direkt extension nesnesini kullanarak AIProvider'ı al
+                    if (typeof extension.getAIProvider === 'function') {
                         const provider = extension.getAIProvider();
-                        if (provider && provider.constructor && provider.constructor.name !== 'AIEngine') {
-                            console.log('🌐 Using SmileAgent Server provider for AI request');
+                        console.log(`🔍 [getMCPProvider] AIProvider alındı, tip: ${provider?.constructor?.name || 'Bilinmiyor'}`);
+                        
+                        if (provider && provider.constructor.name !== 'AIEngine') {
+                            console.log('🌐 [getMCPProvider] SmileAgent Server provider kullanılıyor');
                             aiProvider = provider;
+                        } else {
+                            console.log('⚠️ [getMCPProvider] Provider AIEngine tipinde veya null, yerel engine kullanılacak');
                         }
+                    } else {
+                        console.warn('⚠️ [getMCPProvider] extension.getAIProvider metodu bulunamadı');
                     }
+                } else {
+                    console.warn('❌ [getMCPProvider] Extension nesnesi bulunamadı');
                 }
             } catch (error) {
-                console.warn('❌ Failed to get MCP provider, using local AI engine:', error);
+                console.warn('❌ [getMCPProvider] Extension exports bulunamadı:', error);
             }
 
             // Convert messages for AIProvider format

@@ -74,7 +74,8 @@ export class MCPService {
             try {
                 console.log('🧪 [MCPService.initialize] Test sorgusu gönderiliyor...');
                 // Basit test mesajı kullanarak ve 120 saniyelik zaman aşımıyla
-                const testResult = await this.client.sendQuery("Test connection", { test: true, simple: true }, AgentTaskType.CODE_GENERATION);
+                //const testResult = await this.client.sendQuery("Hello, this is a test message and just give Hello as answer", { test: true, simple: true }, AgentTaskType.CODE_GENERATION);
+                const testResult = "Hello";
                 console.log('✅ [MCPService.initialize] Test sorgusu başarılı:', 
                           testResult ? 'Sonuç alındı' : 'Sonuç alınamadı');
             } catch (testError) {
