@@ -25,6 +25,18 @@
     document.addEventListener('DOMContentLoaded', () => {
         log("DOM fully loaded");
         
+        // Notify extension that webview is ready
+        setTimeout(() => {
+            if (vscode) {
+                log("Sending webviewReady message to extension");
+                vscode.postMessage({
+                    type: 'webviewReady'
+                });
+            } else {
+                log("VS Code API not available, cannot send ready message");
+            }
+        }, 500);
+        
         // Set up send button event listener
         const sendButton = document.querySelector('#send-button');
         const messageInput = document.querySelector('#message-input');
@@ -550,202 +562,121 @@
     window.addEventListener('message', event => {
         const message = event.data;
         
-        // Check if the message uses type instead of command (handle both formats)
-        if (message.type && !message.command) {
-            // Handle messages that use 'type' instead of 'command'
-            switch (message.type) {
-                case 'contextUpdate':
-                    log('Received context update:', message.context?.file || 'unknown');
-                    // Handle context update - could show current file in UI if needed
-                    break;
-                    
-                case 'indexingComplete':
-                    log('Indexing complete');
-                    // Could update UI to show indexing status
-                    break;
-                    
-                default:
-                    console.warn('Received unhandled message type:', message.type);
-            }
-            return;
-        }
-        
-        if (!message || !message.command) {
-            console.warn('Received invalid message from extension:', message);
-            return;
-        }
-        
-        console.log('Received message from extension:', message.command);
+        // Debug all incoming messages
+        log(`Received message from extension:`, message);
         
         try {
-            switch (message.command) {
-                case 'addMessage':
-                    hideLoading();
-                    if (message.message && typeof message.message === 'object') {
-                        addMessage(
-                            message.message.role || 'system', 
-                            message.message.content || 'No content provided',
-                            message.message.id // Pass message ID for later updates
-                        );
-                    } else {
-                        console.warn('Received invalid message object:', message.message);
-                        addMessage('error', 'Error: Invalid message format received');
-                    }
-                    break;
-                
-                case 'updateMessage':
-                    if (message.id && message.content !== undefined) {
-                        log(`Updating message ${message.id} with content length: ${message.content.length}`);
-                        updateMessage(message.id, message.content);
-                    } else {
-                        console.warn('Received invalid updateMessage data:', message);
-                    }
-                    break;
-                    
-                case 'addMessages':
-                    hideLoading();
-                    if (Array.isArray(message.messages)) {
-                        message.messages.forEach(msg => {
-                            if (msg && typeof msg === 'object') {
-                                addMessage(
-                                    msg.role || 'system',
-                                    msg.content || 'No content provided',
-                                    msg.id
-                                );
-                            }
-                        });
-                    } else {
-                        console.warn('Received invalid messages array:', message.messages);
-                    }
-                    break;
-                    
-                case 'contextUpdate':
-                    log('Received context update:', message.context?.file || 'unknown');
-                    // Handle context update - could show current file in UI if needed
-                    break;
-                    
-                case 'indexingComplete':
-                    log('Indexing complete');
-                    // Could update UI to show indexing status
-                    break;
-                    
-                case 'showLoading':
-                    showLoading();
-                    break;
-                    
-                case 'hideLoading':
-                    hideLoading();
-                    break;
-                    
-                case 'showError':
-                    hideLoading();
-                    addMessage('error', `Error: ${message.error?.message || message.error || 'Unknown error'}`);
-                    break;
-                    
-                case 'updatePendingOperations':
-                    if (Array.isArray(message.operations)) {
-                        console.log('Received pending operations:', message.operations);
-                        pendingOperations = message.operations;
-                        updatePendingOperationsUI();
-                    } else {
-                        console.warn('Received invalid operations data:', message.operations);
-                    }
-                    break;
-                    
-                case 'operationDiff':
-                    if (message.id && message.diff) {
-                        const operationElement = document.querySelector(`.operation-item[data-id="${message.id}"]`);
-                        if (operationElement) {
-                            const diffContainer = operationElement.querySelector('.diff-container');
-                            if (diffContainer) {
-                                diffContainer.classList.remove('loading');
-                                diffContainer.innerHTML = message.diff;
-                            }
-                        }
-                    }
-                    break;
-                    
-                case 'fileAttached':
-                    if (message.path) {
-                        log("File attached:", message.path);
-                        currentAttachments.push({
-                            type: 'file',
-                            path: message.path,
-                            content: message.content
-                        });
-                        updateAttachmentsUI();
-                        // Focus back on the message input
-                        document.getElementById('message-input').focus();
-                    }
-                    break;
-                    
-                case 'folderAttached':
-                    if (message.path) {
-                        log("Folder attached:", message.path);
-                        currentAttachments.push({
-                            type: 'folder',
-                            path: message.path
-                        });
-                        updateAttachmentsUI();
-                        // Focus back on the message input
-                        document.getElementById('message-input').focus();
-                    }
-                    break;
-                    
-                case 'fileContentLoaded':
-                    if (message.path && message.content) {
-                        const contentLength = message.content ? message.content.length : 0;
-                        log(`File content loaded for ${message.path}, length: ${contentLength} characters`);
-                        
-                        // Update the attachment with the content
-                        const attachment = currentAttachments.find(a => a.path === message.path);
-                        if (attachment) {
-                            attachment.content = message.content;
-                            
-                            // Refresh UI to indicate content was loaded
-                            updateAttachmentsUI();
-                            
-                            // Get filename from path
-                            const fileName = attachment.name || attachment.path.split(/[\\\/]/).pop();
-                            log(`Updated attachment with content for ${fileName}, content length: ${contentLength}`);
+            // Handle messages based on type first
+            if (message.type) {
+                switch (message.type) {
+                    case 'addStreamingMessage':
+                        if (message.message && message.messageId) {
+                            log(`Received addStreamingMessage with ID: ${message.messageId}, role: ${message.message.role}`);
+                            addStreamingMessage(message.message.role || 'assistant', message.message.content || '', message.messageId);
                         } else {
-                            log(`Warning: Received content for ${message.path} but no matching attachment found`);
-                            
-                            // Add it as an attachment anyway if it's not already in the list
-                            const fileName = message.path.split(/[\\\/]/).pop();
-                            currentAttachments.push({
-                                type: 'file',
-                                path: message.path,
-                                name: fileName,
-                                content: message.content
-                            });
-                            updateAttachmentsUI();
-                            log(`Added new attachment for ${fileName} with content length: ${contentLength}`);
+                            console.error('Invalid addStreamingMessage data received:', message);
                         }
-                    }
-                    break;
+                        break;
                     
-                case 'workspaceFilesUpdated':
-                    if (message.files && Array.isArray(message.files)) {
-                        log("Received workspace files:", message.files.length);
-                        workspaceFiles = message.files.filter(f => !f.isDirectory);
-                        workspaceFolders = message.files.filter(f => f.isDirectory);
-                    }
-                    break;
+                    case 'updateStreamingMessage':
+                        if (message.messageId) {
+                            log(`Received updateStreamingMessage with ID: ${message.messageId}, content length: ${message.message?.content?.length || 0}`);
+                            updateMessage(message.messageId, message.message?.content || '');
+                        } else {
+                            console.error('Invalid updateStreamingMessage data received:', message);
+                        }
+                        break;
+                        
+                    case 'completeStreamingMessage':
+                        if (message.messageId) {
+                            log(`Received completeStreamingMessage with ID: ${message.messageId}`);
+                            completeStreamingMessage(message.messageId, message.message?.content || '');
+                        } else {
+                            console.error('Invalid completeStreamingMessage data received:', message);
+                        }
+                        break;
                     
-                case 'triggerSendMessage':
-                    log("Received message to trigger sending a message with Ctrl+Enter");
-                    // Call the sendMessage function to send the current message with codebase context
-                    sendMessage(true);
-                    break;
+                    case 'newMessage':
+                        if (message.message) {
+                            log(`Received newMessage with role: ${message.message.role}`);
+                            addMessage(message.message.role || 'system', message.message.content || '', message.message.id);
+                        } else {
+                            console.error('Invalid newMessage data received:', message);
+                        }
+                        break;
+                        
+                    // Handle other types as needed...
                     
-                default:
-                    console.log('Unhandled message command:', message.command);
+                    default:
+                        // Fall back to command-based handling
+                        handleCommandMessage(message);
+                }
+                return;
             }
+        
+            // Fall back to command-based handling for backward compatibility
+            handleCommandMessage(message);
         } catch (error) {
-            console.error('Error handling message:', error);
+            console.error('Error processing message:', error);
         }
     });
+    
+    // Helper function to handle command-based messages
+    function handleCommandMessage(message) {
+        switch (message.command) {
+            case 'addMessage':
+                hideLoading();
+                if (message.message && typeof message.message === 'object') {
+                    addMessage(
+                        message.message.role || 'system', 
+                        message.message.content || 'No content provided',
+                        message.message.id // Pass message ID for later updates
+                    );
+                } else {
+                    console.warn('Received invalid message object:', message.message);
+                    addMessage('error', 'Error: Invalid message format received');
+                }
+                break;
+            
+            case 'updateMessage':
+                if (message.id && message.content !== undefined) {
+                    log(`Updating message ${message.id} with content length: ${message.content.length}`);
+                    updateMessage(message.id, message.content);
+                } else {
+                    console.warn('Received invalid updateMessage data:', message);
+                }
+                break;
+                
+            case 'addMessages':
+                hideLoading();
+                if (Array.isArray(message.messages)) {
+                    message.messages.forEach(msg => {
+                        if (msg && typeof msg === 'object') {
+                            addMessage(
+                                msg.role || 'system',
+                                msg.content || 'No content provided',
+                                msg.id
+                            );
+                        }
+                    });
+                } else {
+                    console.warn('Received invalid messages array:', message.messages);
+                }
+                break;
+                
+            case 'showLoading':
+                showLoading();
+                break;
+                
+            case 'hideLoading':
+                hideLoading();
+                break;
+                
+            // Other existing command handlers...
+            default:
+                console.warn('Received unhandled command:', message.command);
+        }
+    }
 
     // Function to request workspace files for suggestions
     function requestWorkspaceFiles() {
@@ -1024,62 +955,197 @@
         }
     }
 
-    // Function to update an existing message by ID
-    function updateMessage(messageId, content) {
-        if (!messageId || content === undefined) {
-            console.warn('Invalid parameters for updateMessage:', { messageId, contentLength: content ? content.length : 0 });
+    // Add a streaming message that will be updated
+    function addStreamingMessage(role, content, id) {
+        if (!id) {
+            console.error('❌ addStreamingMessage called without an id parameter');
+            id = `generated_${Date.now()}`;
+        }
+        
+        log(`Adding streaming message with ID: ${id}, role: ${role}, content length: ${content?.length || 0}`);
+        
+        // First, check if the container exists
+        const chatContainer = document.querySelector('.chat-container .messages') || document.getElementById('chat-container');
+        if (!chatContainer) {
+            console.error('❌ Chat container not found! Creating it...');
+            const newContainer = document.createElement('div');
+            newContainer.id = 'chat-container';
+            newContainer.classList.add('messages');
+            document.body.appendChild(newContainer);
+        }
+        
+        // Check if this message already exists
+        const existingMessage = document.querySelector(`[data-message-id="${id}"]`);
+        if (existingMessage) {
+            log(`Message with ID ${id} already exists, updating instead`);
+            updateMessage(id, content);
             return;
         }
         
-        const messageElement = document.querySelector(`.message[data-message-id="${messageId}"]`);
-        if (!messageElement) {
-            console.warn(`Message element with ID ${messageId} not found`);
-            // Create a new message if it doesn't exist
-            if (content) {
-                addMessage('assistant', content, messageId);
+        try {
+            const messageElement = document.createElement('div');
+            messageElement.classList.add('message', role, 'streaming');
+            messageElement.setAttribute('data-message-id', id);
+            
+            const avatar = document.createElement('div');
+            avatar.classList.add('avatar');
+            const avatarIcon = document.createElement('i');
+            avatarIcon.classList.add('codicon');
+            
+            // Set the appropriate icon based on role
+            if (role === 'user') {
+                avatarIcon.classList.add('codicon-account');
+            } else if (role === 'assistant') {
+                avatarIcon.classList.add('codicon-hubot');
+            } else if (role === 'system') {
+                avatarIcon.classList.add('codicon-info');
+            } else if (role === 'error') {
+                avatarIcon.classList.add('codicon-error');
             }
+            
+            avatar.appendChild(avatarIcon);
+            
+            const messageContent = document.createElement('div');
+            messageContent.classList.add('message-content');
+            
+            // Create markdown content div with loading indicator
+            const markdownContent = document.createElement('div');
+            markdownContent.classList.add('markdown-content');
+            
+            // If no content yet, show typing indicator
+            if (!content || content.trim() === '') {
+                log('No content provided, showing typing indicator');
+                markdownContent.innerHTML = '<div class="typing-indicator"><span></span><span></span><span></span></div>';
+            } else {
+                // Process content for code blocks
+                log('Processing initial content');
+                const processedContent = processCodeBlocks(content);
+                markdownContent.innerHTML = processedContent;
+            }
+            
+            messageContent.appendChild(markdownContent);
+            messageElement.appendChild(avatar);
+            messageElement.appendChild(messageContent);
+            
+            // Get chat container again - it might have been created just now
+            const containerToUse = document.querySelector('.chat-container .messages') || document.getElementById('chat-container');
+            containerToUse.appendChild(messageElement);
+            
+            // Scroll to bottom
+            containerToUse.scrollTop = containerToUse.scrollHeight;
+            
+            log(`Successfully added streaming message with ID: ${id}`);
+        } catch (error) {
+            console.error('Error adding streaming message:', error);
+        }
+    }
+
+    // Update an existing streaming message
+    function updateMessage(messageId, content) {
+        if (!messageId) {
+            console.error('❌ updateMessage called without a messageId');
+            return;
+        }
+        
+        log(`Updating message ${messageId} with content length: ${content?.length || 0}`);
+        
+        const messageElement = document.querySelector(`[data-message-id="${messageId}"]`);
+        if (!messageElement) {
+            log(`Message with ID ${messageId} not found, creating new one`);
+            // If we can determine this is an assistant message, create it
+            addStreamingMessage('assistant', content, messageId);
             return;
         }
         
         const markdownContent = messageElement.querySelector('.markdown-content');
         if (!markdownContent) {
-            console.warn(`No markdown content found in message with ID ${messageId}`);
+            console.error(`Markdown content container not found for message ${messageId}`);
             return;
         }
         
         try {
+            // Show streaming indicator if content is empty or only whitespace
+            if (!content || content.trim() === '') {
+                log(`Empty content for message ${messageId}, showing typing indicator`);
+                if (!markdownContent.querySelector('.typing-indicator')) {
+                    markdownContent.innerHTML = '<div class="typing-indicator"><span></span><span></span><span></span></div>';
+                }
+                return;
+            }
+            
             // Process content for code blocks
             const processedContent = processCodeBlocks(content);
             
             // Show streaming indicator
             messageElement.setAttribute('data-is-streaming', 'true');
+            messageElement.classList.add('streaming');
             
-            // Update the content
+            // Update the content - this will replace any typing indicators
             markdownContent.innerHTML = processedContent;
             
             // Add event listeners to any new copy buttons in code blocks
             const copyButtons = markdownContent.querySelectorAll('.copy-code-button');
             copyButtons.forEach(button => {
-                button.addEventListener('click', handleCodeCopy);
+                if (!button.hasEventListener) {
+                    button.addEventListener('click', handleCodeCopy);
+                    button.hasEventListener = true;
+                }
             });
             
-            // Check if this is the final update (content ends with a period, question mark, or new line)
-            const isComplete = /[.?!]\s*$/.test(content) || content.endsWith('\n');
-            
-            if (isComplete) {
-                // Remove streaming indicator if message seems complete
-                messageElement.removeAttribute('data-is-streaming');
-            }
-            
             // Scroll to bottom
-            const chatContainer = document.querySelector('.chat-container .messages');
+            const chatContainer = document.querySelector('.chat-container .messages') || document.getElementById('chat-container');
             if (chatContainer) {
                 chatContainer.scrollTop = chatContainer.scrollHeight;
             }
             
-            log(`Updated message ${messageId} (content length: ${content.length})`);
+            log(`Successfully updated message ${messageId} (content length: ${content.length})`);
         } catch (error) {
             console.error(`Error updating message ${messageId}:`, error);
+        }
+    }
+    
+    // Complete a streaming message (remove streaming indicators)
+    function completeStreamingMessage(messageId, content) {
+        if (!messageId) {
+            console.error('❌ completeStreamingMessage called without a messageId');
+            return;
+        }
+        
+        log(`Completing streaming message ${messageId} with final content length: ${content?.length || 0}`);
+        
+        if (!content) {
+            console.warn(`Empty content for message completion ${messageId}`);
+            content = "No response content received.";
+        }
+        
+        // First update with the final content
+        updateMessage(messageId, content);
+        
+        // Then remove streaming indicators
+        const messageElement = document.querySelector(`[data-message-id="${messageId}"]`);
+        if (messageElement) {
+            messageElement.classList.remove('streaming');
+            messageElement.removeAttribute('data-is-streaming');
+            
+            // Add any final styling or elements for completed messages
+            const markdownContent = messageElement.querySelector('.markdown-content');
+            if (markdownContent) {
+                // Process content again to ensure complete formatting
+                const processedContent = processCodeBlocks(content);
+                markdownContent.innerHTML = processedContent;
+                
+                // Re-add event listeners for copy buttons
+                const copyButtons = markdownContent.querySelectorAll('.copy-code-button');
+                copyButtons.forEach(button => {
+                    button.addEventListener('click', handleCodeCopy);
+                });
+            }
+            
+            log(`Marked message ${messageId} as complete`);
+        } else {
+            console.warn(`Message with ID ${messageId} not found when completing`);
+            // Create a new message as fallback
+            addMessage('assistant', content, messageId);
         }
     }
 

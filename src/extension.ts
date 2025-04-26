@@ -120,7 +120,7 @@ export class SmileAIExtension {
         
         // Initialize tree view provider
         this.improvementProvider = new ImprovementTreeProvider(this.improvementManager);
-        vscode.window.registerTreeDataProvider('smile-ai.futureImprovements', this.improvementProvider);
+        vscode.window.registerTreeDataProvider('smile-ai.improvements', this.improvementProvider);
 
         // Register webview provider
         context.subscriptions.push(
@@ -792,15 +792,32 @@ export class SmileAIExtension {
             }
 
             console.log('🚀 Initializing ChatService for server-based chat');
+            
+            // Check if ChatService is already initialized
+            if (this.chatService) {
+                console.log('ℹ️ ChatService already initialized, skipping initialization');
+                return;
+            }
+            
             this.chatService = ChatService.getInstance(this.mcpService.getClient(), this.context);
             
-            // Register the chat view provider
-            const chatViewProvider = new ChatViewProvider(this.context.extensionUri, this.chatService);
-            this.context.subscriptions.push(
-                vscode.window.registerWebviewViewProvider('smile-ai.chatView', chatViewProvider)
-            );
-            
-            console.log('✅ ChatService initialized and Chat View registered');
+            // Only register the ChatViewProvider if not already done
+            try {
+                // Register the chat view provider
+                const chatViewProvider = new ChatViewProvider(this.context.extensionUri, this.chatService);
+                this.context.subscriptions.push(
+                    vscode.window.registerWebviewViewProvider('smile-ai.chatView', chatViewProvider)
+                );
+                console.log('✅ ChatService initialized and Chat View registered');
+            } catch (viewError) {
+                if (viewError instanceof Error && viewError.message.includes('already registered')) {
+                    // View provider already registered, just log and continue
+                    console.log('ℹ️ Chat View Provider already registered, continuing with existing provider');
+                } else {
+                    // Re-throw other errors
+                    throw viewError;
+                }
+            }
         } catch (error) {
             console.error('❌ Error initializing ChatService:', error);
         }
